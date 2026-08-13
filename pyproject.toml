@@ -1,0 +1,199 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ============================================================================
+# NOTE: product identity also lives in src/docmax/core/branding.py.
+# tests/hygiene/test_branding.py asserts the two stay in sync and that brand
+# literals do not leak into other modules.
+# ============================================================================
+
+[project]
+name = "docmax"
+version = "3.0.0.dev0"
+description = "Terminal-native document toolkit. Local-first, dual-engine, no server required."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Punith Naidu" }]
+maintainers = [{ name = "Punith Naidu", email = "punithmedaramitta@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["pdf", "ocr", "document", "cli", "tui", "terminal", "conversion", "batch"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+
+# Base install stays light — non-negotiable #3.
+# Everything here is pure Python and installs in seconds on every platform.
+# Heavy deps (OpenCV, Tesseract bindings, ML models) live in extras and are
+# imported lazily, never at module scope. See tests/hygiene/test_no_heavy_imports.py
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "pypdf>=4.2.0",
+    "platformdirs>=4.2.0",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+# Each extra maps to the local engine of a specific tool group.
+# `docmax setup` installs the external *binaries*; these are the Python bindings.
+ocr = [
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.17.0",
+    "opencv-python-headless>=4.9.0",
+    "numpy>=1.26.0",
+]
+tables = [
+    "pdfplumber>=0.11.0",
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.0",
+]
+images = [
+    "Pillow>=10.3.0",
+    "img2pdf>=0.5.0",
+]
+tui = [
+    "textual>=0.60.0",
+]
+# v2 shipped a `full` extra that silently omitted opencv, which broke the entire
+# OCR path for anyone who installed it. Self-referencing extras make that class
+# of mistake impossible — there is only one list.
+all = [
+    "docmax[ocr,tables,images,tui]",
+]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-cov>=5.0.0",
+    "pytest-timeout>=2.3.0",
+    "hypothesis>=6.100.0",
+    "respx>=0.21.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+    "import-linter>=2.0",
+    "pre-commit>=3.7.0",
+]
+
+[project.scripts]
+docmax = "docmax.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/megabyte44/docmax"
+Repository = "https://github.com/megabyte44/docmax"
+Issues = "https://github.com/megabyte44/docmax/issues"
+Changelog = "https://github.com/megabyte44/docmax/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+docmax = ["py.typed"]
+
+# ============================================================================
+# Ruff
+# ============================================================================
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtin shadowing
+    "C4",        # comprehensions
+    "PT",        # pytest style
+    "SIM",       # simplify
+    "RET",       # return consistency
+    "PTH",       # use pathlib, not os.path
+    "S",         # bandit — this project shells out; we want these loud
+    "T20",       # no stray print() in library code
+    "RUF",
+]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "S101",    # assert is fine in tests
+    "RUF012",  # ClassVar annotations on mutable defaults — noisy for our error classes
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may assert, use fixtures loosely, and print.
+"tests/**" = ["S", "T20", "ARG", "PLR2004"]
+# The CLI layer is the one place that legitimately writes to stdout.
+"src/docmax/cli/**" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["docmax"]
+
+# ============================================================================
+# Mypy — strict. There is no legacy code to grandfather in.
+# ============================================================================
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+warn_no_return = true
+show_error_codes = true
+pretty = true
+files = ["src", "tests"]
+
+# Third-party packages without type stubs. Kept as a short, explicit list so
+# that adding one is a visible decision rather than a blanket ignore.
+[[tool.mypy.overrides]]
+module = [
+    "pytesseract.*",
+    "pdf2image.*",
+    "cv2.*",
+    "img2pdf.*",
+    "pdfplumber.*",
+    "rembg.*",
+]
+ignore_missing_imports = true
+
+# ============================================================================
+# Pytest
+# ============================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+# No test may hang. Property tests feed malformed bytes to parsers; a hang is a
+# failure mode we explicitly assert against.
+timeout = 120
+markers = [
+    "needs_binary(name): requires an external binary (gs, tesseract, pandoc, pdftoppm). Skipped when absent locally, REQUIRED in CI.",
+    "golden: golden-file test against the generated fixture corpus.",
+    "property: hypothesis-based fuzz test.",
+    "slow: excluded from the default run via -m 'not slow'.",
+]
+
+[tool.coverage.run]
+source = ["docmax"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]

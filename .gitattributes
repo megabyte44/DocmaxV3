@@ -1,0 +1,19 @@
+# Normalise line endings. CI runs on Linux, macOS, and Windows, and the hygiene
+# tests read source files directly — inconsistent endings would make failures
+# platform-dependent for no reason.
+* text=auto eol=lf
+
+# Windows-native scripts must keep CRLF or cmd.exe misparses them.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary — never touch.
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary

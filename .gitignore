@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib60/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# Type checking / linting
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# Generated test fixtures. The corpus is produced by tests/fixtures/generate.py
+# and must never be committed — partly for repo size, but mainly because
+# committed fixtures drift from the generator and stop being reproducible.
+tests/fixtures/corpus/
+
+# Benchmark output. RESULTS.md is committed; raw runs are not.
+benchmarks/output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets. The cloud API key belongs in the config file or the
+# DOCMAX_API_KEY environment variable, never in the repo.
+.env
+*.local.toml

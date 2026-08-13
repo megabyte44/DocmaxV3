@@ -1,0 +1,49 @@
+; Architectural layering, enforced in CI.
+;
+; v2's layering eroded quietly: operation modules imported UI helpers, the UI
+; imported operations, and by the end nothing could be used without pulling in
+; a rich Console. These contracts make that a build failure rather than
+; something you notice a year later.
+;
+; Run locally with:  lint-imports
+
+[importlinter]
+root_package = docmax
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = Layered architecture
+type = layers
+layers =
+    docmax.cli
+    docmax.tools
+    docmax.cloud_client
+    docmax.core
+; Read bottom-up: core depends on nothing internal; cloud_client may use core;
+; tools may use both; only cli may use everything. docmax.tui joins the top
+; layer in M7.
+
+[importlinter:contract:core-is-ui-free]
+name = core never imports a UI framework
+type = forbidden
+source_modules =
+    docmax.core
+forbidden_modules =
+    rich
+    textual
+    typer
+; Progress crosses this boundary as the ProgressSink protocol, not as a rich
+; Progress object. That is what lets the same core drive a CLI, a TUI, a batch
+; runner, and the M10 MCP server without modification.
+
+[importlinter:contract:core-is-standalone]
+name = core never imports tools or interfaces
+type = forbidden
+source_modules =
+    docmax.core
+forbidden_modules =
+    docmax.tools
+    docmax.cli
+    docmax.cloud_client
+; The registry resolves tools by lazy metadata, never by importing them. This
+; is what keeps `import docmax` free of OpenCV.

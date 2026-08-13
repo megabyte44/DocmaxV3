@@ -1,0 +1,45 @@
+# Fast checks only — anything slow belongs in CI, or people start using
+# `--no-verify` and the hook stops being a gate at all.
+#
+#   pre-commit install        (once)
+#   pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      # The structural guarantees. Cheap (AST walks over a small tree), and
+      # catching them here rather than in CI saves a round trip.
+      - id: hygiene
+        name: hygiene (no sys.exit / direct writes / heavy imports / brand leaks)
+        entry: pytest tests/hygiene -q
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: import-linter
+        name: import-linter (architectural layering)
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]

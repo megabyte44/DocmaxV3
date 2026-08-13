@@ -1,0 +1,53 @@
+name: Release
+
+# Publishing is gated on a green CI run. v2 published on release with no test
+# job at all — the only thing standing between a typo and PyPI was a human.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: re-run the full gate
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: build distributions
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install build twine
+      - run: python -m build
+
+      - name: check metadata renders on PyPI
+        run: twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/docmax
+    permissions:
+      id-token: write  # trusted publishing — no long-lived API token in secrets
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

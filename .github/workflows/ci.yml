@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Static gates. Fast, single-platform, fails the PR before burning the matrix.
+  # --------------------------------------------------------------------------
+  lint:
+    name: lint & types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: python -m pip install -e ".[dev]"
+
+      - name: ruff (lint)
+        run: ruff check --output-format=github .
+
+      - name: ruff (format)
+        run: ruff format --check .
+
+      - name: mypy (strict)
+        run: mypy
+
+      - name: import-linter (architectural layering)
+        run: lint-imports
+
+  # --------------------------------------------------------------------------
+  # The structural guarantees from docs/architecture.md. These are the tests
+  # that make v2's failure modes unreintroducible, so they run everywhere.
+  # --------------------------------------------------------------------------
+  test:
+    name: test ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: python -m pip install -e ".[dev]"
+
+      # No external binaries needed — these must pass on a bare machine, which
+      # is the whole point of the light base install.
+      - name: unit, hygiene & property tests
+        run: pytest -m "not golden and not needs_binary" --cov --cov-report=term-missing
+
+  # --------------------------------------------------------------------------
+  # Golden tests need the real external tools. Skipped locally when a binary is
+  # absent; REQUIRED here, so the badge means something.
+  # --------------------------------------------------------------------------
+  golden:
+    name: golden ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: external tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ghostscript tesseract-ocr tesseract-ocr-deu poppler-utils pandoc
+
+      - name: external tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ghostscript tesseract poppler pandoc
+
+      - name: external tools (Windows)
+        if: runner.os == 'Windows'
+        run: choco install --no-progress -y ghostscript tesseract pandoc poppler
+
+      - run: python -m pip install -e ".[dev,all]"
+
+      - name: verify the tools are actually visible
+        run: docmax doctor
+
+      - name: golden tests
+        run: pytest -m "golden or needs_binary" -ra
+
+  # --------------------------------------------------------------------------
+  # The open-core boundary. The freely-licensed half must never quietly grow a
+  # dependency on the gated half — so we delete pro/ and require a green suite.
+  # See docs/adr/0004-open-core-boundary.md
+  # --------------------------------------------------------------------------
+  open-core:
+    name: open core stands alone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: remove the licence-gated half
+        run: rm -rf src/docmax/pro
+
+      - run: python -m pip install -e ".[dev]"
+
+      - run: pytest -m "not golden and not needs_binary"
+
+  # A single required status check, so branch protection needs one entry
+  # instead of nine that change every time the matrix does.
+  ci-ok:
+    name: CI
+    if: always()
+    needs: [lint, test, golden, open-core]
+    runs-on: ubuntu-latest
+    steps:
+      - name: verify all jobs succeeded
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "test=${{ needs.test.result }}"
+          echo "golden=${{ needs.golden.result }}"
+          echo "open-core=${{ needs.open-core.result }}"
+          [ "${{ needs.lint.result }}" = "success" ] \
+            && [ "${{ needs.test.result }}" = "success" ] \
+            && [ "${{ needs.golden.result }}" = "success" ] \
+            && [ "${{ needs.open-core.result }}" = "success" ]
