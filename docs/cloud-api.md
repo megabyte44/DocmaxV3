@@ -129,6 +129,12 @@ is not implementing this API.
 - TLS required. The client refuses plaintext `http://` endpoints except
   `localhost`, so self-hosted development still works.
 
+**Changing these terms re-asks every user.** Consent is recorded against
+`CONSENT_TERMS_VERSION` in [`core/consent.py`](../src/docmax/core/consent.py);
+a material change here — what is retained, what is logged, what a document may
+be used for — means bumping that constant, which invalidates every existing
+grant. Wording fixes do not. See [ADR 0008](adr/0008-consent-record.md).
+
 ## Discovery
 
 ```http

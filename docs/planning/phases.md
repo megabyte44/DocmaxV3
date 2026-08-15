@@ -120,32 +120,71 @@ caller is indirection, not architecture.
 
 ## Phase 3 — Configuration
 
-**Goal** One configuration strategy with one precedence chain.
+**Goal** One configuration strategy with one precedence chain, and a consent
+record that fails closed.
 
-**Status** `not started`. **Depends on** Phase 2.
+**Status** `complete` — 2026-08-16. Full toolchain green; CI matrix outstanding.
+
+**Depends on** Phase 2.
+
+**Decision first** [ADR 0008](../adr/0008-consent-record.md) settled where the
+consent record lives, what invalidates it, and how it is versioned — before any
+code, because a consent mechanism designed around its implementation is a
+mechanism designed backwards.
+
+**Delivered**
+
+| Module | Contracts |
+|---|---|
+| `core/config.py` | `Config`, `load()`, `config_dir/file()`, `consent_file()` |
+| `core/consent.py` | `ConsentGrant`, `ConsentStore`, `CONSENT_TERMS_VERSION` |
 
 **Precedence**, lowest to highest:
 
 ```
-defaults  →  config file (TOML)  →  environment  →  CLI/runtime override
+defaults  →  config file (TOML)  →  environment  →  runtime override
 ```
 
-**Tasks** `core/config.py` · locate the config directory via `platformdirs` and
-`CONFIG_DIR_NAME` · the `offline` flag · per-tool engine preference · the
-per-tool consent record.
+`load()` applies the first three; `Config.with_overrides()` applies the fourth,
+because only the interface knows what the user typed. Both the path and the
+environment are injectable, so no test reads a real home directory.
 
-**Read first** `cloud_client/config.py` and `server/config.py` on
-[`m1-foundations`](reconciliation.md). Both already resolve settings against an
-env prefix; Phase 3 should not invent a third precedence chain that then has to
-be reconciled with them at Phases 7 and 8.
+**Tasks**
+- [x] ADR 0008 — consent location, invalidation, versioning
+- [x] `core/config.py` with the full precedence chain
+- [x] `offline`, one-way: an override may turn it on, never off
+- [x] per-tool engine preference, merging file and environment rather than
+      replacing
+- [x] validation at load — unknown keys refused, TLS required except localhost,
+      closed set of booleans
+- [x] `core/consent.py`, writing through `core/atomic.py`
+- [x] 77 unit tests
+- [x] `implementation/config.md`; `cloud-api.md` points at the terms constant
 
-**Constraint** Environment access is centralised here. Scattered `os.environ`
-reads are what this phase exists to prevent — see
-[layers.md](../architecture/layers.md#cross-cutting-concerns).
+**Definition of done**
+- [x] precedence tested at every level, including the merge behaviour
+- [x] `offline = true` survives an explicit override
+- [x] a misspelled key is an error, not a silent no-op
+- [x] consent fails closed on corrupt, unreadable, and future-schema records
+- [x] `pytest` 197 passed / 3 skipped · `ruff` · `ruff format` · `mypy --strict`
+      · `lint-imports` 3 contracts kept
+- [ ] **CI matrix** — Windows / CPython 3.14 locally only, as for Phase 2
 
-**Definition of done** precedence is tested at every level; `offline = true`
-makes cloud unreachable *regardless of flags*, including an explicit
-`--engine cloud`.
+**Findings worth keeping**
+
+- **`offline` had to be made one-way.** An override that could clear it would
+  make the flag decoration: it exists for the person whose policy says documents
+  do not leave the building, and `--engine cloud` must not defeat that.
+- **An unrecognised boolean must raise, not default.** `DOCMAX_OFFLINE=maybe`
+  read as false would send documents. The accepted set is closed and anything
+  else is an error.
+- **Consent is scoped to the endpoint**, which is what makes a re-pointed
+  endpoint re-ask automatically rather than depending on the user remembering.
+
+**Deliberately not here** — the router (Phase 5) is what applies precedence
+against availability and consent, and the architecture's stronger claim that *no
+path reaches `cloud_client` without a consent check* is its to enforce. Phase 3
+provides the mechanism, not yet the guarantee.
 
 ---
 

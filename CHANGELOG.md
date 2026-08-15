@@ -28,6 +28,13 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **Configuration and consent** — one precedence chain (defaults → file →
+  environment → runtime override), read in exactly one place, with validation at
+  load rather than at use: unknown keys are refused rather than silently
+  ignored, and TLS is required for any endpoint that is not localhost. `offline`
+  is one-way, so an explicit `--engine cloud` cannot defeat it. Consent to
+  upload is recorded per tool, scoped to the endpoint it was granted for, and
+  fails closed on any record it cannot read.
 - **Core contracts** — the framework-independent foundation every layer speaks:
   `DocumentRef`, `OutputTarget` and `ToolResult`; the `ProgressSink`,
   `EngineStrategy` and `Validator` protocols; the atomic writers; and a
@@ -45,7 +52,7 @@ These are behaviour changes a v2 user can actually hit. See
   no brand literals outside `branding.py`.
 - CI across Linux, macOS, and Windows × Python 3.11, 3.12, 3.13, plus an
   `open-core` job that runs the suite with the licence-gated half deleted.
-- Architecture documentation and ADRs 0001–0006, with an indexed decision log,
+- Architecture documentation and ADRs 0001–0008, with an indexed decision log,
   layer and dependency references, and a planning system that separates the
   product roadmap from the engineering phases underneath it.
 
@@ -57,6 +64,10 @@ These are behaviour changes a v2 user can actually hit. See
   repository would have had to vendor the tool layer or depend on the published
   wheel, and either one forks the implementation the server exists to share.
   The open-core line itself does not move: `pro/` is unchanged.
+- [ADR 0008](docs/adr/0008-consent-record.md) — consent lives in an app-owned
+  file beside the user-owned config, scoped to `(tool, endpoint)` and a
+  deliberately hand-bumped terms version. Preferences sync between a user's
+  machines through dotfiles; permission to upload their documents does not.
 
 ### Fixed
 

@@ -1,6 +1,59 @@
 # ADR 0007 — `m1-foundations` is a source branch, absorbed phase by phase
 
-**Status:** Accepted · 2026-08-15
+**Status:** Accepted · 2026-08-15 · **ratified 2026-08-16**
+
+## Ratified disposition
+
+The reconciliation was reviewed and accepted. The binding statements:
+
+- **`architecture` is the authoritative implementation branch.**
+- **`m1-foundations` is never merged.** No merge has been performed, and none
+  will be.
+- **Neither branch is deleted.** `m1-foundations` is preserved on `origin` as a
+  historical and reference branch.
+- **Phase 2's Core contracts are authoritative and are not reverted** to match
+  M1's.
+- **Nothing is cherry-picked yet.** Porting happens at the phase that owns each
+  component, not before.
+
+| `m1-foundations` component | Disposition |
+|---|---|
+| Core (`models`, `protocols`, `atomic`, `cancellation`) | **superseded** |
+| Registry | **future reference** — Phase 4 |
+| Server | **future reference** — Phase 8 |
+| Architecture enforcement config | **future reference** — Phase 8 |
+
+Cloud client and tool skeletons are likewise future reference, at Phases 7 and 6.
+See [reconciliation.md](../planning/reconciliation.md#component-disposition).
+
+## Evidence preserved
+
+Recorded here because it is the justification for the disposition above, and
+because the branch it describes will drift further from `architecture` over time.
+
+1. **M1's Core regresses `EngineStrategy.run()`.** Its signature makes
+   `progress` optional (`ProgressSink | None = None`) and **omits `cancellation`
+   entirely**. Phase 2 made both required, so that no engine carries an
+   `if progress is not None` branch and every engine is cancellable by its
+   caller. Adopting M1's version would remove cancellation from the one contract
+   every tool implements.
+2. **Phase 2's Core is therefore authoritative**, and additionally is the only
+   version that passes the current toolchain. `ruff` reports ten errors in M1's
+   `atomic.py` and `cancellation.py` — four `PTH105`, four `RUF100`, one
+   `SIM105`, one `S110` — every one of which Phase 2 has already fixed in the
+   same files. M1's Core is not a competing implementation; it is the pre-fix
+   copy of this one.
+3. **M1's unique work already implements decisions this project has since made
+   independently.** Its enforcement configuration satisfies every item the
+   backlog lists as not-yet-enforced, and matches what
+   [ADR 0006](0006-reference-server-location.md) requires the server to arrive
+   with — in-tree, open, excluded from the wheel, with an
+   `interfaces-are-independent` contract. That work is to be reused and adapted,
+   not rewritten.
+4. **No merge was performed.** The branches remain forked at `4fc92f2` with no
+   shared commit beyond it.
+
+---
 
 ## Context
 

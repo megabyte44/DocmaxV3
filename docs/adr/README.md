@@ -19,7 +19,8 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0004](0004-open-core-boundary.md) | Open-core boundary — every document operation is free | Accepted · superseded in part by 0006 |
 | [0005](0005-gui-pickers.md) | GUI pickers over localhost | Accepted |
 | [0006](0006-reference-server-location.md) | The reference server lives in this repository, and is open | Accepted |
-| [0007](0007-m1-foundations-reconciliation.md) | `m1-foundations` is a source branch, absorbed phase by phase | Accepted |
+| [0007](0007-m1-foundations-reconciliation.md) | `m1-foundations` is a source branch, absorbed phase by phase | Accepted · ratified |
+| [0008](0008-consent-record.md) | Consent is machine-local state, scoped to an endpoint and a terms version | Accepted |
 
 ## When to write one
 

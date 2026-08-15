@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-15 · **Branch:** `architecture` · **Base:** `4fc92f2`
+**Last updated:** 2026-08-16 · **Branch:** `architecture` · **Base:** `4fc92f2`
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,14 +10,15 @@ fix it.
 
 ## Where the project is
 
-**Phases 0, 1 and 2 are complete. Milestone M1 is in progress.**
+**Phases 0–3 are complete. Milestone M1 is in progress.**
 
 | Phase | | |
 |---|---|---|
 | 0 — Repository baseline | complete | commit `4fc92f2` |
 | 1 — Architecture mapping and docs | complete | this documentation system |
 | 2 — Core contracts | complete | `models`, `protocols`, `atomic`, `cancellation` |
-| 3 — Configuration | not started | next |
+| 3 — Configuration | complete | `config`, `consent` |
+| 4 — Tool registry | not started | next — ports from `m1-foundations` |
 
 ### Core as it stands
 
@@ -29,7 +30,8 @@ fix it.
 | `protocols.py` | done — `ProgressSink`, `NullProgress`, `EngineStrategy`, `Validator` |
 | `atomic.py` | done — `atomic_write`, `atomic_path`, `atomic_dir` |
 | `cancellation.py` | done — `CancellationToken`, `NEVER_CANCELLED` |
-| `config.py` | **missing** — Phase 3 |
+| `config.py` | done — precedence chain, validation, file locations |
+| `consent.py` | done — `ConsentStore`, scoped to endpoint + terms version |
 | `registry.py` | **missing** — Phase 4 |
 | `router.py` | **missing** — Phase 5 |
 
@@ -48,10 +50,10 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **114 passed, 3 skipped** |
+| `pytest -m "not golden and not needs_binary"` | **197 passed, 3 skipped** |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 47 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 27 source files |
+| `ruff format --check .` | **passed** — 54 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 31 source files |
 | `lint-imports` | **passed** — 3 contracts kept, 0 broken |
 
 The three skips are intentional: two are the self-exemptions inside the hygiene
@@ -65,7 +67,15 @@ Everything above is one platform and one interpreter, and 3.14 is not in the
 project's supported matrix. The `golden` and `needs_binary` tests are also
 unrun, since the external binaries are absent locally; CI requires them.
 
-### What the toolchain caught
+### What Phase 3 added
+
+Phase 3 was written with the toolchain available throughout, and needed no
+after-the-fact correction pass: `ruff check`, `mypy --strict` and `lint-imports`
+were clean on the first run, and `ruff format` reformatted three files. That is
+the contrast with Phase 2 below, and the argument for keeping the toolchain
+installed.
+
+### What the toolchain caught in Phase 2
 
 Running the real tools after the fact found 17 `ruff` errors and 8 `mypy`
 errors, **all in Phase 2 code, none previously visible** to the standalone
@@ -109,7 +119,6 @@ layer it governs, per
 | No `independence` contract between interfaces | the second interface |
 | `HEAVY_MODULES` omits web-framework packages | `server` |
 | `docmax.server` has no wheel exclusion | `server` |
-| No single configuration strategy | Phase 3 |
 | No observability boundary | Phase 8 |
 
 ---
@@ -122,9 +131,10 @@ layer it governs, per
 | `architecture/layers.md` | current — Core status updated |
 | `architecture/dependencies.md` | current |
 | `implementation/core.md` | current — new in Phase 2 |
-| `adr/README.md` | current — indexes 0007 |
+| `implementation/config.md` | current — new in Phase 3 |
+| `adr/README.md` | current — indexes 0008 |
 | `planning/*` | current — includes `reconciliation.md`, deleted once its table empties |
-| `cloud-api.md` | design-stage; no server exists |
+| `cloud-api.md` | design-stage; data-handling now points at the terms constant |
 | `README.md` | current |
 | `CHANGELOG.md` | current through Phase 2 |
 | `development/*` | **missing** — no setup, testing or contributing guide |
@@ -143,9 +153,12 @@ of 0004 stands, and its text is unchanged apart from a pointer.
 the `m1-foundations` branch: preserved, never merged, ported component by
 component.
 
-Three decisions remain owed an ADR before the code that needs them —
-configuration precedence and consent storage, the execution model, and
-observability. See [backlog.md](backlog.md#decisions-owed-an-adr).
+[ADR 0008](../adr/0008-consent-record.md) settled the consent record ahead of
+Phase 3's code: app-owned `consent.json` beside the user-owned `config.toml`,
+scoped to `(tool, endpoint)` and a hand-bumped terms version, failing closed.
+
+Two decisions remain owed an ADR before the code that needs them — the execution
+model and observability. See [backlog.md](backlog.md#decisions-owed-an-adr).
 
 ---
 
@@ -197,13 +210,14 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**Phase 3 — Configuration.** One strategy, one precedence chain: defaults →
-config file → environment → runtime override. It owns the `offline` flag, the
-per-tool engine preference, and the consent record — all of which Phase 5's
-router reads, so it must precede the router.
+**Phase 4 — Tool registry.** It is the first phase to *port* rather than write:
+`core/registry.py` exists on `m1-foundations`, complete and lint-clean, and
+[ADR 0007](../adr/0007-m1-foundations-reconciliation.md) says to port it rather
+than rewrite it. Re-read it against Phase 2's Core first — it was written before
+`EngineStrategy` gained required `cancellation`.
 
-It needs a decision recorded first: where the consent record lives and what
-invalidates it. See [phases.md](phases.md#phase-3--configuration).
+Its definition of done is concrete: un-skip
+`test_building_the_registry_pulls_in_nothing_heavy` and have it pass.
 
-**Do not start it without direction** — Phase 2 was scoped explicitly, and the
-next phase is to be decided separately.
+**Do not start it without direction.** Each phase is scoped explicitly, and the
+next one is decided separately.

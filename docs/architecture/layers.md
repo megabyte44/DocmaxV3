@@ -138,7 +138,8 @@ and reads back a result.
 ## Foundation — `core`
 
 **Status:** `models`, `protocols`, `atomic`, `cancellation`, `errors`, `branding`
-implemented (Phase 2). `registry`, `router` and `config` remain.
+(Phase 2) and `config`, `consent` (Phase 3) implemented. `registry` (Phase 4)
+and `router` (Phase 5) remain.
 
 The domain, and nothing else. Every layer speaks the types defined here, which
 is why they cannot depend on any of those layers.

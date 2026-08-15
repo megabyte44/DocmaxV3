@@ -48,8 +48,10 @@ make the ADR a justification rather than a decision.
       read-only source branch, never merged, ported component by component by
       the phase that owns each. Outstanding components are tracked in
       [reconciliation.md](reconciliation.md).
-- [ ] **Configuration precedence and consent storage.** Where the consent record
-      lives and what invalidates it.
+- [x] ~~**Configuration precedence and consent storage.**~~ Decided by
+      [ADR 0008](../adr/0008-consent-record.md) and implemented in Phase 3:
+      app-owned `consent.json` beside the user-owned `config.toml`, scoped to
+      `(tool, endpoint)` and a hand-bumped terms version, failing closed.
 - [ ] **Execution model.** Whether jobs are in-process or queued, and what that
       means for cancellation crossing a process boundary.
 - [ ] **Observability.** One approach to logging, and the mechanism that keeps

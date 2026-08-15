@@ -25,6 +25,7 @@ Start here.
 
 | | |
 |---|---|
+| [implementation/config.md](implementation/config.md) | Configuration precedence and the consent record |
 | [cloud-api.md](cloud-api.md) | The Cloud Engine wire contract *(design stage — no server exists yet)* |
 | [migrating-from-v2.md](migrating-from-v2.md) | What changed, and what will break |
 
