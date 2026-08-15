@@ -66,6 +66,17 @@ images = [
 tui = [
     "textual>=0.60.0",
 ]
+# Dependencies for the reference API server — the half a self-hoster deploys.
+# Not in `all`: installing DocMax should never install a web framework by
+# accident. Note this extra installs what the server *needs*, not the server
+# itself: its code is excluded from the wheel (see packages.find below) and is
+# run from a checkout.
+server = [
+    "docmax[all]",
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+]
 # v2 shipped a `full` extra that silently omitted opencv, which broke the entire
 # OCR path for anyone who installed it. Self-referencing extras make that class
 # of mistake impossible — there is only one list.
@@ -95,6 +106,12 @@ Changelog = "https://github.com/megabyte44/docmax/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+# The server is the half a self-hoster deploys from a checkout, inside an image
+# that also carries Ghostscript, Tesseract, and Pandoc — none of which pip can
+# install. So it has no reason to be in the wheel, and one reason not to be:
+# every byte here lands in the site-packages of someone who only wanted to merge
+# two PDFs. tests/hygiene/test_wheel_excludes_server.py holds the line.
+exclude = ["docmax.server*"]
 
 [tool.setuptools.package-data]
 docmax = ["py.typed"]
@@ -136,6 +153,9 @@ ignore = [
 "tests/**" = ["S", "T20", "ARG", "PLR2004"]
 # The CLI layer is the one place that legitimately writes to stdout.
 "src/docmax/cli/**" = ["T20"]
+# FastAPI's dependency-injection idiom is a call in an argument default, which
+# B008 exists to catch. It is correct everywhere else.
+"src/docmax/server/**" = ["B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["docmax"]
@@ -164,6 +184,22 @@ module = [
     "rembg.*",
 ]
 ignore_missing_imports = true
+
+# The server extra is not part of `dev`: the lint job type-checks the terminal
+# tool, and a self-hosted API server should not be able to slow that down or
+# break it. These two overrides are what that costs.
+[[tool.mypy.overrides]]
+module = [
+    "fastapi.*",
+    "starlette.*",
+    "uvicorn.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["docmax.server.*"]
+# FastAPI's route decorators are untyped when the framework itself is absent.
+disallow_untyped_decorators = false
 
 # ============================================================================
 # Pytest
