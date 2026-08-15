@@ -28,6 +28,11 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **Core contracts** — the framework-independent foundation every layer speaks:
+  `DocumentRef`, `OutputTarget` and `ToolResult`; the `ProgressSink`,
+  `EngineStrategy` and `Validator` protocols; the atomic writers; and a
+  cancellation token with cooperative checks, teardown callbacks and deadlines
+  that accumulate down a chain of sub-operations.
 - Dual-engine architecture — every tool can run locally or via a cloud endpoint
   behind one interface, chosen per tool.
 - `OutputTarget`, which makes in-place overwrite unrepresentable rather than
@@ -40,7 +45,18 @@ These are behaviour changes a v2 user can actually hit. See
   no brand literals outside `branding.py`.
 - CI across Linux, macOS, and Windows × Python 3.11, 3.12, 3.13, plus an
   `open-core` job that runs the suite with the licence-gated half deleted.
-- Architecture documentation and ADRs 0001–0005.
+- Architecture documentation and ADRs 0001–0006, with an indexed decision log,
+  layer and dependency references, and a planning system that separates the
+  product roadmap from the engineering phases underneath it.
+
+### Architecture
+
+- [ADR 0006](docs/adr/0006-reference-server-location.md) — the reference Cloud
+  Engine server lives in this repository at `src/docmax/server/` and is MIT
+  licensed, superseding the `cloud_server/` clause of ADR 0004. A separate
+  repository would have had to vendor the tool layer or depend on the published
+  wheel, and either one forks the implementation the server exists to share.
+  The open-core line itself does not move: `pro/` is unchanged.
 
 ### Fixed
 

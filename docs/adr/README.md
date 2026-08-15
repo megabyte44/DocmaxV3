@@ -16,8 +16,9 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0001](0001-python-311.md) | Python 3.11 is the minimum | Accepted |
 | [0002](0002-registry-mechanism.md) | Lazy self-registering tool registry | Accepted |
 | [0003](0003-atomic-writes.md) | All output is written atomically; destinations are types | Accepted |
-| [0004](0004-open-core-boundary.md) | Open-core boundary — every document operation is free | Accepted |
+| [0004](0004-open-core-boundary.md) | Open-core boundary — every document operation is free | Accepted · superseded in part by 0006 |
 | [0005](0005-gui-pickers.md) | GUI pickers over localhost | Accepted |
+| [0006](0006-reference-server-location.md) | The reference server lives in this repository, and is open | Accepted |
 
 ## When to write one
 

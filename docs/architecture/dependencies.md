@@ -61,6 +61,11 @@ Adding the layer and adding its contract belong in the **same** change. A layer
 that lands without its contract is a rule that exists only in this document,
 which is the state this section exists to prevent.
 
+That `docmax.server` belongs in this package at all — rather than in a separate
+repository — is settled by
+[ADR 0006](../adr/0006-reference-server-location.md), which also lists the checks
+it must arrive with.
+
 ## Interfaces are peers, not a stack
 
 `cli`, `tui`, `server` and `mcp` are siblings. None is built on another, and

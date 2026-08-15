@@ -33,13 +33,10 @@ belongs in the *same change* as the layer it governs, not a follow-up.
 These are architectural and currently unrecorded. Writing the code first would
 make the ADR a justification rather than a decision.
 
-- [ ] **Where the server lives, and which side of the open-core line.**
-      [ADR 0004](../adr/0004-open-core-boundary.md) reserves a *gated, separate
-      `cloud_server/` repo*. That conflicts with putting the HTTP layer in this
-      package, and it makes cloud-api.md's promise to self-hosters —
-      "any server implementing this document works with an unmodified client" —
-      unfulfillable, since the only server would be gated and elsewhere.
-      Resolve deliberately; supersede or amend 0004.
+- [x] ~~**Where the server lives, and which side of the open-core line.**~~
+      Resolved by [ADR 0006](../adr/0006-reference-server-location.md): the
+      reference server lives at `src/docmax/server/` and is open; `pro/` is
+      unchanged. Its enforcement is listed above and lands with the layer.
 - [ ] **Configuration precedence and consent storage.** Where the consent record
       lives and what invalidates it.
 - [ ] **Execution model.** Whether jobs are in-process or queued, and what that

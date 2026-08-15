@@ -1,6 +1,18 @@
 # ADR 0004 — Open-core boundary
 
-**Status:** Accepted · 2026-08-13
+**Status:** Accepted · 2026-08-13 · **superseded in part by [ADR 0006](0006-reference-server-location.md)**
+
+> **Superseded in part.** The `cloud_server/` entry in the Gated row below no
+> longer holds: the reference server lives at `src/docmax/server/` and is open.
+> See [ADR 0006](0006-reference-server-location.md) for what changed and why.
+>
+> **Everything else in this ADR stands** — the open-core line itself, the `pro/`
+> boundary, the enforcement job, and the principle that gating is team-shaped
+> rather than capability-shaped. ADR 0006 applies that principle; it does not
+> revise it.
+>
+> The text below is left exactly as accepted. The reasoning that turned out to
+> need correcting is part of the record.
 
 ## Context
 

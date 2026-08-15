@@ -50,6 +50,16 @@ the batch runner.
 The server is deliberately *not* granted that privilege: a request handler that
 exits takes every other in-flight request with it.
 
+**Where the server lives**
+
+`docmax.server` is the reference implementation of
+[the Cloud Engine contract](../cloud-api.md), and it is open and in this package
+rather than in a separate gated repository — see
+[ADR 0006](../adr/0006-reference-server-location.md). It runs the same
+`LocalStrategy` a user runs locally, on a machine that already has the heavy
+dependencies installed. That is the whole mechanism: there is one implementation
+of `compress`, and the only question is whose machine it runs on.
+
 ---
 
 ## Application — `tools`
@@ -127,7 +137,8 @@ and reads back a result.
 
 ## Foundation — `core`
 
-**Status:** `errors`, `branding` implemented; the rest is M1
+**Status:** `models`, `protocols`, `atomic`, `cancellation`, `errors`, `branding`
+implemented (Phase 2). `registry`, `router` and `config` remain.
 
 The domain, and nothing else. Every layer speaks the types defined here, which
 is why they cannot depend on any of those layers.

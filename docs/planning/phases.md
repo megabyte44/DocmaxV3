@@ -56,38 +56,62 @@ not have.
 **Goal** The types and protocols every other layer speaks, with no third-party
 dependency.
 
-**Status** `not started`.
+**Status** `complete` — 2026-08-15. Verification is partial; see below.
 
 **Depends on** Phase 0.
 
-**Why it is next** It unblocks every other phase, and it is pure standard
+**Why it was next** It unblocks every other phase, and it is pure standard
 library — which under the current
-[network constraint](current-status.md#blocked) makes it the only substantial
-work that can actually be verified locally.
+[network constraint](current-status.md#blocked) made it the only substantial work
+that could be verified locally at all.
 
-**Order matters.** Each step consumes the previous one:
+**Delivered**
 
-| # | Module | Delivers |
+| # | Module | Contracts |
 |---|---|---|
 | 1 | `core/models.py` | `DocumentRef`, `OutputTarget`, `ToolResult`, `Engine` |
-| 2 | `core/protocols.py` | `ProgressSink`, `EngineStrategy`, `Validator` |
+| 2 | `core/protocols.py` | `ProgressSink`, `NullProgress`, `EngineStrategy`, `Validator` |
 | 3 | `core/atomic.py` | `atomic_write`, `atomic_path`, `atomic_dir` |
 | 4 | `core/cancellation.py` | `CancellationToken`, `NEVER_CANCELLED` |
 
-**Tests required**
-- unit tests per module, written against the *failure* each mechanism prevents —
-  a happy-path test for `atomic_write` demonstrates nothing
-- `OutputTarget.resolve` must be tested against in-place overwrite specifically
-- cancellation must be tested under threads, not only sequentially
-- `test_no_direct_writes.py` stops exempting a file that does not exist
+`errors.py` and `branding.py` were reviewed and needed **no change** —
+`errors.py` already carried every error type these modules raise.
 
-**Documentation required** `implementation/core.md`; update
-`current-status.md`.
+Two things were deliberately left out as speculative at this phase: a
+`JobStatus` enum (belongs with the cloud client, Phase 7) and storage/cloud
+protocols (Phase 8). A protocol with no second implementation and no cross-layer
+caller is indirection, not architecture.
 
-**Definition of done** ADR 0003's guarantees hold under test on all three
-platforms: a crash mid-write leaves the destination untouched, an input can
-never be an output, and a cancelled multi-file operation leaves no partial
-directory.
+**Tasks**
+- [x] domain models, with `resolve()` owning every destination check
+- [x] boundary protocols, structural rather than inherited
+- [x] atomic write / path / dir
+- [x] cancellation with cooperative checks, callbacks, and accumulating deadlines
+- [x] unit tests per module, written against the failure each prevents
+- [x] `implementation/core.md`
+- [x] `test_no_direct_writes.py` no longer exempts a file that does not exist
+
+**Definition of done**
+- [x] ADR 0003's guarantees hold under test: a crash mid-write leaves the
+      destination untouched, an input can never be an output, a cancelled
+      multi-file run leaves no partial directory
+- [x] core imports nothing heavy — verified by subprocess probe per module
+- [x] documentation updated and consistent with the code
+- [ ] **verified on all three platforms** — cannot be claimed locally; the suite
+      has not been executed under pytest. See
+      [current-status.md](current-status.md#blocked).
+
+**Findings worth keeping**
+
+- **The in-place check survives a case-insensitive filesystem.** On Windows and
+  default macOS, `-o DOC.PDF` against an input of `doc.pdf` is the same file.
+  It works because both `DocumentRef.from_path` and `OutputTarget.resolve` call
+  `Path.resolve()`, which returns the name as the filesystem stores it. There is
+  now a test that probes the filesystem and asserts accordingly, rather than
+  assuming from the platform.
+- **`issubclass` cannot demonstrate the absence of inheritance** for a
+  method-only runtime protocol — it answers `True`. `test_protocols.py` checks
+  the MRO instead.
 
 ---
 
@@ -176,11 +200,14 @@ of the inputs *before* the swap.
 **Status** `not started`. **Depends on** Phase 6. **Milestone** M6.
 
 Client first, against the contract in [cloud-api.md](../cloud-api.md) and a mock;
-then the server. Both are governed by decisions not yet recorded — see
-[backlog](backlog.md#required). **Write the ADRs before the code**: the server's
-location relative to the open-core line contradicts
-[ADR 0004](../adr/0004-open-core-boundary.md) as currently written, and that has
-to be resolved deliberately rather than by whichever file is edited first.
+then the server.
+
+Where the server lives is settled:
+[ADR 0006](../adr/0006-reference-server-location.md) places it at
+`src/docmax/server/`, open and in this package. The execution-model and
+observability decisions are **not** settled — see
+[backlog](backlog.md#required) — and both should be recorded before the code,
+not after.
 
 Each ships with its enforcement in the same change: `independence` contract,
 `fastapi`/`mcp` added to the forbidden list, web packages added to

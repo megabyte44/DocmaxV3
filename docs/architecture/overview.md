@@ -33,8 +33,26 @@ Every operation is a `Tool` with up to two `EngineStrategy` implementations:
 ```python
 class EngineStrategy(Protocol):
     def is_available(self) -> bool: ...
-    def run(self, doc: DocumentRef, target: OutputTarget, **params) -> ToolResult: ...
+    def unavailable_reason(self) -> str | None: ...
+    def run(
+        self,
+        docs: Sequence[DocumentRef],
+        target: OutputTarget,
+        *,
+        progress: ProgressSink,
+        cancellation: CancellationToken,
+        **params: Any,
+    ) -> ToolResult: ...
 ```
+
+Three things in that signature are load-bearing. `docs` is a *sequence* because
+assembling tools — `merge`, `from-images` — take several inputs; single-input
+tools read `docs[0]`. `unavailable_reason` exists so `NoEngineAvailableError` can
+quote both engines' reasons rather than saying "it didn't work". And `progress`
+and `cancellation` are **required**, not optional: the router supplies
+`NullProgress` and `NEVER_CANCELLED` when nobody cares, which deletes the
+`if progress is not None` branch from every engine rather than leaving a code
+path that only runs in production.
 
 `LocalStrategy` does the work here — offline, private, heavy dependencies.
 `CloudStrategy` posts to an HTTP endpoint — no local install required.
