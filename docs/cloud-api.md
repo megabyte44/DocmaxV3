@@ -1,12 +1,15 @@
 # Cloud Engine API contract
 
-**Status:** design. The client is built and tested against a mock in M1; no
-server exists yet.
+**Status:** design. Both halves exist in skeleton: the client in
+`src/docmax/cloud_client/` speaks the whole contract, and the reference server
+in `src/docmax/server/` implements every endpoint below except the part that
+runs the tool, which lands with the cloud engines in M6.
 
-This document is the contract. The client in `src/docmax/cloud_client/` is
-written against it, and `respx`-based tests assert the client honours it. Any
-server implementing this document — the hosted service, or a self-hosted one —
-works with an unmodified client.
+This document is the contract, and it has two independent implementations on
+purpose — a client that borrowed the server's parsing (or the reverse) would
+agree with itself about its own bugs. `respx`-based tests assert the client
+honours it. Any server implementing this document — the hosted service, or a
+self-hosted one — works with an unmodified client.
 
 ## Why this exists
 
@@ -139,4 +142,17 @@ GET /v1/capabilities
 ```
 
 The client calls this once and caches it, so a self-hosted server offering a
-subset of tools degrades cleanly rather than failing per-call.
+subset of tools degrades cleanly rather than failing per-call. The server
+answers it from the tool registry rather than from a list of its own, so it
+cannot advertise a tool it does not have.
+
+## Running the reference server
+
+```bash
+pip install -e ".[server]"        # the code is not in the wheel; run it from a checkout
+DOCMAX_SERVER_API_KEYS=dev-key python -m docmax.server
+```
+
+It binds to localhost and accepts no keys until you name some. Point a client at
+it with `DOCMAX_CLOUD_ENDPOINT=http://localhost:8000` — plaintext is permitted
+for a local endpoint precisely so that this works, and refused everywhere else.
