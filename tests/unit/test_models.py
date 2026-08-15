@@ -233,9 +233,9 @@ def test_every_input_is_checked_not_only_the_first(tmp_path: Path) -> None:
 
 def test_engine_values_are_the_wire_strings() -> None:
     """These appear in config files, `--engine` arguments and JSON output."""
-    assert Engine.LOCAL == "local"
-    assert Engine.CLOUD == "cloud"
-    assert Engine.AUTO == "auto"
+    assert Engine.LOCAL.value == "local"
+    assert Engine.CLOUD.value == "cloud"
+    assert Engine.AUTO.value == "auto"
 
 
 def test_a_result_describes_which_engine_ran(tmp_path: Path) -> None:

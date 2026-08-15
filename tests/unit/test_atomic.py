@@ -36,7 +36,7 @@ def staged_files(directory: Path) -> list[str]:
     return sorted(path.name for path in directory.glob(".*"))
 
 
-class Boom(Exception):
+class BoomError(Exception):
     """Raised inside a context manager to simulate a mid-operation failure."""
 
 
@@ -55,7 +55,7 @@ def test_atomic_write_delivers_the_bytes(tmp_path: Path) -> None:
     assert not staged_files(tmp_path)
 
 
-@pytest.mark.parametrize("failure", [Boom, KeyboardInterrupt])
+@pytest.mark.parametrize("failure", [BoomError, KeyboardInterrupt])
 def test_a_crash_mid_write_leaves_the_previous_file(
     tmp_path: Path, failure: type[BaseException]
 ) -> None:
@@ -69,9 +69,13 @@ def test_a_crash_mid_write_leaves_the_previous_file(
     destination = tmp_path / "out.pdf"
     destination.write_bytes(b"the original")
 
-    with pytest.raises(failure), atomic_write(target(destination)) as handle:
-        handle.write(b"a partial write that must never land")
-        raise failure
+    def write_then_fail() -> None:
+        with atomic_write(target(destination)) as handle:
+            handle.write(b"a partial write that must never land")
+            raise failure
+
+    with pytest.raises(failure):
+        write_then_fail()
 
     assert destination.read_bytes() == b"the original"
     assert not staged_files(tmp_path)
@@ -80,9 +84,13 @@ def test_a_crash_mid_write_leaves_the_previous_file(
 def test_a_crash_before_any_output_creates_nothing(tmp_path: Path) -> None:
     destination = tmp_path / "absent.pdf"
 
-    with pytest.raises(Boom), atomic_write(target(destination)) as handle:
-        handle.write(b"x")
-        raise Boom
+    def write_then_fail() -> None:
+        with atomic_write(target(destination)) as handle:
+            handle.write(b"x")
+            raise BoomError
+
+    with pytest.raises(BoomError):
+        write_then_fail()
 
     assert not destination.exists()
     assert not staged_files(tmp_path)
@@ -247,9 +255,13 @@ def test_cancelling_a_multi_file_run_keeps_the_old_tree(tmp_path: Path) -> None:
     destination.mkdir()
     (destination / "complete.png").write_bytes(b"from a finished run")
 
-    with pytest.raises(Boom), atomic_dir(target(destination)) as staged:
-        (staged / "partial.png").write_bytes(b"page 40 of 1000")
-        raise Boom
+    def stage_then_fail() -> None:
+        with atomic_dir(target(destination)) as staged:
+            (staged / "partial.png").write_bytes(b"page 40 of 1000")
+            raise BoomError
+
+    with pytest.raises(BoomError):
+        stage_then_fail()
 
     assert [path.name for path in destination.iterdir()] == ["complete.png"]
     assert not staged_files(tmp_path)
@@ -259,10 +271,14 @@ def test_a_cancelled_nested_tree_is_cleaned_up(tmp_path: Path) -> None:
     """Cleanup recurses, so a staged tree with subdirectories leaves nothing."""
     destination = tmp_path / "output"
 
-    with pytest.raises(Boom), atomic_dir(target(destination)) as staged:
-        (staged / "sub" / "deeper").mkdir(parents=True)
-        (staged / "sub" / "deeper" / "leaf.txt").write_text("x", encoding="utf-8")
-        raise Boom
+    def stage_then_fail() -> None:
+        with atomic_dir(target(destination)) as staged:
+            (staged / "sub" / "deeper").mkdir(parents=True)
+            (staged / "sub" / "deeper" / "leaf.txt").write_text("x", encoding="utf-8")
+            raise BoomError
+
+    with pytest.raises(BoomError):
+        stage_then_fail()
 
     assert not destination.exists()
     assert not staged_files(tmp_path)

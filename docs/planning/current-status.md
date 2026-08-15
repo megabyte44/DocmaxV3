@@ -41,60 +41,56 @@ since `core/registry.py` is Phase 4. It should be un-skipped there, not sooner.
 
 ---
 
-## Verification — what was and was not run
+## Verification
 
-**This is the honest picture, and it is partial.**
+Network access was restored on 2026-08-15 and **the full toolchain now runs
+locally**. Every check the project defines passes:
 
-### Ran successfully
-
-- `python -m py_compile` over all core and test modules — clean.
-- **A standalone verifier reproducing the four hygiene tests' logic** against the
-  real source tree, plus behavioural checks of every Phase 2 contract:
-  **76 checks, all passing**, on Windows / CPython 3.14. Covers: no process
-  exits in library code; no writes outside `atomic.py`; no brand literals
-  outside `branding.py`; import safety per module by subprocess probe; and the
-  behaviour of models, protocols, atomic writes and cancellation — including
-  Ctrl-C mid-write, cancelled multi-file runs, and sixteen threads racing on
-  `cancel()`.
-- Markdown link integrity across the repository — 69 relative links, all resolve.
-
-### Blocked by the environment, not by the project
-
-`pip` cannot reach PyPI on this machine (DNS resolution fails), so the dev
-extras are not installed. **None of the following has been run, and no claim is
-made about them:**
-
-| Command | Status |
+| Check | Result |
 |---|---|
-| `pytest` | **not run** — the test files have never executed under pytest |
-| `ruff check .` | **not run** |
-| `ruff format --check .` | **not run** |
-| `mypy` | **not run** |
-| `lint-imports` | **not run** |
+| `pytest -m "not golden and not needs_binary"` | **114 passed, 3 skipped** |
+| `ruff check .` | **passed** |
+| `ruff format --check .` | **passed** — 47 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 27 source files |
+| `lint-imports` | **passed** — 3 contracts kept, 0 broken |
 
-The standalone verifier runs the same *checks* the hygiene tests encode, but it
-is not pytest and does not exercise fixtures, parametrisation, or the test files
-themselves. Treat Phase 2 as **verified in behaviour, unverified in toolchain**.
+The three skips are intentional: two are the self-exemptions inside the hygiene
+suite (`branding.py` may contain brand literals; `atomic.py` may write), and the
+third is the registry import-safety test, which stays skipped until Phase 4.
 
-### What to run when a network is available
+Environment: Windows, CPython 3.14, `.venv` from `pip install -e ".[dev]"`.
 
-```bash
-python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"
-pytest -m "not golden and not needs_binary"
-ruff check . && ruff format --check .
-mypy
-lint-imports
-```
+**Still unverified:** the CI matrix — Linux and macOS, and Python 3.11–3.13.
+Everything above is one platform and one interpreter, and 3.14 is not in the
+project's supported matrix. The `golden` and `needs_binary` tests are also
+unrun, since the external binaries are absent locally; CI requires them.
 
-Most likely to surface something: `mypy --strict` over the new modules, and
-`ruff` on line length and import ordering. `lint-imports` should pass unchanged —
-Phase 2 added no import edges between layers.
+### What the toolchain caught
+
+Running the real tools after the fact found 17 `ruff` errors and 8 `mypy`
+errors, **all in Phase 2 code, none previously visible** to the standalone
+verifier. Worth recording because it calibrates how much a hand-rolled check is
+worth:
+
+- `PTH105` — `os.replace()` should be `Path.replace()`; the project enables the
+  pathlib ruleset and the module had four call sites.
+- `RUF100` — `noqa: SLF001` / `BLE001` directives for rules this project does
+  not enable, which are themselves errors.
+- `SIM105` / `S110` — `try/except/pass` in `cancel()`, now `contextlib.suppress`.
+- `PT012` ×4, `PT017`, `N818` — pytest and naming conventions in the tests.
+- `mypy` — comparing a `StrEnum` member to a string literal under
+  `strict_equality`; asserting on the return of a `-> None` method; and one
+  genuine narrowing trap, where `assert not token.is_cancelled` caused mypy to
+  treat the rest of the test as unreachable.
+
+All were fixed rather than suppressed.
 
 ---
 
 ## Blocked
 
-Nothing is blocked on a decision. One environmental constraint stands, above.
+Nothing. The earlier network constraint is resolved — `pip` reaches PyPI and the
+full toolchain is installed and passing.
 
 ---
 
@@ -149,17 +145,38 @@ precedence and consent storage, the execution model, and observability. See
 
 ---
 
-## Session note — discarded work, 2026-08-15
+## Related branch — `m1-foundations`
 
-An earlier M1 implementation written during a session on this date was discarded
-and the tree returned to `4fc92f2`. Phase 2 rebuilt `models`, `protocols`,
-`atomic` and `cancellation` from that work; the `cloud_client`, `server` and tool
-skeletons were **not** rebuilt, as they belong to later phases.
+An earlier M1 implementation was written on 2026-08-15 and disappeared from the
+working tree, which was at the time recorded here as "discarded". **That was
+wrong, and this corrects it.** The work is committed and intact on the
+`m1-foundations` branch:
 
-Empty `__pycache__` directories from the discarded work remain on disk at
-`src/docmax/server/`, `tools/merge/` and `tools/ocr/`. They are git-ignored and
-contain no source, but they make those packages look present in a directory
-listing. Removing them is in [the backlog](backlog.md#important).
+```
+a0c3e52  docs: record the three-part shape and the fifth structural guarantee
+d3c7f65  feat(server): reference implementation of the Cloud Engine API
+873467d  feat(tools): merge and ocr as the two reference tool layouts
+1d5163c  feat(cloud_client): the client half of the Cloud Engine contract
+82cf226  feat(core): atomic writes and cancellation
+be3e3b6  feat(core): value types, protocols, and the lazy tool registry
+```
+
+It branches from `4fc92f2` and shares no commit with the phase work, so the two
+are independent lines over the same milestone.
+
+**This needs reconciling before Phase 4.** `m1-foundations` contains a registry,
+a cloud client, a server and two tool skeletons — Phases 4, 7, 8 and 6
+respectively — and its `core` overlaps with what Phase 2 built. Whether to merge
+it, cherry-pick from it, or treat it as a reference and supersede it is an open
+question, and is tracked in [the backlog](backlog.md#required).
+
+Doing nothing is the one option that is not safe: two divergent implementations
+of `core` in one repository is precisely the drift this documentation system
+exists to prevent.
+
+Stale bytecode directories left behind at `src/docmax/server/`,
+`tools/merge/` and `tools/ocr/` — source-less `__pycache__` shells that made
+those packages look present in a directory listing — have been removed.
 
 ---
 

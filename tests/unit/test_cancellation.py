@@ -150,7 +150,10 @@ def test_a_deadline_reports_time_left_for_a_subprocess() -> None:
 
 def test_a_lapsed_deadline_cancels() -> None:
     token = CancellationToken(timeout=BRIEF)
-    assert not token.is_cancelled
+
+    before = token.remaining_seconds()
+    assert before is not None
+    assert before > 0, "the deadline has not lapsed yet"
 
     wait_past(BRIEF)
 
@@ -246,7 +249,7 @@ def test_the_shared_token_does_not_accumulate_callbacks() -> None:
     for _ in range(1000):
         NEVER_CANCELLED.on_cancel(lambda: None)
 
-    assert NEVER_CANCELLED._callbacks == []  # noqa: SLF001 — the leak is the point
+    assert NEVER_CANCELLED._callbacks == [], "the shared token must store nothing"
 
 
 def test_a_child_of_the_shared_token_is_a_normal_token() -> None:

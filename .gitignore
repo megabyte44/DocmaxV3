@@ -40,6 +40,9 @@ coverage.xml
 .mypy_cache/
 .ruff_cache/
 .dmypy.json
+# import-linter writes its own .gitignore inside this directory; listed here too
+# so the rule survives if that file is ever removed.
+.import_linter_cache/
 
 # Generated test fixtures. The corpus is produced by tests/fixtures/generate.py
 # and must never be committed — partly for repo size, but mainly because
@@ -49,10 +52,17 @@ tests/fixtures/corpus/
 # Benchmark output. RESULTS.md is committed; raw runs are not.
 benchmarks/output/
 
-# IDE
+# IDE / agent tooling
 .vscode/
 .idea/
 *.swp
+# Claude Code state. Both settings files here accumulate machine-specific data —
+# absolute Windows paths, per-session temp directories, `.venv/Scripts/` command
+# allowlists — so neither is portable and neither belongs in the repository.
+# Ignored wholesale rather than per-file: a contributor whose *global* git ignore
+# happens to cover the `.local.` variant would otherwise still commit the other.
+# If a curated, cross-platform project config is ever wanted, `git add -f` it.
+.claude/
 
 # OS
 .DS_Store

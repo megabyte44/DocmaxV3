@@ -56,14 +56,15 @@ not have.
 **Goal** The types and protocols every other layer speaks, with no third-party
 dependency.
 
-**Status** `complete` — 2026-08-15. Verification is partial; see below.
+**Status** `complete` — 2026-08-15. Full toolchain green locally; CI matrix
+still outstanding, see the Definition of done.
 
 **Depends on** Phase 0.
 
 **Why it was next** It unblocks every other phase, and it is pure standard
-library — which under the current
-[network constraint](current-status.md#blocked) made it the only substantial work
-that could be verified locally at all.
+library — which, during the period when PyPI was unreachable from the
+development machine, made it the only substantial work that could be verified
+locally at all.
 
 **Delivered**
 
@@ -97,9 +98,11 @@ caller is indirection, not architecture.
       multi-file run leaves no partial directory
 - [x] core imports nothing heavy — verified by subprocess probe per module
 - [x] documentation updated and consistent with the code
-- [ ] **verified on all three platforms** — cannot be claimed locally; the suite
-      has not been executed under pytest. See
-      [current-status.md](current-status.md#blocked).
+- [x] full toolchain passes locally — `pytest` (114 passed, 3 skipped),
+      `ruff`, `ruff format`, `mypy --strict`, `lint-imports` (3 contracts kept)
+- [ ] **verified on all three platforms** — still outstanding. Local runs are
+      Windows / CPython 3.14 only, and 3.14 is not in the supported matrix.
+      Needs CI on Linux and macOS across 3.11–3.13.
 
 **Findings worth keeping**
 

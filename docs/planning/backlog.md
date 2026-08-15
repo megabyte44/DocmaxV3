@@ -37,6 +37,12 @@ make the ADR a justification rather than a decision.
       Resolved by [ADR 0006](../adr/0006-reference-server-location.md): the
       reference server lives at `src/docmax/server/` and is open; `pro/` is
       unchanged. Its enforcement is listed above and lands with the layer.
+- [ ] **Reconcile the `m1-foundations` branch.** It holds an independent M1
+      implementation — registry, cloud client, server, two tool skeletons, and a
+      `core` that overlaps with Phase 2's. Merge, cherry-pick, or supersede;
+      decide before Phase 4 builds a second registry. Two divergent `core`
+      implementations in one repository is the drift this system exists to
+      prevent. See [current-status.md](current-status.md#related-branch--m1-foundations).
 - [ ] **Configuration precedence and consent storage.** Where the consent record
       lives and what invalidates it.
 - [ ] **Execution model.** Whether jobs are in-process or queued, and what that
@@ -50,17 +56,14 @@ make the ADR a justification rather than a decision.
 - [ ] `docs/development/setup.md`, `testing.md`, `contributing.md` — the README
       links contributors to ADRs and architecture, but never explains how to run
       anything
-- [ ] `docs/implementation/core.md` — after Phase 2
+- [x] ~~`docs/implementation/core.md`~~ — written in Phase 2
 - [ ] `benchmarks/` — the README promises published benchmarks with real
       hardware and methodology, and no numbers appear until they are measured
 
 ### Environment
 
-- [ ] **Restore network access, or record an offline path.** `pip` cannot reach
-      PyPI on the current machine, so no third-party-dependent check can run
-      locally. Everything is currently verified only in CI, or by hand for
-      stdlib-only code. This silently weakens every "verified" claim made during
-      development.
+- [x] ~~**Restore network access.**~~ Resolved 2026-08-15; the full toolchain
+      installs and runs locally.
 
 ---
 
@@ -77,10 +80,7 @@ Worth doing, not blocking anything.
 - [ ] **The fixture corpus generator** (`tests/fixtures/generate.py`) referenced
       by `.gitignore` but absent.
 - [ ] **Coverage floor in CI.** `--cov` runs; nothing fails on a drop.
-- [ ] **Stale `__pycache__` cleanup.** `src/docmax/server/`,
-      `tools/merge/`, `tools/ocr/` exist on disk as bytecode-only shells from
-      discarded work. Harmless and git-ignored, but misleading to anyone
-      listing the tree.
+- [x] ~~**Stale `__pycache__` cleanup.**~~ Removed 2026-08-15.
 
 ---
 

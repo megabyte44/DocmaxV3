@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from docmax.core.errors import CancelledError
@@ -128,9 +129,11 @@ class CancellationToken:
         passed, since that is what a timeout argument expects.
         """
         deadlines = [
-            token._deadline  # noqa: SLF001 — same class; see _chain
+            # Reaching into a sibling instance of the same class, which is
+            # what _chain exists to hand back.
+            token._deadline
             for token in self._chain()
-            if token._deadline is not None  # noqa: SLF001
+            if token._deadline is not None
         ]
         if not deadlines:
             return None
@@ -155,10 +158,10 @@ class CancellationToken:
             self._callbacks.clear()
 
         for callback in callbacks:
-            try:
+            # Broad and silent, for the reason in the docstring: a teardown that
+            # is already broken must not stop the rest of the teardown.
+            with suppress(Exception):
                 callback()
-            except Exception:  # noqa: BLE001 — see docstring
-                pass
 
     def on_cancel(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register ``callback`` to run when cancellation is requested.
@@ -209,7 +212,7 @@ class CancellationToken:
         token: CancellationToken | None = self
         while token is not None:
             chain.append(token)
-            token = token._parent  # noqa: SLF001 — same class
+            token = token._parent
         return tuple(chain)
 
     def __repr__(self) -> str:

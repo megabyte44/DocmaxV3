@@ -149,9 +149,13 @@ def _validate(produced: Path, validators: Sequence[Validator], destination: Path
 
 
 def _commit(staged: Path, destination: Path) -> None:
-    """Swap a staged *file* into place. The atomic step."""
+    """Swap a staged *file* into place. The atomic step.
+
+    ``Path.replace`` is ``os.replace``, which is atomic on POSIX and on Windows:
+    a reader sees the old file or the new one, never a partial one.
+    """
     try:
-        os.replace(staged, destination)
+        staged.replace(destination)
     except OSError as exc:
         raise _fail_for_oserror(exc, destination) from exc
 
@@ -159,7 +163,7 @@ def _commit(staged: Path, destination: Path) -> None:
 def _commit_tree(staged: Path, destination: Path) -> None:
     """Swap a staged *directory* into place, as close to atomically as possible.
 
-    ``os.replace`` will not put a directory over an existing one — POSIX requires
+    ``replace`` will not put a directory over an existing one — POSIX requires
     the target to be empty, Windows refuses outright. So an existing destination
     is moved aside first and deleted only once the new tree is in place.
 
@@ -172,12 +176,12 @@ def _commit_tree(staged: Path, destination: Path) -> None:
         if destination.exists():
             previous = destination.with_name(f"{_STAGE_PREFIX}{destination.name}.previous")
             _discard(previous)
-            os.replace(destination, previous)
-        os.replace(staged, destination)
+            destination.replace(previous)
+        staged.replace(destination)
     except OSError as exc:
         if previous is not None and not destination.exists():
             with suppress(OSError):
-                os.replace(previous, destination)
+                previous.replace(destination)
         raise _fail_for_oserror(exc, destination) from exc
 
     if previous is not None:
