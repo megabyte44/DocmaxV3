@@ -134,6 +134,11 @@ defaults  →  config file (TOML)  →  environment  →  CLI/runtime override
 `CONFIG_DIR_NAME` · the `offline` flag · per-tool engine preference · the
 per-tool consent record.
 
+**Read first** `cloud_client/config.py` and `server/config.py` on
+[`m1-foundations`](reconciliation.md). Both already resolve settings against an
+env prefix; Phase 3 should not invent a third precedence chain that then has to
+be reconciled with them at Phases 7 and 8.
+
 **Constraint** Environment access is centralised here. Scattered `os.environ`
 reads are what this phase exists to prevent — see
 [layers.md](../architecture/layers.md#cross-cutting-concerns).
@@ -150,9 +155,14 @@ makes cloud unreachable *regardless of flags*, including an explicit
 
 **Status** `not started`. **Depends on** Phase 2.
 
-**Tasks** `core/registry.py` — `ToolSpec`, `Param`, `register`, directory scan of
-`tools/*/tool.py`, `importlib.metadata` entry points for third-party tools,
-strategy loading on demand.
+**Input** `core/registry.py` exists on
+[`m1-foundations`](reconciliation.md#component-disposition) — complete,
+lint-clean, and ADR 0002-compliant. **Port it; do not rewrite it.**
+
+**Tasks** port `core/registry.py` — `ToolSpec`, `Param`, `register`, directory
+scan of `tools/*/tool.py`, `importlib.metadata` entry points, strategy loading
+on demand · re-read it against Phase 2's Core before landing · fix the
+`get_tool` remedy, which names no command.
 
 **Definition of done** un-skip
 `test_building_the_registry_pulls_in_nothing_heavy` and have it pass: building
@@ -189,8 +199,14 @@ passing a consent check.
 
 **Status** `not started`. **Depends on** Phase 5. **Completes** milestone M1.
 
-**Tasks** `tools/merge/{tool,local,validators}.py` · `cloud = None` (pypdf-only)
-· CLI command wiring · golden tests.
+**Input** `tools/merge/` and `tools/ocr/` exist on
+[`m1-foundations`](reconciliation.md#component-disposition) as skeletons: real
+`ToolSpec`, `Param` and validators, but both `run()` bodies raise
+`NotImplementedError` and both signatures predate `cancellation`.
+
+**Tasks** port the layout and metadata · **write `run()` against the current
+`EngineStrategy`**, with required `progress` and `cancellation` · `cloud = None`
+(pypdf-only) · CLI command wiring · golden tests.
 
 **Definition of done** `docmax merge a.pdf b.pdf -o out.pdf` works end to end;
 `-o a.pdf` is refused; the output validator checks that page count equals the sum
@@ -201,6 +217,18 @@ of the inputs *before* the swap.
 ## Phase 7 — Cloud client · Phase 8 — HTTP server
 
 **Status** `not started`. **Depends on** Phase 6. **Milestone** M6.
+
+**Both exist on [`m1-foundations`](reconciliation.md#component-disposition)**
+and are ported rather than written. `cloud_client/` is complete and lint-clean;
+`server/` implements routes, jobs, storage, auth and idempotency, with
+`execution.start()` stubbed pending real tools.
+
+Phase 7 brings `JobStatus` into `core/models.py` with the client, which needs
+it. Phase 8 ports the server **together with its enforcement config** — that
+config already satisfies every item under
+[dependencies.md](../architecture/dependencies.md#not-yet-enforced), and cannot
+land sooner because import-linter fails on a contract naming a module that does
+not exist.
 
 Client first, against the contract in [cloud-api.md](../cloud-api.md) and a mock;
 then the server.

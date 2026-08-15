@@ -19,6 +19,7 @@ Start here.
 | [planning/roadmap.md](planning/roadmap.md) | Milestones, in shipping order |
 | [planning/phases.md](planning/phases.md) | The engineering order underneath the roadmap |
 | [planning/backlog.md](planning/backlog.md) | Known gaps and unscheduled work |
+| [planning/reconciliation.md](planning/reconciliation.md) | What happens to the `m1-foundations` branch *(temporary)* |
 
 ## Reference
 

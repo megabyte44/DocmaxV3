@@ -20,6 +20,12 @@ does not keep.
 From [dependencies.md](../architecture/dependencies.md#not-yet-enforced). Each
 belongs in the *same change* as the layer it governs, not a follow-up.
 
+**All of these already exist on `m1-foundations`** and are ported wholesale at
+Phase 8 rather than written — see
+[reconciliation.md](reconciliation.md#the-enforcement-config-is-the-largest-single-win).
+They cannot land sooner: import-linter fails on a contract naming a module that
+does not yet exist.
+
 - [ ] `fastapi` and `mcp` added to the `core-is-ui-free` forbidden list
 - [ ] `independence` contract between `docmax.cli` and `docmax.server`
 - [ ] web-framework packages added to `HEAVY_MODULES`
@@ -37,12 +43,11 @@ make the ADR a justification rather than a decision.
       Resolved by [ADR 0006](../adr/0006-reference-server-location.md): the
       reference server lives at `src/docmax/server/` and is open; `pro/` is
       unchanged. Its enforcement is listed above and lands with the layer.
-- [ ] **Reconcile the `m1-foundations` branch.** It holds an independent M1
-      implementation — registry, cloud client, server, two tool skeletons, and a
-      `core` that overlaps with Phase 2's. Merge, cherry-pick, or supersede;
-      decide before Phase 4 builds a second registry. Two divergent `core`
-      implementations in one repository is the drift this system exists to
-      prevent. See [current-status.md](current-status.md#related-branch--m1-foundations).
+- [x] ~~**Reconcile the `m1-foundations` branch.**~~ Decided by
+      [ADR 0007](../adr/0007-m1-foundations-reconciliation.md): preserved as a
+      read-only source branch, never merged, ported component by component by
+      the phase that owns each. Outstanding components are tracked in
+      [reconciliation.md](reconciliation.md).
 - [ ] **Configuration precedence and consent storage.** Where the consent record
       lives and what invalidates it.
 - [ ] **Execution model.** Whether jobs are in-process or queued, and what that

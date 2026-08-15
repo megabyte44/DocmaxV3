@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-15 · **Branch:** `phase-2/core-contracts` · **Base:** `4fc92f2`
+**Last updated:** 2026-08-15 · **Branch:** `architecture` · **Base:** `4fc92f2`
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -122,8 +122,8 @@ layer it governs, per
 | `architecture/layers.md` | current — Core status updated |
 | `architecture/dependencies.md` | current |
 | `implementation/core.md` | current — new in Phase 2 |
-| `adr/README.md` | current — indexes 0006 |
-| `planning/*` | current |
+| `adr/README.md` | current — indexes 0007 |
+| `planning/*` | current — includes `reconciliation.md`, deleted once its table empties |
 | `cloud-api.md` | design-stage; no server exists |
 | `README.md` | current |
 | `CHANGELOG.md` | current through Phase 2 |
@@ -139,44 +139,59 @@ server lives: `src/docmax/server/`, open, in this package. It supersedes the
 `cloud_server/` clause of [ADR 0004](../adr/0004-open-core-boundary.md); the rest
 of 0004 stands, and its text is unchanged apart from a pointer.
 
-Three decisions remain owed an ADR before the code that needs them — configuration
-precedence and consent storage, the execution model, and observability. See
-[backlog.md](backlog.md#decisions-owed-an-adr).
+[ADR 0007](../adr/0007-m1-foundations-reconciliation.md) settled what happens to
+the `m1-foundations` branch: preserved, never merged, ported component by
+component.
+
+Three decisions remain owed an ADR before the code that needs them —
+configuration precedence and consent storage, the execution model, and
+observability. See [backlog.md](backlog.md#decisions-owed-an-adr).
 
 ---
 
 ## Related branch — `m1-foundations`
 
-An earlier M1 implementation was written on 2026-08-15 and disappeared from the
-working tree, which was at the time recorded here as "discarded". **That was
-wrong, and this corrects it.** The work is committed and intact on the
-`m1-foundations` branch:
+An earlier, broader attempt at the whole of M1, committed on a branch that forks
+cleanly from `4fc92f2` and shares no commit with this line. It is pushed to
+`origin/m1-foundations` and safe.
 
-```
-a0c3e52  docs: record the three-part shape and the fifth structural guarantee
-d3c7f65  feat(server): reference implementation of the Cloud Engine API
-873467d  feat(tools): merge and ocr as the two reference tool layouts
-1d5163c  feat(cloud_client): the client half of the Cloud Engine contract
-82cf226  feat(core): atomic writes and cancellation
-be3e3b6  feat(core): value types, protocols, and the lazy tool registry
-```
+**It is a source branch, not a development line.** No merge, no deletion, no new
+commits on it — see [ADR 0007](../adr/0007-m1-foundations-reconciliation.md) for
+the decision and [reconciliation.md](reconciliation.md) for the evidence and the
+outstanding component list.
 
-It branches from `4fc92f2` and shares no commit with the phase work, so the two
-are independent lines over the same milestone.
+What it holds, and who takes it:
 
-**This needs reconciling before Phase 4.** `m1-foundations` contains a registry,
-a cloud client, a server and two tool skeletons — Phases 4, 7, 8 and 6
-respectively — and its `core` overlaps with what Phase 2 built. Whether to merge
-it, cherry-pick from it, or treat it as a reference and supersede it is an open
-question, and is tracked in [the backlog](backlog.md#required).
+| Component | Disposition | Phase |
+|---|---|---|
+| `core/registry.py` | port near as-is | 4 |
+| `tools/merge/`, `tools/ocr/` | port layout; rewrite `run()` | 6 |
+| `cloud_client/` | port, with `JobStatus` | 7 |
+| `server/` + all enforcement config | port wholesale | 8 |
+| its `core/{atomic,cancellation,models,protocols}.py` | **discard** | — |
 
-Doing nothing is the one option that is not safe: two divergent implementations
-of `core` in one repository is precisely the drift this documentation system
-exists to prevent.
+The Core copies are discarded because they are the *pre-fix* version of what
+Phase 2 now has: `ruff` reports in them the same ten errors Phase 2 already
+fixed. Its `protocols.py` is additionally older — `run()` takes `progress` as
+optional and has no `cancellation` at all.
 
-Stale bytecode directories left behind at `src/docmax/server/`,
-`tools/merge/` and `tools/ocr/` — source-less `__pycache__` shells that made
-those packages look present in a directory listing — have been removed.
+**No architectural violations were found in it.** Layering is clean throughout:
+`cloud_client` imports only `core` and `httpx`, `server` imports neither the
+client nor the CLI, and no heavy dependency sits at module scope.
+
+Two things worth knowing:
+
+- **It already pays the entire enforcement debt.** Every item under
+  [dependencies.md](../architecture/dependencies.md#not-yet-enforced) exists
+  there — the `docmax.server` layer, the independence contract, the wheel
+  exclusion and its test, the `server` extra. Phase 8 ports them rather than
+  writing them.
+- **It corroborates [ADR 0006](../adr/0006-reference-server-location.md).** That
+  ADR reasoned the server belongs in-tree, open, and out of the wheel. This
+  branch had independently built exactly that.
+
+Stale bytecode directories left behind at `src/docmax/server/`, `tools/merge/`
+and `tools/ocr/` have been removed.
 
 ---
 
