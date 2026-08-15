@@ -19,8 +19,6 @@ import subprocess
 import sys
 import textwrap
 
-import pytest
-
 #: Modules that must not appear after a bare ``import docmax``.
 #: ``pypdf`` is included deliberately: it is a base dependency, but it belongs
 #: inside tool implementations, which the registry loads lazily. Its presence
@@ -40,6 +38,11 @@ HEAVY_MODULES = (
     "rich",
     "typer",
     "httpx",
+    # The server's own dependencies. A user running `docmax merge` has no web
+    # framework installed and never needs one; if either of these ever appears
+    # after a bare import, the interface boundary has leaked downward.
+    "fastapi",
+    "uvicorn",
 )
 
 _PROBE = textwrap.dedent(
@@ -86,7 +89,6 @@ def test_version_is_available_without_heavy_imports() -> None:
     assert result.stdout.strip(), "no version reported"
 
 
-@pytest.mark.skip(reason="enabled in M1, once core/registry.py exists")
 def test_building_the_registry_pulls_in_nothing_heavy() -> None:
     """The registry knows every tool's name and params without importing local.py.
 
