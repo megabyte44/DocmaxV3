@@ -23,7 +23,7 @@ make specific past failures unreachable.
 `ProgressSink` protocol, which is what lets one core drive a CLI, a TUI, a batch
 runner, and the M10 MCP server unchanged.
 
-The layering is enforced by [import-linter](../.importlinter) contracts checked
+The layering is enforced by [import-linter](../../.importlinter) contracts checked
 in CI, not by convention.
 
 ## The dual-engine model
@@ -112,12 +112,12 @@ retry or suggest filing a bug.
 A user should never see a traceback for an anticipated condition. If they do,
 that is itself a bug — something escaped the hierarchy.
 
-See [`core/errors.py`](../src/docmax/core/errors.py).
+See [`core/errors.py`](../../src/docmax/core/errors.py).
 
 ## Decisions
 
-- [ADR 0001 — Python 3.11](adr/0001-python-311.md)
-- [ADR 0002 — Lazy self-registering tool registry](adr/0002-registry-mechanism.md)
-- [ADR 0003 — Atomic writes and `OutputTarget`](adr/0003-atomic-writes.md)
-- [ADR 0004 — Open-core boundary](adr/0004-open-core-boundary.md)
-- [ADR 0005 — GUI pickers over localhost](adr/0005-gui-pickers.md)
+- [ADR 0001 — Python 3.11](../adr/0001-python-311.md)
+- [ADR 0002 — Lazy self-registering tool registry](../adr/0002-registry-mechanism.md)
+- [ADR 0003 — Atomic writes and `OutputTarget`](../adr/0003-atomic-writes.md)
+- [ADR 0004 — Open-core boundary](../adr/0004-open-core-boundary.md)
+- [ADR 0005 — GUI pickers over localhost](../adr/0005-gui-pickers.md)

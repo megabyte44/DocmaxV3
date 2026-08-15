@@ -71,7 +71,7 @@ This is the part most tools get wrong, so it is worth being specific.
 
 These are enforced by tests that run on every commit across Linux, macOS, and
 Windows — not by good intentions. See
-[architecture.md](docs/architecture.md#the-structural-guarantees).
+[architecture/overview.md](docs/architecture/overview.md#the-structural-guarantees).
 
 ## Install
 
@@ -110,6 +110,20 @@ docmax doctor                     # what's installed, what's missing, what needs
 Benchmarks will be published in `benchmarks/` with real hardware and
 methodology. No numbers appear in this README until they are measured.
 
+For the milestone detail and the reasoning behind the ordering, see
+[docs/planning/roadmap.md](docs/planning/roadmap.md). For what is actually built
+today, see [current-status.md](docs/planning/current-status.md).
+
+## Documentation
+
+[**docs/**](docs/README.md) is the index. The short version:
+
+- [architecture/overview.md](docs/architecture/overview.md) — how DocMax is put
+  together, and why
+- [adr/](docs/adr/README.md) — the decisions, and what they cost
+- [planning/current-status.md](docs/planning/current-status.md) — what is done,
+  what is next, what is missing
+
 ## Contributing
 
 ```bash
@@ -121,7 +135,7 @@ pre-commit install
 pytest && ruff check . && mypy && lint-imports
 ```
 
-Start with [docs/architecture.md](docs/architecture.md) and the
+Start with [docs/architecture/overview.md](docs/architecture/overview.md) and the
 [ADRs](docs/adr/) — they explain the constraints, most of which exist for a
 specific reason.
 

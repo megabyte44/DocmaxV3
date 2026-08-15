@@ -1,0 +1,127 @@
+# Backlog
+
+Work that is known about but not scheduled. Sequenced work lives in
+[phases.md](phases.md); this is everything else.
+
+The four sections are a commitment level, not a priority. **Nothing moves from
+Future to Required by being implemented** — it moves by being decided, and the
+decision gets written down first.
+
+---
+
+## Required
+
+Known gaps in things the project already claims. Each is a rule the architecture
+implies with nothing enforcing it, or a promise made in a document that the code
+does not keep.
+
+### Enforcement that must land with its layer
+
+From [dependencies.md](../architecture/dependencies.md#not-yet-enforced). Each
+belongs in the *same change* as the layer it governs, not a follow-up.
+
+- [ ] `fastapi` and `mcp` added to the `core-is-ui-free` forbidden list
+- [ ] `independence` contract between `docmax.cli` and `docmax.server`
+- [ ] web-framework packages added to `HEAVY_MODULES`
+- [ ] `docmax.server` excluded from the wheel, with a hygiene test
+- [ ] `server` added to `LIBRARY_PACKAGES` in `tests/paths.py` — a request
+      handler that exits takes every in-flight request with it
+- [ ] `forbidden` contract: the server may not import the cloud client
+
+### Decisions owed an ADR
+
+These are architectural and currently unrecorded. Writing the code first would
+make the ADR a justification rather than a decision.
+
+- [ ] **Where the server lives, and which side of the open-core line.**
+      [ADR 0004](../adr/0004-open-core-boundary.md) reserves a *gated, separate
+      `cloud_server/` repo*. That conflicts with putting the HTTP layer in this
+      package, and it makes cloud-api.md's promise to self-hosters —
+      "any server implementing this document works with an unmodified client" —
+      unfulfillable, since the only server would be gated and elsewhere.
+      Resolve deliberately; supersede or amend 0004.
+- [ ] **Configuration precedence and consent storage.** Where the consent record
+      lives and what invalidates it.
+- [ ] **Execution model.** Whether jobs are in-process or queued, and what that
+      means for cancellation crossing a process boundary.
+- [ ] **Observability.** One approach to logging, and the mechanism that keeps
+      cloud-api.md's "document contents are never logged" true rather than
+      merely stated.
+
+### Documentation the project promises but does not have
+
+- [ ] `docs/development/setup.md`, `testing.md`, `contributing.md` — the README
+      links contributors to ADRs and architecture, but never explains how to run
+      anything
+- [ ] `docs/implementation/core.md` — after Phase 2
+- [ ] `benchmarks/` — the README promises published benchmarks with real
+      hardware and methodology, and no numbers appear until they are measured
+
+### Environment
+
+- [ ] **Restore network access, or record an offline path.** `pip` cannot reach
+      PyPI on the current machine, so no third-party-dependent check can run
+      locally. Everything is currently verified only in CI, or by hand for
+      stdlib-only code. This silently weakens every "verified" claim made during
+      development.
+
+---
+
+## Important
+
+Worth doing, not blocking anything.
+
+- [ ] **Python 3.14 in the CI matrix.** The development machine runs 3.14; CI
+      tests 3.11–3.13. The gap means local runs exercise a version CI does not.
+- [ ] **A `conftest.py` with shared fixtures.** Currently every test builds its
+      own temp paths.
+- [ ] **Property tests** for the parsers, per the `property` marker that exists
+      and is unused.
+- [ ] **The fixture corpus generator** (`tests/fixtures/generate.py`) referenced
+      by `.gitignore` but absent.
+- [ ] **Coverage floor in CI.** `--cov` runs; nothing fails on a drop.
+- [ ] **Stale `__pycache__` cleanup.** `src/docmax/server/`,
+      `tools/merge/`, `tools/ocr/` exist on disk as bytecode-only shells from
+      discarded work. Harmless and git-ignored, but misleading to anyone
+      listing the tree.
+
+---
+
+## Future
+
+Decided in principle, not scheduled. Mostly already on the
+[roadmap](roadmap.md) — listed here where they carry an open question.
+
+- [ ] **Pipelines and resumable batch** (M9). Needs the cancellation and progress
+      contracts to survive crossing a process boundary.
+- [ ] **Folder watch** (M9). v2's version fed on its own output; the replacement
+      needs a rule about outputs written into a watched directory.
+- [ ] **Third-party tool plugins.** The entry-point group exists in
+      `branding.py`; the trust model for third-party code does not.
+- [ ] **`--json` everywhere** (M6). `ErrorCode` is already described as public
+      API, so this partly exists as a commitment already.
+- [ ] **`docmax setup`** (M3) — idempotent, `--dry-run`, verifies afterwards
+      rather than assuming success.
+
+---
+
+## Exploratory
+
+Ideas. No commitment, and none of these should be treated as planned.
+
+- [ ] A local HTTP mode for the TUI's visual pickers — see
+      [ADR 0005](../adr/0005-gui-pickers.md).
+- [ ] Content-addressed caching of expensive operations (OCR, compression).
+- [ ] Streaming operations for documents larger than memory.
+- [ ] A `docmax explain` that prints which engine would run and why, without
+      running it — mostly a debugging aid for the router's precedence rules.
+
+---
+
+## Conventions
+
+- An item states the *problem*, not a chosen solution, unless the solution is
+  the decision.
+- Anything affecting architecture becomes an ADR before it becomes code.
+- Delete items that are done. This file is not a history; that is what
+  [the changelog](../../CHANGELOG.md) and `docs/adr/` are for.
