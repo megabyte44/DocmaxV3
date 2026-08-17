@@ -140,9 +140,8 @@ and reads back a result.
 
 ## Foundation — `core`
 
-**Status:** `models`, `protocols`, `atomic`, `cancellation`, `errors`,
-`branding`, `registry`, `config` and `consent` implemented. `router` (Phase 5)
-is the one piece still missing.
+**Status:** complete. `models`, `protocols`, `atomic`, `cancellation`,
+`errors`, `branding`, `registry`, `config`, `consent` and `router`.
 
 The domain, and nothing else. Every layer speaks the types defined here, which
 is why they cannot depend on any of those layers.
@@ -158,6 +157,7 @@ is why they cannot depend on any of those layers.
 | Cancellation | a framework-independent stop signal |
 | Protocols | `EngineStrategy`, `Validator` |
 | Registry | lazy tool discovery |
+| Router | engine resolution, consent, timing, the traceback boundary |
 | Atomic writes | the only module permitted to write to a destination |
 
 **May import** — the standard library. That is the whole list.

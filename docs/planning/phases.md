@@ -213,10 +213,32 @@ everything available"). Cosmetic; fold into Phase 5 or the CLI work.
 
 **Goal** The single orchestration path both the CLI and the server call.
 
-**Status** `not started` — **next**. **Depends on** Phases 2, 3, 4, all complete.
+**Status** `complete` — 2026-08-16. **Completes Core.**
 
-It is now the only Core module missing, and both callers already exist: the CLI
-and `server/execution.py`, whose `start()` is stubbed waiting for exactly this.
+**Delivered** `core/router.py` — `EngineRouter` and `Routing`. Both callers
+already existed: the CLI, and `server/execution.py`, whose `start()` is stubbed
+waiting for exactly this.
+
+**Two small additions it required**
+- `Config.default_engine` (settable as top-level `engine = "..."` or
+  `DOCMAX_ENGINE`). Without it, precedence rung 3 — "global default" — did not
+  exist. `Config.engine_for()` consequently returns `Engine` rather than
+  `Engine | None`, so the fallback is not each caller's to remember.
+- `protocols.NULL_PROGRESS`, mirroring `NEVER_CANCELLED`, so `run()` can require
+  both arguments while costing an indifferent caller nothing.
+
+**Definition of done**
+- [x] resolution follows the documented ladder, and every rung is tested
+- [x] `offline` beats an explicit `--engine cloud`, and is checked before consent
+      so a policy never surfaces as a prompt
+- [x] no route to the cloud bypasses the consent gate — including the automatic
+      fallback, which is the branch that would otherwise upload quietly
+- [x] progress and cancellation reach the strategy; the null constants are
+      substituted when a caller has neither
+- [x] a typed error propagates unchanged; anything else becomes `InternalError`
+      with the original kept as `__cause__`; `KeyboardInterrupt` is not swallowed
+- [x] 39 router tests, all against fakes — a router test needing pypdf would be
+      evidence of a design failure
 
 **Why it is the linchpin** Everything cross-cutting lives here so that no tool
 and no interface implements it twice: engine resolution, consent, `--dry-run`,

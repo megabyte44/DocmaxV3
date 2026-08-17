@@ -28,6 +28,14 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **The engine router** — the single path from "run this tool" to "here is the
+  result", which every interface calls and nothing else. It owns engine
+  resolution, the consent gate, cancellation and progress plumbing, timing, dry
+  runs, and the boundary where an untyped exception becomes an `InternalError`
+  rather than a traceback. `offline` beats an explicit `--engine cloud` and is
+  checked before consent, so a policy never surfaces as a prompt; and every
+  route to the cloud — including the automatic fallback when a local dependency
+  is missing — passes one consent checkpoint.
 - **Configuration and consent** — one precedence chain (defaults → file →
   environment → runtime override), read in exactly one place, with validation at
   load rather than at use: unknown keys are refused rather than silently

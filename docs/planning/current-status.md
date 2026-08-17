@@ -20,7 +20,8 @@ published as `DocmaxV3` 3.0.0a7.**
 | 2 — Core contracts | complete | `models`, `protocols`, `atomic`, `cancellation` |
 | 3 — Configuration | complete | `config`, `consent` |
 | 4 — Tool registry | **complete** | arrived via `main`; `registry.py` is live |
-| 5 — Engine router | not started | **next** — the last missing piece of Core |
+| 5 — Engine router | **complete** | `core/router.py`; Core is now finished |
+| 6 — `merge` as reference tool | not started | **next** — completes M1 |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -39,7 +40,7 @@ noticed. [ADR 0009](../adr/0009-main-is-the-base.md) records this.
 | `config.py` | done — precedence chain, validation, file locations |
 | `consent.py` | done — `ConsentStore`, scoped to endpoint + terms version |
 | `registry.py` | done — lazy discovery, entry points, `ToolSpec`/`Param` |
-| `router.py` | **missing** — Phase 5, the one remaining Core module |
+| `router.py` | done — resolution, consent gate, timing, error boundary |
 
 Beyond Core: `cloud_client/` is implemented, `server/` is implemented apart
 from its tool-execution bridge, and `tools/merge` and `tools/ocr` exist as
@@ -58,11 +59,11 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **205 passed, 3 skipped** |
+| `pytest -m "not golden and not needs_binary"` | **377 passed, 2 skipped** |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 54 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 31 source files |
-| `lint-imports` | **passed** — 3 contracts kept, 0 broken |
+| `ruff format --check .` | **passed** — 89 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 64 source files |
+| `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
 The three skips are intentional: two are the self-exemptions inside the hygiene
 suite (`branding.py` may contain brand literals; `atomic.py` may write), and the

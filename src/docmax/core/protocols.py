@@ -142,4 +142,12 @@ class EngineStrategy(Protocol):
         ...
 
 
-__all__ = ["EngineStrategy", "NullProgress", "ProgressSink", "Validator"]
+#: The shared do-nothing sink, mirroring ``NEVER_CANCELLED`` in
+#: ``core.cancellation``. Both exist so a caller with nothing to report and
+#: nothing to cancel can still satisfy a required argument, which is what lets
+#: those arguments *be* required — and a shared constant means a batch runner
+#: does not construct one sink per document.
+NULL_PROGRESS: ProgressSink = NullProgress()
+
+
+__all__ = ["NULL_PROGRESS", "EngineStrategy", "NullProgress", "ProgressSink", "Validator"]

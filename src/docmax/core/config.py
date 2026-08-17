@@ -55,6 +55,8 @@ CONSENT_FILENAME: Final = "consent.json"
 ENV_OFFLINE: Final = f"{ENV_PREFIX}OFFLINE"
 ENV_ENDPOINT: Final = f"{ENV_PREFIX}CLOUD_ENDPOINT"
 ENV_API_KEY: Final = f"{ENV_PREFIX}API_KEY"
+#: ``DOCMAX_ENGINE`` — the global default, below any per-tool preference.
+ENV_ENGINE: Final = f"{ENV_PREFIX}ENGINE"
 #: ``DOCMAX_TOOL_OCR_ENGINE`` — per-tool, for scripts and CI.
 ENV_TOOL_PREFIX: Final = f"{ENV_PREFIX}TOOL_"
 ENV_TOOL_SUFFIX: Final = "_ENGINE"
@@ -65,7 +67,7 @@ ENV_TOOL_SUFFIX: Final = "_ENGINE"
 _TRUE: Final = frozenset({"1", "true", "yes", "on"})
 _FALSE: Final = frozenset({"0", "false", "no", "off"})
 
-_TOP_LEVEL_KEYS: Final = frozenset({"offline", "cloud", "tools"})
+_TOP_LEVEL_KEYS: Final = frozenset({"offline", "engine", "cloud", "tools"})
 _CLOUD_KEYS: Final = frozenset({"endpoint", "api_key"})
 _TOOL_KEYS: Final = frozenset({"engine"})
 
@@ -98,15 +100,25 @@ class Config:
     offline: bool = False
     cloud_endpoint: str = DEFAULT_CLOUD_ENDPOINT
     api_key: str | None = None
-    #: Per-tool engine preference, ``{"ocr": Engine.CLOUD}``. Absent means auto.
+    #: The default when a tool has no preference of its own — the third rung of
+    #: the router's precedence ladder, below an explicit argument and below
+    #: ``[tools.<name>] engine``. ``AUTO`` means "decide from what is available".
+    default_engine: Engine = Engine.AUTO
+    #: Per-tool engine preference, ``{"ocr": Engine.CLOUD}``. Absent means the
+    #: :attr:`default_engine` applies.
     tool_engines: Mapping[str, Engine] = field(default_factory=dict)
     #: Where the file came from, or ``None`` if there was none. Carried so an
     #: error can name the file the user has to edit.
     source: Path | None = None
 
-    def engine_for(self, tool: str) -> Engine | None:
-        """The user's preference for ``tool``, or ``None`` if they have none."""
-        return self.tool_engines.get(tool)
+    def engine_for(self, tool: str) -> Engine:
+        """The configured engine for ``tool``, falling back to the global default.
+
+        Never ``None``: a tool with no preference of its own inherits
+        :attr:`default_engine`, which is itself ``AUTO`` unless configured. The
+        router resolves ``AUTO`` against what is actually available.
+        """
+        return self.tool_engines.get(tool, self.default_engine)
 
     def with_overrides(
         self,
@@ -227,6 +239,8 @@ def _from_file(path: Path) -> dict[str, Any]:
     settings: dict[str, Any] = {}
     if "offline" in document:
         settings["offline"] = _validated_bool(document["offline"], key="offline")
+    if "engine" in document:
+        settings["default_engine"] = _validated_engine(document["engine"], key="engine")
 
     cloud = document.get("cloud", {})
     if not isinstance(cloud, dict):
@@ -287,6 +301,10 @@ def _from_env(environ: Mapping[str, str]) -> dict[str, Any]:
     api_key = environ.get(ENV_API_KEY)
     if api_key:
         settings["api_key"] = api_key
+
+    default_engine = environ.get(ENV_ENGINE)
+    if default_engine:
+        settings["default_engine"] = _validated_engine(default_engine, key=ENV_ENGINE)
 
     engines: dict[str, Engine] = {}
     for name, value in environ.items():

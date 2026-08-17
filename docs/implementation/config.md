@@ -37,6 +37,7 @@ which the server will need.
 
 ```toml
 offline = false
+engine  = "auto"          # the global default, below any per-tool preference
 
 [cloud]
 endpoint = "https://api.example.com"
@@ -78,6 +79,13 @@ explicit `--engine cloud`. `with_overrides(offline=False)` cannot turn it off.
 
 Someone sets this because policy says documents do not leave the building. An
 argument that defeats it makes it decoration.
+
+### `engine_for` never returns `None`
+
+A tool with no preference of its own inherits `default_engine`, which is `AUTO`
+unless configured. The router's precedence ladder has a global-default rung
+between "this tool says" and "decide from what is available", and an `Optional`
+here would have made that rung every caller's problem to remember.
 
 ## Consent
 

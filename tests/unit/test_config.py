@@ -116,9 +116,56 @@ def test_a_trailing_slash_is_stripped_from_the_endpoint(tmp_path: Path) -> None:
     assert load(path=path, environ={}).cloud_endpoint == "https://api.example.com"
 
 
-def test_engine_for_an_unconfigured_tool_is_none(tmp_path: Path) -> None:
-    """Absent means auto — it does not mean local."""
-    assert load(path=tmp_path / "x.toml", environ={}).engine_for("merge") is None
+def test_engine_for_an_unconfigured_tool_falls_back_to_the_default(tmp_path: Path) -> None:
+    """A tool with no preference inherits the global default, which is AUTO.
+
+    `engine_for` never returns `None`: the router's precedence ladder has a
+    global-default rung between "this tool says" and "decide from what is
+    available", and an Optional here would have made that rung the caller's
+    problem to remember.
+    """
+    config = load(path=tmp_path / "x.toml", environ={})
+
+    assert config.engine_for("merge") is Engine.AUTO
+
+
+def test_a_global_default_applies_to_every_unconfigured_tool(tmp_path: Path) -> None:
+    path = write(tmp_path / "c.toml", 'engine = "local"\n')
+
+    config = load(path=path, environ={})
+
+    assert config.default_engine is Engine.LOCAL
+    assert config.engine_for("merge") is Engine.LOCAL
+
+
+def test_a_per_tool_preference_overrides_the_global_default(tmp_path: Path) -> None:
+    path = write(
+        tmp_path / "c.toml",
+        """
+        engine = "local"
+
+        [tools.ocr]
+        engine = "cloud"
+        """,
+    )
+
+    config = load(path=path, environ={})
+
+    assert config.engine_for("ocr") is Engine.CLOUD
+    assert config.engine_for("merge") is Engine.LOCAL
+
+
+def test_the_global_default_is_settable_from_the_environment(tmp_path: Path) -> None:
+    config = load(path=tmp_path / "x.toml", environ={"DOCMAX_ENGINE": "cloud"})
+
+    assert config.default_engine is Engine.CLOUD
+
+
+def test_an_unknown_global_default_engine_is_refused(tmp_path: Path) -> None:
+    path = write(tmp_path / "c.toml", 'engine = "magic"\n')
+
+    with pytest.raises(InvalidParameterError):
+        load(path=path, environ={})
 
 
 # ---------------------------------------------------------------------------

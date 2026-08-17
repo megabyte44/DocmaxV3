@@ -21,9 +21,10 @@ share cannot be owned by one of them.
 | `protocols.py` | `ProgressSink`, `EngineStrategy`, `Validator`, `NullProgress`. |
 | `atomic.py` | The only module permitted to write to a destination. |
 | `cancellation.py` | `CancellationToken`, `NEVER_CANCELLED`. |
+| `registry.py` | Lazy tool discovery — `ToolSpec`, `Param`, entry points. |
+| `router.py` | Engine resolution, the consent gate, timing, the error boundary. |
 
-Still to come: `registry.py` (Phase 4), `config.py` (Phase 3), `router.py`
-(Phase 5).
+**Core is complete.** Every module above is implemented and tested.
 
 ## What Core does not know
 
@@ -151,6 +152,58 @@ Details that exist because of a specific failure:
   deleting it, so a failure mid-swap leaves the old tree recoverable.
 - A validator that raises something other than `OutputValidationError` is wrapped
   rather than propagated, so callers can rely on the documented failure type.
+
+## The router
+
+`EngineRouter` is the single path from "run this tool" to "here is the result".
+Every interface calls it and nothing else, which is what stops each of them
+growing its own orchestration.
+
+It owns exactly the things that would otherwise be implemented once per tool or
+once per interface: engine resolution, the consent gate, cancellation and
+progress plumbing, timing, dry runs, and the boundary where an untyped exception
+becomes an `InternalError` rather than a traceback in someone's terminal.
+
+It owns nothing about documents. If this module ever imports `pypdf`, the design
+has failed.
+
+### Resolution
+
+The ladder, highest first — an explicit argument, then `[tools.<name>] engine`,
+then the global `engine`, then `auto`:
+
+```
+resolve(tool, requested=None)
+    ↓  requested ?? config.engine_for(tool)      # config falls back to default_engine
+    ↓  AUTO → local if available, else cloud
+    ↓  cloud → offline? → consent? → allowed
+```
+
+Two rules sit above the ladder:
+
+**`offline` beats everything**, including an explicit `--engine cloud`. It is
+checked before consent, so a policy decision never surfaces to the user as a
+question they could answer.
+
+**Every route to the cloud passes the consent gate** — the explicit one and the
+automatic fallback alike. The fallback is the branch that matters: it is where a
+document would otherwise be uploaded because a local dependency happened to be
+missing. A `None` consent store reads as *nothing consented*, so a caller who
+forgot to supply one cannot thereby gain permission.
+
+`Routing` carries the engine *and the reason*. The reason is what `--dry-run`
+prints and what makes `NoEngineAvailableError` name both halves of the failure
+rather than asserting that nothing worked.
+
+### What the router guarantees to strategies
+
+- `progress` and `cancellation` are always real objects — `NULL_PROGRESS` and
+  `NEVER_CANCELLED` are substituted — so no engine needs a `None` check.
+- `progress.finish()` runs in a `finally`, so a failure cannot leave a live
+  progress region open.
+- Cancellation is checked *before* resolution, so a cancelled batch stops
+  without even loading the next tool's strategy module.
+- `duration_ms` is filled from wall-clock time unless the strategy timed itself.
 
 ## Extension points
 
