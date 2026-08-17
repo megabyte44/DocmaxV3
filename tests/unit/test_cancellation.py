@@ -26,6 +26,13 @@ GENEROUS = 30.0
 #: Short enough to expire during a test, long enough not to expire before one.
 BRIEF = 0.05
 
+#: Two independent `time.monotonic()` reads, one baked into a deadline at
+#: construction and one taken later to check it, can round such that the
+#: "later" one comes out a float ULP below the deadline it should be under —
+#: not a logic bug, just floating-point addition not being perfectly
+#: associative with subtraction.
+CLOCK_EPSILON = 1e-6
+
 
 def wait_past(seconds: float) -> None:
     time.sleep(seconds * 4)
@@ -219,7 +226,7 @@ def test_a_child_cannot_outlive_its_parents_deadline() -> None:
 
     remaining = child.remaining_seconds()
     assert remaining is not None
-    assert remaining <= BRIEF
+    assert remaining <= BRIEF + CLOCK_EPSILON
 
     wait_past(BRIEF)
     assert child.is_cancelled
