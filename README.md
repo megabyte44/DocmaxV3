@@ -5,7 +5,7 @@ convert, redact — locally, privately, with no server to run and no browser tab
 to open.
 
 ```bash
-pip install docmax
+pip install DocmaxV3
 docmax merge a.pdf b.pdf -o combined.pdf
 ```
 
@@ -26,7 +26,7 @@ DocMax assumes a terminal instead.
 
 |  | DocMax | Self-hosted web tools |
 |---|---|---|
-| Install | `pip install docmax` | Docker + a container |
+| Install | `pip install DocmaxV3` | Docker + a container |
 | Interface | CLI and TUI | browser |
 | Over SSH | works | needs port forwarding |
 | Scripting | argv | HTTP against a running server |
@@ -76,9 +76,9 @@ Windows — not by good intentions. See
 ## Install
 
 ```bash
-pip install docmax                # the shell and the cloud client
-pip install "docmax[ocr]"         # local OCR
-pip install "docmax[all]"         # everything
+pip install DocmaxV3              # the shell and the cloud client
+pip install "DocmaxV3[ocr]"       # local OCR
+pip install "DocmaxV3[all]"       # everything
 ```
 
 The base install is deliberately small. Heavy dependencies arrive only when you

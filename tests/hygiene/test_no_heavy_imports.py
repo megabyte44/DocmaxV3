@@ -1,6 +1,6 @@
 """Importing the package must not drag in heavy dependencies.
 
-Non-negotiable #3: ``pip install docmax`` gets you the shell and the cloud
+Non-negotiable #3: ``pip install DocmaxV3`` gets you the shell and the cloud
 client. OpenCV, pandas, Pillow, and the Tesseract bindings arrive only when a
 user first invokes a local engine that genuinely needs them.
 

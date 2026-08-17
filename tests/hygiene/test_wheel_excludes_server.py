@@ -1,6 +1,6 @@
 """The wheel a user installs does not carry the server.
 
-``pip install docmax`` should get someone a terminal tool. The Cloud Engine's
+``pip install DocmaxV3`` should get someone a terminal tool. The Cloud Engine's
 server half is deployed from a checkout, inside an image that also carries
 Ghostscript, Tesseract, and Pandoc — none of which pip can install — so shipping
 its source to every user buys nobody anything and lands a web server's worth of

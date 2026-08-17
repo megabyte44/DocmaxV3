@@ -27,8 +27,8 @@ layers =
 ;
 ; The server sits above tools because it is an interface, exactly like the CLI:
 ; it drives the same registry and the same engines over HTTP instead of argv.
-; Nothing below it may import it, which is what keeps `pip install docmax` free
-; of a web framework.
+; Nothing below it may import it, which is what keeps `pip install DocmaxV3`
+; free of a web framework.
 ;
 ; cli and server appear on separate lines only because a layers contract is a
 ; total order and has to put one somewhere. They are peers, and the
@@ -66,7 +66,7 @@ modules =
 ; express "same level, mutually forbidden" on its own; this states it directly.
 ;
 ; The direction that matters is cli -> server: without this, `import docmax.cli`
-; could pull in FastAPI, and `pip install docmax` would owe a user a web
+; could pull in FastAPI, and `pip install DocmaxV3` would owe a user a web
 ; framework to run `docmax merge`. docmax.tui joins this contract in M7.
 
 [importlinter:contract:core-is-standalone]

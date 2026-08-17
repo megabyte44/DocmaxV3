@@ -72,7 +72,7 @@ tui = [
 # itself: its code is excluded from the wheel (see packages.find below) and is
 # run from a checkout.
 server = [
-    "docmax[all]",
+    "DocmaxV3[all]",
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
@@ -80,8 +80,13 @@ server = [
 # v2 shipped a `full` extra that silently omitted opencv, which broke the entire
 # OCR path for anyone who installed it. Self-referencing extras make that class
 # of mistake impossible — there is only one list.
+#
+# Must match [project].name exactly: "docmax" is already taken on PyPI by the
+# v2 package under this same author, so "docmax[...]" here would silently
+# resolve to that external package instead of self-referencing, shadowing the
+# local editable install with v2's incompatible module layout.
 all = [
-    "docmax[ocr,tables,images,tui]",
+    "DocmaxV3[ocr,tables,images,tui]",
 ]
 dev = [
     "pytest>=8.2.0",
