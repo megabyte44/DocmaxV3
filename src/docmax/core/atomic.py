@@ -134,7 +134,7 @@ def _validate(produced: Path, validators: Sequence[Validator], destination: Path
 def _commit(staged: Path, destination: Path) -> None:
     """Swap a staged *file* into place."""
     try:
-        os.replace(staged, destination)
+        staged.replace(destination)
     except OSError as exc:
         raise _fail_for_oserror(exc, destination) from exc
 
@@ -154,12 +154,12 @@ def _commit_tree(staged: Path, destination: Path) -> None:
         if destination.exists():
             previous = destination.with_name(f"{_STAGE_PREFIX}{destination.name}.previous")
             _discard(previous)
-            os.replace(destination, previous)
-        os.replace(staged, destination)
+            destination.replace(previous)
+        staged.replace(destination)
     except OSError as exc:
         if previous is not None and not destination.exists():
             with suppress(OSError):
-                os.replace(previous, destination)  # put it back
+                previous.replace(destination)  # put it back
         raise _fail_for_oserror(exc, destination) from exc
 
     if previous is not None:

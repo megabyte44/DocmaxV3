@@ -43,7 +43,7 @@ def staged_files(directory: Path) -> list[str]:
     return sorted(path.name for path in directory.glob(STAGED_GLOB))
 
 
-class Boom(Exception):
+class BoomError(Exception):
     """Raised inside a context manager to simulate a mid-operation failure."""
 
 
@@ -62,7 +62,7 @@ def test_atomic_write_delivers_the_bytes(workspace: Path) -> None:
     assert not staged_files(workspace)
 
 
-@pytest.mark.parametrize("failure", [Boom, KeyboardInterrupt])
+@pytest.mark.parametrize("failure", [BoomError, KeyboardInterrupt])
 def test_a_crash_mid_write_leaves_the_previous_file(
     workspace: Path, failure: type[BaseException]
 ) -> None:
@@ -76,7 +76,9 @@ def test_a_crash_mid_write_leaves_the_previous_file(
     destination = workspace / "out.pdf"
     destination.write_bytes(b"the original")
 
-    with pytest.raises(failure), atomic_write(target(destination)) as handle:
+    # pytest.raises must wrap the whole block so atomic_write's __exit__ sees
+    # the exception and rolls back, not just the raise itself.
+    with pytest.raises(failure), atomic_write(target(destination)) as handle:  # noqa: PT012
         handle.write(b"a partial write that must never land")
         raise failure
 
@@ -87,9 +89,9 @@ def test_a_crash_mid_write_leaves_the_previous_file(
 def test_a_crash_before_any_output_creates_nothing(workspace: Path) -> None:
     destination = workspace / "absent.pdf"
 
-    with pytest.raises(Boom), atomic_write(target(destination)) as handle:
+    with pytest.raises(BoomError), atomic_write(target(destination)) as handle:  # noqa: PT012
         handle.write(b"x")
-        raise Boom
+        raise BoomError
 
     assert not destination.exists()
     assert not staged_files(workspace)
@@ -108,9 +110,10 @@ def test_a_failing_validator_prevents_delivery(workspace: Path) -> None:
     def reject(produced: Path) -> None:
         raise OutputValidationError("wrong page count")
 
-    with pytest.raises(OutputValidationError), atomic_write(
-        target(destination), validators=(reject,)
-    ) as handle:
+    with (
+        pytest.raises(OutputValidationError),
+        atomic_write(target(destination), validators=(reject,)) as handle,
+    ):
         handle.write(b"plausible but wrong")
 
     assert destination.read_bytes() == b"the original"
@@ -139,9 +142,10 @@ def test_an_unexpected_validator_error_becomes_a_typed_one(workspace: Path) -> N
     def buggy(produced: Path) -> None:
         raise ValueError("the validator itself is broken")
 
-    with pytest.raises(OutputValidationError), atomic_write(
-        target(destination), validators=(buggy,)
-    ) as handle:
+    with (
+        pytest.raises(OutputValidationError),
+        atomic_write(target(destination), validators=(buggy,)) as handle,
+    ):
         handle.write(b"x")
 
     assert not destination.exists()
@@ -242,9 +246,9 @@ def test_cancelling_a_multi_file_run_keeps_the_old_tree(workspace: Path) -> None
     destination.mkdir()
     (destination / "complete.png").write_bytes(b"from a finished run")
 
-    with pytest.raises(Boom), atomic_dir(target(destination)) as staged:
+    with pytest.raises(BoomError), atomic_dir(target(destination)) as staged:  # noqa: PT012
         (staged / "partial.png").write_bytes(b"page 40 of 1000")
-        raise Boom
+        raise BoomError
 
     assert [path.name for path in destination.iterdir()] == ["complete.png"]
     assert not staged_files(workspace)
@@ -254,10 +258,10 @@ def test_a_cancelled_nested_tree_is_cleaned_up(workspace: Path) -> None:
     """Cleanup recurses. ``rmtree`` is unavailable here — the write test bans it."""
     destination = workspace / "output"
 
-    with pytest.raises(Boom), atomic_dir(target(destination)) as staged:
+    with pytest.raises(BoomError), atomic_dir(target(destination)) as staged:  # noqa: PT012
         (staged / "sub" / "deeper").mkdir(parents=True)
         (staged / "sub" / "deeper" / "leaf.txt").write_text("x", encoding="utf-8")
-        raise Boom
+        raise BoomError
 
     assert not destination.exists()
     assert not staged_files(workspace)

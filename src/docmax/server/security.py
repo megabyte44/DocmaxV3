@@ -29,7 +29,7 @@ def require_api_key(request: Request) -> str:
     maps straight back to ``CloudAuthError`` — so the user sees the same message
     they would see if the local config were wrong.
     """
-    header = request.headers.get("authorization", "")
+    header: str = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
 
     if scheme.lower() != "bearer" or not token.strip():

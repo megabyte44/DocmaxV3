@@ -68,7 +68,9 @@ def test_asking_for_an_unsupported_engine_is_refused() -> None:
 def test_every_spec_is_renderable() -> None:
     """Whatever a UI needs to offer a tool, every spec must actually carry."""
     for spec in iter_tools():
-        assert spec.name and spec.summary and spec.category
+        assert spec.name
+        assert spec.summary
+        assert spec.category
         assert spec.supported_engines, f"{spec.name} supports no engine at all"
         assert spec.module.endswith(spec.name.replace("-", "_"))
         for param in spec.params:

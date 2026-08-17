@@ -22,11 +22,11 @@ if TYPE_CHECKING:
 def is_readable_pdf(produced: Path) -> None:
     """The output must open, and must have at least one page."""
     from pypdf import PdfReader
-    from pypdf.errors import PdfError
+    from pypdf.errors import PyPdfError
 
     try:
         pages = len(PdfReader(str(produced)).pages)
-    except (PdfError, OSError, ValueError) as exc:
+    except (PyPdfError, OSError, ValueError) as exc:
         raise OutputValidationError(
             f"The merged file could not be reopened as a PDF: {exc}",
             context={"path": str(produced)},
