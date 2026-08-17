@@ -111,7 +111,16 @@ jobs:
         run: docmax doctor
 
       - name: golden tests
-        run: pytest -m "golden or needs_binary" -ra
+        # No golden fixture corpus exists yet at this milestone, so pytest's
+        # exit 5 ("no tests collected") is expected, not a failure — the day
+        # golden tests land, any *other* exit code still fails the job.
+        shell: bash
+        run: |
+          pytest -m "golden or needs_binary" -ra
+          status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 5 ]; then
+            exit "$status"
+          fi
 
   # --------------------------------------------------------------------------
   # The open-core boundary. The freely-licensed half must never quietly grow a

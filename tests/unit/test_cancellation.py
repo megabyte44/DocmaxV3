@@ -156,7 +156,12 @@ def test_a_lapsed_deadline_cancels() -> None:
     wait_past(BRIEF)
 
     assert token.is_cancelled
-    assert token.remaining_seconds() == 0.0, "a timeout argument cannot take a negative"
+    # mypy narrows `is_cancelled` (a read-only property) as unchanging since the
+    # earlier `assert not token.is_cancelled`, not accounting for wait_past()
+    # actually lapsing the deadline in between — a false positive.
+    assert token.remaining_seconds() == 0.0, (  # type: ignore[unreachable]
+        "a timeout argument cannot take a negative"
+    )
 
 
 def test_observing_a_lapsed_deadline_fires_callbacks() -> None:
@@ -247,7 +252,7 @@ def test_the_shared_token_does_not_accumulate_callbacks() -> None:
     for _ in range(1000):
         NEVER_CANCELLED.on_cancel(lambda: None)
 
-    assert NEVER_CANCELLED._callbacks == []  # noqa: SLF001 — the leak is the point
+    assert NEVER_CANCELLED._callbacks == []
 
 
 def test_a_child_of_the_shared_token_is_a_normal_token() -> None:

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from docmax.core.errors import OutputValidationError
-
 if TYPE_CHECKING:
     from pathlib import Path
 

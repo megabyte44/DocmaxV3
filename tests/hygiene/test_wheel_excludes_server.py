@@ -52,13 +52,16 @@ def test_shipped_code_never_imports_the_server(source: Path) -> None:
     offences: list[str] = []
     for node in ast.walk(tree):
         imported: list[str] = []
+        line = 0
         if isinstance(node, ast.Import):
             imported = [alias.name for alias in node.names]
+            line = node.lineno
         elif isinstance(node, ast.ImportFrom) and node.module is not None and node.level == 0:
             imported = [node.module]
+            line = node.lineno
 
         offences.extend(
-            f"{relative(source)}:{node.lineno}: imports {name}"
+            f"{relative(source)}:{line}: imports {name}"
             for name in imported
             if name == EXCLUDED_PACKAGE or name.startswith(f"{EXCLUDED_PACKAGE}.")
         )

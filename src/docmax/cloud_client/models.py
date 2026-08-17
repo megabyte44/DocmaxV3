@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from docmax.core.errors import CloudProtocolError
+
 # Re-exported. The status vocabulary is shared with the server, so it lives in
 # core and neither half of the contract owns it.
 from docmax.core.models import JobStatus

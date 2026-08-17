@@ -1,4 +1,4 @@
-name: Release
+name: CD
 
 # Publishing is gated on a green CI run. v2 published on release with no test
 # job at all — the only thing standing between a typo and PyPI was a human.
