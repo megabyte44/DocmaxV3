@@ -280,8 +280,9 @@ observability decisions are **not** settled — see
 not after.
 
 Each ships with its enforcement in the same change: `independence` contract,
-`fastapi`/`mcp` added to the forbidden list, web packages added to
-`HEAVY_MODULES`, and a wheel exclusion. See
+and a wheel exclusion. (`fastapi`/`mcp` in the forbidden list and the web
+packages in `HEAVY_MODULES` landed early, in Phase 3's hardening pass — an
+external-package rule needs no layer behind it.) See
 [dependencies.md](../architecture/dependencies.md#not-yet-enforced).
 
 ---

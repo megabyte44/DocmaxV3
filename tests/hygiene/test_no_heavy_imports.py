@@ -22,10 +22,25 @@ import textwrap
 import pytest
 
 #: Modules that must not appear after a bare ``import docmax``.
-#: ``pypdf`` is included deliberately: it is a base dependency, but it belongs
-#: inside tool implementations, which the registry loads lazily. Its presence
-#: here would mean the registry is eagerly importing tool code.
+#:
+#: Three kinds of entry, for three different reasons:
+#:
+#: * **Heavy optional dependencies** (OpenCV, pandas, Pillow…) — the ones that
+#:   make an install slow and a wheel large.
+#: * **Base dependencies that still belong lower down.** ``pypdf``, ``httpx``
+#:   and ``typer`` all ship with the base install, but importing them from a
+#:   bare ``import docmax`` would mean the registry is eagerly loading tool
+#:   code, or that core has reached for the client or the CLI.
+#: * **Interface frameworks that are not installed yet** — ``fastapi``,
+#:   ``starlette``, ``uvicorn``, ``mcp``. Listing them costs nothing now and
+#:   means the guard already exists on the day those layers land, rather than
+#:   being something to remember. A module that is absent simply never appears
+#:   in ``sys.modules``, so the check is a no-op until it is not.
+#:
+#: Nothing here is imported by the test itself, so none of it needs to be
+#: installed for the suite to run.
 HEAVY_MODULES = (
+    # Document processing
     "cv2",
     "numpy",
     "pandas",
@@ -35,17 +50,43 @@ HEAVY_MODULES = (
     "pdfplumber",
     "img2pdf",
     "openpyxl",
-    "textual",
     "pypdf",
+    # Interface frameworks
+    "textual",
     "rich",
     "typer",
+    "fastapi",
+    "starlette",
+    "uvicorn",
+    "mcp",
+    # Transport and cloud SDKs
     "httpx",
+    "boto3",
+    "botocore",
+    "google.cloud",
+    "azure",
+)
+
+#: Entry points a user or a library actually takes, each of which must stay
+#: cheap. ``docmax.core`` is listed separately from ``docmax`` because they can
+#: diverge: a heavy import added to a core submodule would not show up in a bare
+#: package import if the package does not pull that submodule in.
+LIGHTWEIGHT_IMPORTS = (
+    "docmax",
+    "docmax.core",
+    "docmax.core.models",
+    "docmax.core.protocols",
+    "docmax.core.errors",
+    "docmax.core.atomic",
+    "docmax.core.cancellation",
+    "docmax.core.config",
+    "docmax.core.consent",
 )
 
 _PROBE = textwrap.dedent(
     """
     import sys
-    import docmax
+    import {module}
 
     heavy = {heavy!r}
     found = sorted(m for m in heavy if m in sys.modules)
@@ -66,11 +107,19 @@ def _probe(snippet: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_bare_import_pulls_in_nothing_heavy() -> None:
-    result = _probe(_PROBE.format(heavy=HEAVY_MODULES))
+@pytest.mark.parametrize("module", LIGHTWEIGHT_IMPORTS)
+def test_import_pulls_in_nothing_heavy(module: str) -> None:
+    """Each entry point stays cheap, checked one at a time.
+
+    Per-module rather than one combined probe, because the failure message is
+    the point: "importing docmax.core.consent pulled in httpx" names the module
+    to fix, where a single aggregate check would only say that something,
+    somewhere, got heavier.
+    """
+    result = _probe(_PROBE.format(module=module, heavy=HEAVY_MODULES))
 
     assert result.returncode == 0, (
-        "`import docmax` pulled in heavy dependencies: "
+        f"`import {module}` pulled in heavy dependencies: "
         f"{result.stdout.strip()}\n"
         "Move these imports inside the functions that need them. "
         "The base install must stay light — see docs/adr/0001 and non-negotiable #3.\n"
@@ -95,6 +144,6 @@ def test_building_the_registry_pulls_in_nothing_heavy() -> None:
     """
     result = _probe(
         "from docmax.core.registry import build_registry; build_registry()\n"
-        + _PROBE.format(heavy=HEAVY_MODULES)
+        + _PROBE.format(module="docmax", heavy=HEAVY_MODULES)
     )
     assert result.returncode == 0, result.stdout

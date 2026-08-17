@@ -50,7 +50,7 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **197 passed, 3 skipped** |
+| `pytest -m "not golden and not needs_binary"` | **205 passed, 3 skipped** |
 | `ruff check .` | **passed** |
 | `ruff format --check .` | **passed** — 54 files already formatted |
 | `mypy` (strict) | **passed** — no issues in 31 source files |
@@ -115,9 +115,7 @@ layer it governs, per
 
 | Gap | Lands with |
 |---|---|
-| `core` may import `fastapi` / `mcp` — not in the forbidden list | `server` / `mcp` |
 | No `independence` contract between interfaces | the second interface |
-| `HEAVY_MODULES` omits web-framework packages | `server` |
 | `docmax.server` has no wheel exclusion | `server` |
 | No observability boundary | Phase 8 |
 

@@ -123,7 +123,12 @@ and never in `all`.
 
 ## Enforcement
 
-**None of this is enforced yet, because `src/docmax/server/` does not exist.**
+Two of the checks originally listed here — `fastapi` in `core-is-ui-free`, and
+the web frameworks in `HEAVY_MODULES` — **have since landed ahead of the layer**,
+because a rule naming an external package does not need that package to exist.
+The remainder name `docmax.server` itself and still do not.
+
+**The rest is not enforced yet, because `src/docmax/server/` does not exist.**
 That is deliberate: the checks land in the *same change* as the layer, not as a
 follow-up. Until then these are recorded in
 [dependencies.md](../architecture/dependencies.md#not-yet-enforced) and
@@ -135,8 +140,6 @@ When the server lands (Phase 8), it must land with:
 |---|---|
 | `independence` contract between `docmax.cli` and `docmax.server` | interfaces are peers; the CLI never pulls in a web framework |
 | `forbidden` contract: `docmax.server` may not import `docmax.cloud_client` | the two halves of the contract stay independent implementations |
-| `fastapi` added to `core-is-ui-free` | core stays framework-free |
-| web packages added to `HEAVY_MODULES` | `import docmax` stays cheap |
 | `exclude = ["docmax.server*"]` plus a hygiene test | the server does not ship to users |
 | `server` added to `LIBRARY_PACKAGES` in `tests/paths.py` | a request handler that exits cannot take every in-flight request with it |
 

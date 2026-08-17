@@ -27,20 +27,20 @@ modification — each of them is a *driver* of core, not a layer core knows abou
 
 ## Currently enforced
 
-Four contracts run in CI via `lint-imports`, in the `lint` job. A violation
+Three contracts run in CI via `lint-imports`, in the `lint` job. A violation
 fails the pull request.
 
 | Contract | Rule |
 |---|---|
 | `layers` | `cli` → `tools` → `cloud_client` → `core`, downward only |
-| `core-is-ui-free` | `core` may not import `rich`, `textual`, `typer` |
+| `core-is-ui-free` | `core` may not import `rich`, `textual`, `typer`, `fastapi`, `mcp` |
 | `core-is-standalone` | `core` may not import `docmax.tools`, `docmax.cli`, `docmax.cloud_client` |
 
 Plus two AST-based hygiene tests that enforce related boundaries:
 
 | Test | Rule |
 |---|---|
-| `test_no_heavy_imports.py` | `import docmax` pulls in no heavy dependency (runs in a subprocess) |
+| `test_no_heavy_imports.py` | `docmax` and each `docmax.core` submodule pull in no heavy dependency, no interface framework and no cloud SDK (runs in a subprocess, one probe per module) |
 | `test_no_sys_exit.py` | library packages never terminate the process |
 
 ## Not yet enforced
@@ -51,15 +51,23 @@ are tracked in [the backlog](../planning/backlog.md#required).
 
 | Rule | Blocked on |
 |---|---|
-| `core` may not import `fastapi` or `mcp` | those layers do not exist yet |
 | `cli` and `server` may not import each other | `docmax.server` does not exist yet |
-| `import docmax` pulls in no web framework | as above |
 | `docmax.server` is excluded from the user wheel | as above |
 | `server` may not import `cloud_client` | as above |
 
 Adding the layer and adding its contract belong in the **same** change. A layer
 that lands without its contract is a rule that exists only in this document,
 which is the state this section exists to prevent.
+
+**Two rules moved out of this table**, because the distinction turned out to
+matter: a contract naming an *external* package can be written before that
+package exists, since an absent module simply never appears as an import. So
+`core` is already forbidden from importing `fastapi` and `mcp`, and
+`HEAVY_MODULES` already lists the web frameworks and cloud SDKs — both enforced
+today, on a machine where none of them is installed.
+
+Only contracts naming an *internal* module — the three above, all of which
+reference `docmax.server` — genuinely have to wait for the layer.
 
 That `docmax.server` belongs in this package at all — rather than in a separate
 repository — is settled by

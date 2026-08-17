@@ -32,9 +32,18 @@ forbidden_modules =
     rich
     textual
     typer
+    fastapi
+    mcp
 ; Progress crosses this boundary as the ProgressSink protocol, not as a rich
 ; Progress object. That is what lets the same core drive a CLI, a TUI, a batch
 ; runner, and the M10 MCP server without modification.
+;
+; fastapi and mcp are listed before those layers exist, and deliberately. A
+; forbidden contract naming an *external* package costs nothing while that
+; package is absent — it simply never appears as an import — so the guard is in
+; place on the day the layer lands rather than being something to remember then.
+; (The layers and independence contracts are different: they name docmax.server,
+; an internal module, and cannot be written until it exists.)
 
 [importlinter:contract:core-is-standalone]
 name = core never imports tools or interfaces

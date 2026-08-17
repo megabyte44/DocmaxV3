@@ -23,12 +23,17 @@ belongs in the *same change* as the layer it governs, not a follow-up.
 **All of these already exist on `m1-foundations`** and are ported wholesale at
 Phase 8 rather than written — see
 [reconciliation.md](reconciliation.md#the-enforcement-config-is-the-largest-single-win).
-They cannot land sooner: import-linter fails on a contract naming a module that
-does not yet exist.
 
-- [ ] `fastapi` and `mcp` added to the `core-is-ui-free` forbidden list
+The remaining items name `docmax.server`, an internal module, so import-linter
+cannot express them until the layer exists. Rules naming *external* packages had
+no such constraint and have been enforced ahead of the layer.
+
+- [x] ~~`fastapi` and `mcp` added to the `core-is-ui-free` forbidden list~~ —
+      done, ahead of the server; neither package is installed and the contract
+      passes
+- [x] ~~web-framework packages added to `HEAVY_MODULES`~~ — done, along with the
+      cloud SDKs, and every core submodule is now probed individually
 - [ ] `independence` contract between `docmax.cli` and `docmax.server`
-- [ ] web-framework packages added to `HEAVY_MODULES`
 - [ ] `docmax.server` excluded from the wheel, with a hygiene test
 - [ ] `server` added to `LIBRARY_PACKAGES` in `tests/paths.py` — a request
       handler that exits takes every in-flight request with it
