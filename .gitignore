@@ -49,10 +49,16 @@ tests/fixtures/corpus/
 # Benchmark output. RESULTS.md is committed; raw runs are not.
 benchmarks/output/
 
-# IDE
+# IDE / agent tooling
 .vscode/
 .idea/
 *.swp
+# Claude Code state. Both settings files accumulate machine-specific data —
+# absolute Windows paths, per-session temp directories, command allowlists —
+# so neither is portable. Ignored wholesale rather than per-file, because a
+# contributor whose global git ignore covers only the `.local.` variant would
+# otherwise still commit the other.
+.claude/
 
 # OS
 .DS_Store

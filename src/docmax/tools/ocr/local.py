@@ -22,6 +22,7 @@ from docmax.core.models import Engine, ToolResult
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from docmax.core.cancellation import CancellationToken
     from docmax.core.models import DocumentRef, OutputTarget
     from docmax.core.protocols import EngineStrategy, ProgressSink
 
@@ -62,7 +63,8 @@ class OcrLocal:
         docs: Sequence[DocumentRef],
         target: OutputTarget,
         *,
-        progress: ProgressSink | None = None,
+        progress: ProgressSink,
+        cancellation: CancellationToken,
         **params: Any,
     ) -> ToolResult:
         """OCR ``docs[0]`` into ``target``. Lands in M8.

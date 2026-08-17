@@ -28,6 +28,14 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **Configuration and consent** — one precedence chain (defaults → file →
+  environment → runtime override), read in exactly one place, with validation at
+  load rather than at use: unknown keys are refused rather than silently
+  ignored, and TLS is required for any endpoint that is not localhost. `offline`
+  is one-way, so an explicit `--engine cloud` cannot defeat it. Consent to
+  upload is recorded per tool, scoped to the endpoint it was granted for, and
+  fails closed on any record it cannot read. See
+  [ADR 0008](docs/adr/0008-consent-record.md).
 - Dual-engine architecture — every tool can run locally or via a cloud endpoint
   behind one interface, chosen per tool.
 - The three working halves of the package, in skeleton: `tools/` (one
@@ -52,7 +60,26 @@ These are behaviour changes a v2 user can actually hit. See
   server, which is excluded from the wheel.
 - CI across Linux, macOS, and Windows × Python 3.11, 3.12, 3.13, plus an
   `open-core` job that runs the suite with the licence-gated half deleted.
-- Architecture documentation and ADRs 0001–0005.
+- Architecture documentation and ADRs 0001–0009, with an indexed decision log,
+  per-layer and dependency references, and a planning system that separates the
+  product roadmap from the engineering phases underneath it.
+
+### Changed
+
+- **`EngineStrategy.run()` now requires `progress` and `cancellation`.** Both
+  were previously optional or absent, which meant a tool could not be cancelled
+  by its caller at all. `NullProgress` and `NEVER_CANCELLED` exist so the
+  arguments can be required without burdening callers, and requiring them
+  removes the `if progress is not None` branch from every engine rather than
+  leaving a path that only runs in tests. This changes a contract published in
+  `3.0.0a7`; no tool implements `run()` yet, so nothing observable changed.
+
+### Architecture
+
+- [ADR 0009](docs/adr/0009-main-is-the-base.md) — `main` is the authoritative
+  base, superseding ADR 0007. That ADR recorded that `m1-foundations` would
+  never be merged; it had in fact already been merged and released, and the
+  phase line had been developing against a stale remote without noticing.
 
 ### Fixed
 

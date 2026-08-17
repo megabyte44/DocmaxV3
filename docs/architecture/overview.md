@@ -39,7 +39,7 @@ everyone else never downloads it.
 Two consequences worth stating plainly. The server is *not* a privileged path —
 it runs the same `EngineStrategy` a user would run locally, so a cloud result
 cannot quietly diverge from a local one. And the client and the server are
-independent implementations of [one document](cloud-api.md), which is the only
+independent implementations of [one document](../cloud-api.md), which is the only
 reason that document is worth writing down.
 
 `core` imports nothing from `tools`, `cli`, `cloud_client`, or `server`, and
@@ -47,7 +47,7 @@ never imports `rich`, `typer`, `textual`, or `fastapi`. Progress crosses that bo
 `ProgressSink` protocol, which is what lets one core drive a CLI, a TUI, a batch
 runner, and the M10 MCP server unchanged.
 
-The layering is enforced by [import-linter](../.importlinter) contracts checked
+The layering is enforced by [import-linter](../../.importlinter) contracts checked
 in CI, not by convention.
 
 ## The dual-engine model
@@ -58,7 +58,15 @@ Every operation is a `Tool` with up to two `EngineStrategy` implementations:
 class EngineStrategy(Protocol):
     def is_available(self) -> bool: ...
     def unavailable_reason(self) -> str | None: ...
-    def run(self, docs: Sequence[DocumentRef], target: OutputTarget, **params) -> ToolResult: ...
+    def run(
+        self,
+        docs: Sequence[DocumentRef],
+        target: OutputTarget,
+        *,
+        progress: ProgressSink,
+        cancellation: CancellationToken,
+        **params: Any,
+    ) -> ToolResult: ...
 ```
 
 `LocalStrategy` does the work here — offline, private, heavy dependencies.
@@ -73,7 +81,7 @@ A tool contributes a `ToolSpec` — name, summary, parameters, supported engines
 and the registry holds the dotted path to its package rather than its modules.
 `tools/<name>/local.py` is imported only when the router resolves that engine
 for that call, which is what makes discovery cost a directory walk instead of
-fifty OpenCV imports. See [ADR 0002](adr/0002-registry-mechanism.md).
+fifty OpenCV imports. See [ADR 0002](../adr/0002-registry-mechanism.md).
 
 `ToolResult` is engine-agnostic. The UI layer never knows or cares which one
 ran; it reads `result.engine_used` only to display a badge.
@@ -149,12 +157,12 @@ retry or suggest filing a bug.
 A user should never see a traceback for an anticipated condition. If they do,
 that is itself a bug — something escaped the hierarchy.
 
-See [`core/errors.py`](../src/docmax/core/errors.py).
+See [`core/errors.py`](../../src/docmax/core/errors.py).
 
 ## Decisions
 
-- [ADR 0001 — Python 3.11](adr/0001-python-311.md)
-- [ADR 0002 — Lazy self-registering tool registry](adr/0002-registry-mechanism.md)
-- [ADR 0003 — Atomic writes and `OutputTarget`](adr/0003-atomic-writes.md)
-- [ADR 0004 — Open-core boundary](adr/0004-open-core-boundary.md)
-- [ADR 0005 — GUI pickers over localhost](adr/0005-gui-pickers.md)
+- [ADR 0001 — Python 3.11](../adr/0001-python-311.md)
+- [ADR 0002 — Lazy self-registering tool registry](../adr/0002-registry-mechanism.md)
+- [ADR 0003 — Atomic writes and `OutputTarget`](../adr/0003-atomic-writes.md)
+- [ADR 0004 — Open-core boundary](../adr/0004-open-core-boundary.md)
+- [ADR 0005 — GUI pickers over localhost](../adr/0005-gui-pickers.md)

@@ -19,6 +19,7 @@ from docmax.core.models import Engine, ToolResult
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from docmax.core.cancellation import CancellationToken
     from docmax.core.models import DocumentRef, OutputTarget
     from docmax.core.protocols import EngineStrategy, ProgressSink
 
@@ -50,7 +51,8 @@ class OcrCloud:
         docs: Sequence[DocumentRef],
         target: OutputTarget,
         *,
-        progress: ProgressSink | None = None,
+        progress: ProgressSink,
+        cancellation: CancellationToken,
         **params: Any,
     ) -> ToolResult:
         """Upload, wait, and write the result. Lands in M6.
