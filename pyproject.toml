@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 # ============================================================================
 
 [project]
-name = "docmax"
+name = "DocmaxV3"
 version = "3.0.0a1"
 description = "Terminal-native document toolkit. Local-first, dual-engine, no server required."
 readme = "README.md"

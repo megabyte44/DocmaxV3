@@ -24,7 +24,9 @@ APP_NAME: Final = "DocMax"
 CLI_NAME: Final = "docmax"
 
 #: PyPI distribution name — the key for ``importlib.metadata.version()``.
-DIST_NAME: Final = "docmax"
+#: Decoupled from ``CLI_NAME`` because plain ``docmax`` was already taken on
+#: PyPI by the v2 package under this same author.
+DIST_NAME: Final = "DocmaxV3"
 
 #: Application directory name handed to ``platformdirs``. Resolves to
 #: ``~/.config/docmax`` on Linux, ``~/Library/Application Support/DocMax`` on
