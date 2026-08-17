@@ -10,8 +10,9 @@ SRC = REPO_ROOT / "src" / "docmax"
 #: Packages that are *library* code: importable, embeddable, and forbidden from
 #: terminating the process or writing files outside the atomic helpers.
 #: ``cli`` and ``tui`` are deliberately excluded — they are the layer that is
-#: allowed to exit and to print.
-LIBRARY_PACKAGES = ("core", "tools", "cloud_client")
+#: allowed to exit and to print. ``server`` is included: a request handler that
+#: exits the process takes every other in-flight request with it.
+LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server")
 
 
 def library_sources() -> list[Path]:

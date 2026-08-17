@@ -30,14 +30,26 @@ These are behaviour changes a v2 user can actually hit. See
 
 - Dual-engine architecture — every tool can run locally or via a cloud endpoint
   behind one interface, chosen per tool.
+- The three working halves of the package, in skeleton: `tools/` (one
+  self-registering package per operation, with `merge` and `ocr` as the
+  local-only and dual-engine references), `cloud_client/` (the wire contract,
+  idempotency, server-controlled polling, retries only where retrying helps),
+  and `server/` (the reference implementation of the same contract, which runs
+  the same engines rather than reimplementing them).
+- A lazy tool registry: discovery walks `tools/*/tool.py` and reads
+  `importlib.metadata` entry points, so adding tool #51 edits no central file
+  and listing tools imports no tool.
+- `DocumentRef`, `OutputTarget`, `ToolResult`, and the `EngineStrategy` /
+  `ProgressSink` / `Validator` protocols the layers meet at.
 - `OutputTarget`, which makes in-place overwrite unrepresentable rather than
   merely discouraged.
 - Atomic writes for every operation: temp file → validate → `os.replace()`.
 - A typed error hierarchy where every error carries a stable code and an
   actionable remedy.
-- Four structural hygiene tests, enforced in CI: no process exits in library
+- Five structural hygiene tests, enforced in CI: no process exits in library
   code, no writes outside the atomic helpers, no heavy imports at module scope,
-  no brand literals outside `branding.py`.
+  no brand literals outside `branding.py`, and no shipped module importing the
+  server, which is excluded from the wheel.
 - CI across Linux, macOS, and Windows × Python 3.11, 3.12, 3.13, plus an
   `open-core` job that runs the suite with the licence-gated half deleted.
 - Architecture documentation and ADRs 0001–0005.
