@@ -31,7 +31,7 @@ is for:
 
 `server` sits above `tools` for the same reason `cli` does: it is an interface.
 It drives the registry and the engines over HTTP instead of over argv, and
-nothing below it may import it — which is what keeps `pip install docmax` free
+nothing below it may import it — which is what keeps `pip install DocmaxV3` free
 of a web framework. It is not shipped in the wheel at all: a self-hoster runs it
 from a checkout, in an image that also carries Ghostscript and Tesseract, and
 everyone else never downloads it.

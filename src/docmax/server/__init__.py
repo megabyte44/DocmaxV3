@@ -6,7 +6,7 @@ run their own. This package is the reference implementation of that document —
 the one a self-hoster deploys, and the one the client's tests can be pointed at.
 
 It is optional in every direction. Nothing else in the package imports it, it is
-not installed by default (``pip install docmax[server]``), and the terminal tool
+not installed by default (``pip install DocmaxV3[server]``), and the terminal tool
 neither needs it nor knows it exists. A user who never touches cloud never
 touches a line of this code.
 
