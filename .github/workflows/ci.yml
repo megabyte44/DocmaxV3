@@ -114,10 +114,13 @@ jobs:
         # No golden fixture corpus exists yet at this milestone, so pytest's
         # exit 5 ("no tests collected") is expected, not a failure — the day
         # golden tests land, any *other* exit code still fails the job.
+        # `cmd || status=$?` (not a bare command, and not `if !cmd`, which
+        # collapses the real exit code to 0/1) keeps bash's default -e from
+        # aborting the step while still capturing the actual exit code.
         shell: bash
         run: |
-          pytest -m "golden or needs_binary" -ra
-          status=$?
+          status=0
+          pytest -m "golden or needs_binary" -ra || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 5 ]; then
             exit "$status"
           fi
