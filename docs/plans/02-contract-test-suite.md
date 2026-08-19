@@ -77,16 +77,16 @@ than by a filename someone chose in 2026.
 ```python
 # tests/contract/corpus.py
 CASES = {
-    "single_page":    "one page, minimal, valid",
-    "three_page":     "the ordinary case",
-    "many_page":      "500 pages — marked slow",
-    "unicode_name":   "ĥéllo wörld.pdf — Windows/macOS filename handling",
-    "spaced_name":    "'has spaces.pdf' — argv quoting",
-    "empty_file":     "0 bytes with a .pdf extension",
-    "truncated":      "valid header, body cut mid-object",
-    "not_a_pdf":      "PNG bytes named .pdf",
-    "encrypted":      "user password set",
-    "no_extension":   "valid PDF, no suffix at all",
+    "single_page": "one page, minimal, valid",
+    "three_page": "the ordinary case",
+    "many_page": "500 pages — marked slow",
+    "unicode_name": "ĥéllo wörld.pdf — Windows/macOS filename handling",
+    "spaced_name": "'has spaces.pdf' — argv quoting",
+    "empty_file": "0 bytes with a .pdf extension",
+    "truncated": "valid header, body cut mid-object",
+    "not_a_pdf": "PNG bytes named .pdf",
+    "encrypted": "user password set",
+    "no_extension": "valid PDF, no suffix at all",
 }
 ```
 
@@ -143,7 +143,7 @@ a human knows a sensible one.
 # tests/contract/samples.py
 SAMPLES: dict[str, Sample] = {
     "merge": Sample(inputs=("single_page", "three_page"), params={}),
-    "ocr":   Sample(inputs=("single_page",), params={"lang": "eng"}),
+    "ocr": Sample(inputs=("single_page",), params={"lang": "eng"}),
 }
 ```
 
@@ -167,7 +167,8 @@ Smaller than originally planned — ten tools now work — but not redundant.
 built, and every future tool passes through this state.
 
 ```python
-NOT_YET_IMPLEMENTED = frozenset({"ocr"})   # must only ever shrink
+NOT_YET_IMPLEMENTED = frozenset({"ocr"})  # must only ever shrink
+
 
 def test_unimplemented_ledger_is_accurate() -> None:
     """Fails when a listed tool starts working, forcing the list down."""

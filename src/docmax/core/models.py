@@ -91,6 +91,39 @@ class DocumentRef:
         return self.path.stat().st_size
 
 
+def _is_one_of(destination: Path, inputs: Sequence[DocumentRef]) -> bool:
+    """Is ``destination`` one of ``inputs``, as the *filesystem* understands it?
+
+    Comparing the resolved paths is not enough, and the difference is the most
+    destructive failure class in the project. ``Path.resolve()`` returns the
+    name as stored on disk on Windows, so ``-o DOC.PDF`` against an input of
+    ``doc.pdf`` normalises to one path and is caught. On macOS it does not:
+    ``resolve()`` makes the path absolute and follows symlinks, but leaves the
+    case exactly as typed — so on a case-insensitive APFS volume the two strings
+    differ while naming the same file, and a string comparison waves the write
+    through onto the input.
+
+    ``samefile`` asks the operating system instead, comparing device and inode.
+    That also covers hard links and Windows junctions, neither of which any
+    amount of path normalisation would catch.
+
+    It needs both sides to exist. Inputs always do — ``DocumentRef.from_path``
+    guarantees it — but the destination usually does not, and a destination that
+    does not exist cannot be an input, so the string comparison is exactly right
+    for that case.
+    """
+    if not destination.exists():
+        return destination in {ref.path for ref in inputs}
+
+    for ref in inputs:
+        try:
+            if destination.samefile(ref.path):
+                return True
+        except OSError:  # pragma: no cover - the input vanished mid-call
+            continue
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class OutputTarget:
     """A destination that has been checked and is safe to write.
@@ -131,7 +164,7 @@ class OutputTarget:
                 remedy="Pass an explicit output path with -o.",
             )
 
-        if destination in {ref.path for ref in inputs}:
+        if _is_one_of(destination, inputs):
             raise InPlaceOverwriteError(
                 f"The output path is also an input: {destination}",
                 context={"path": str(destination)},

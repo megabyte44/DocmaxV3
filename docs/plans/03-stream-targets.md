@@ -39,6 +39,7 @@ Two named types and one context manager. No behaviour change at M1.
 ```python
 # core/models.py
 
+
 @dataclass(frozen=True, slots=True)
 class DocumentRef:
     """A document we were asked to read.
@@ -46,6 +47,7 @@ class DocumentRef:
     `path` is None exactly when the source is a stream. Engines must not read
     `path` directly — see `materialize`.
     """
+
     path: Path | None
     stream: BinaryIO | None = None
 
@@ -62,7 +64,7 @@ class DocumentRef:
 ```python
 @dataclass(frozen=True, slots=True)
 class OutputTarget:
-    destination: Path | None      # None means stdout
+    destination: Path | None  # None means stdout
     force: bool = False
 
     @property

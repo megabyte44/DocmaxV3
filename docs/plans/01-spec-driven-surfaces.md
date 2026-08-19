@@ -97,7 +97,7 @@ touching 20 files.
 class Param:
     name: str
     description: str
-    type_: str = "str"          # str | int | float | bool | path
+    type_: str = "str"  # str | int | float | bool | path
     default: Any = None
     required: bool = False
     choices: tuple[str, ...] = ()
@@ -234,8 +234,12 @@ from "this is our bug", which is the whole point of having a stable
 
 ```python
 EXIT_BY_FAMILY = {
-    "input": 2, "output": 3, "dependency": 4,
-    "engine": 5, "cloud": 6, "internal": 70,
+    "input": 2,
+    "output": 3,
+    "dependency": 4,
+    "engine": 5,
+    "cloud": 6,
+    "internal": 70,
 }
 ```
 
