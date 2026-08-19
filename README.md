@@ -96,8 +96,8 @@ docmax doctor                     # what's installed, what's missing, what needs
 | | | |
 |---|---|---|
 | **M0** | Foundation — architecture, CI, safety mechanisms | ✅ done |
-| **M1** | Core engine + `merge` as the reference implementation | in progress |
-| **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | |
+| **M1** | Core engine + `merge` as the reference implementation | ✅ complete |
+| **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ done |
 | **M3** | `compress` + a real `setup` / `doctor` | |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | |
 | **M5** | `convert`, `to-images`, `from-images` | |

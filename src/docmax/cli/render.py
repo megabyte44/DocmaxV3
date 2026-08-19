@@ -96,4 +96,58 @@ def render_result(result: ToolResult, *, dry_run: bool = False) -> None:
     console.print(f"  [dim]{' · '.join(summary)}[/dim]")
 
 
-__all__ = ["console", "out", "render_error", "render_result"]
+def render_metadata(result: ToolResult) -> None:
+    """Print document metadata as a table.
+
+    A table rather than a line, because this *is* the result — unlike the other
+    tools, where the document is the result and the summary is a footnote.
+    """
+    from rich.table import Table
+
+    fields = result.details.get("metadata", {})
+    if not fields:
+        console.print("[dim]No metadata.[/dim]")
+        return
+
+    table = Table(title="Document metadata", title_justify="left")
+    table.add_column("Field")
+    table.add_column("Value")
+    for key in sorted(fields):
+        table.add_row(str(key).lstrip("/"), str(fields[key]))
+    out.print(table)
+
+
+def render_info(result: ToolResult) -> None:
+    """Print what `get-info` found.
+
+    Page count reads "unknown" rather than 0 for an encrypted file: the page
+    tree genuinely cannot be read without the password, and reporting 0 would
+    be a wrong answer rather than an absent one.
+    """
+    from rich.table import Table
+
+    details = result.details
+    table = Table(title=str(details.get("name", "")), title_justify="left")
+    table.add_column("Property")
+    table.add_column("Value")
+
+    pages = details.get("pages")
+    table.add_row("Pages", "unknown (encrypted)" if pages is None else str(pages))
+    table.add_row("Size", f"{details.get('size_bytes', 0):,} bytes")
+    table.add_row("Encrypted", "yes" if details.get("encrypted") else "no")
+
+    fields = details.get("metadata", {})
+    for key in sorted(fields):
+        table.add_row(str(key).lstrip("/"), str(fields[key]))
+
+    out.print(table)
+
+
+__all__ = [
+    "console",
+    "out",
+    "render_error",
+    "render_info",
+    "render_metadata",
+    "render_result",
+]

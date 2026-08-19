@@ -177,4 +177,55 @@ def execute(
             raise typer.Exit(EXIT_FAILURE) from exc
 
 
-__all__ = ["EXIT_CANCELLED", "EXIT_FAILURE", "build_router", "execute"]
+def execute_read_only(
+    tool: str,
+    source: Path,
+    *,
+    router: EngineRouter | None = None,
+    engine: Engine | None = None,
+) -> ToolResult:
+    """Run a tool that writes nothing, and render whatever happens.
+
+    ``EngineStrategy.run`` requires an ``OutputTarget`` and these tools have no
+    output, so one is built directly rather than resolved. Going through
+    ``router.target_for`` would check a destination that is never written — and
+    would refuse the whole run with ``OutputExistsError`` if a file happened to
+    sit at the derived path, which for a read-only command is a failure invented
+    out of nothing.
+
+    This is a seam in the tool contract rather than a tidy design; see
+    ``tools/get_info/local.py``. The clean fix is a ``produces_output`` flag on
+    ``ToolSpec``, which is a core change and has not been made here.
+    """
+    from docmax.core.models import DocumentRef, OutputTarget
+
+    router = router or build_router()
+    token = CancellationToken()
+
+    with _interruptible(token), ConsoleProgress(console) as progress:
+        try:
+            document = DocumentRef.from_path(source)
+            unused = OutputTarget(destination=document.path, force=True)
+            return router.run(
+                tool,
+                [document],
+                unused,
+                requested=engine,
+                progress=progress,
+                cancellation=token,
+            )
+        except CancelledError as exc:
+            console.print(f"[yellow]{exc.message}[/yellow]")
+            raise typer.Exit(EXIT_CANCELLED) from exc
+        except DocMaxError as exc:
+            render_error(exc)
+            raise typer.Exit(EXIT_FAILURE) from exc
+
+
+__all__ = [
+    "EXIT_CANCELLED",
+    "EXIT_FAILURE",
+    "build_router",
+    "execute",
+    "execute_read_only",
+]

@@ -28,6 +28,13 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **The M2 tool set** — `split`, `rotate`, `pages`, `reorder`, `metadata`,
+  `sanitize` and `get-info`, all pure pypdf and all reached through the same
+  router. `split` is the first tool to produce many outputs, so it is the first
+  real exercise of the guarantee that a cancelled multi-file run leaves no
+  partial directory. Page selections (`1-3,7`, `4-`, `-2`) are parsed in one
+  place, so the syntax a user learns for one tool is the syntax for all of them.
+  `sanitize` documents exactly what it removes and explicitly what it does not.
 - **The engine router** — the single path from "run this tool" to "here is the
   result", which every interface calls and nothing else. It owns engine
   resolution, the consent gate, cancellation and progress plumbing, timing, dry

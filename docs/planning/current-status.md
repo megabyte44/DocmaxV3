@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-16 · **Branch:** `feat/core-reconciliation` · **Base:** `15b42c4` (`origin/main`, `v3.0.0a7`)
+**Last updated:** 2026-08-17 · **Branch:** `feat/m2-pypdf-tools` · **Base:** `15b42c4` (`origin/main`, `v3.0.0a7`)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,8 +10,8 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–4 are complete. Milestone M1 is in progress, and the package is
-published as `DocmaxV3` 3.0.0a7.**
+**Phases 0–7 are complete. Milestones M1 and M2 are done; the published
+package is `DocmaxV3` 3.0.0a7, which predates them.**
 
 | Phase | | |
 |---|---|---|
@@ -21,7 +21,8 @@ published as `DocmaxV3` 3.0.0a7.**
 | 3 — Configuration | complete | `config`, `consent` |
 | 4 — Tool registry | **complete** | arrived via `main`; `registry.py` is live |
 | 5 — Engine router | **complete** | `core/router.py`; Core is now finished |
-| 6 — `merge` as reference tool | not started | **next** — completes M1 |
+| 6 — `merge` as reference tool | **complete** | M1 closed; CLI wired to the router |
+| 7 — M2 pypdf tool set | **complete** | split, rotate, pages, reorder, metadata, sanitize, get-info |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -42,13 +43,23 @@ noticed. [ADR 0009](../adr/0009-main-is-the-base.md) records this.
 | `registry.py` | done — lazy discovery, entry points, `ToolSpec`/`Param` |
 | `router.py` | done — resolution, consent gate, timing, error boundary |
 
-Beyond Core: `cloud_client/` is implemented, `server/` is implemented apart
-from its tool-execution bridge, and `tools/merge` and `tools/ocr` exist as
-reference layouts whose `run()` bodies are stubs. The CLI still has only
-`doctor`.
+### Tools
 
-`test_building_the_registry_pulls_in_nothing_heavy` is **no longer skipped** —
-the registry exists and the test passes.
+| Tool | State |
+|---|---|
+| `merge` | done — the reference implementation |
+| `split` | done — and the first real consumer of `atomic_dir` |
+| `rotate`, `pages`, `reorder`, `sanitize` | done |
+| `metadata`, `get-info` | done — read-only paths write nothing |
+| `ocr` | **skeleton** — `run()` and both validators are `NotImplementedError`, M8 |
+
+Shared between them: `tools/_pagespec.py` parses page selections once, and
+`tools/_pdf.py` opens and saves PDFs once, so eight tools cannot drift into
+eight slightly different messages for the same failure.
+
+Beyond the tools: `cloud_client/` is implemented; `server/` is implemented apart
+from its tool-execution bridge, which can now call the router. The CLI exposes
+all eight working tools plus `doctor`.
 
 ---
 
@@ -59,15 +70,14 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **377 passed, 2 skipped** |
+| `pytest -m "not golden and not needs_binary"` | **773 passed, 2 skipped** |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 89 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 64 source files |
+| `ruff format --check .` | **passed** — 125 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 100 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
-The three skips are intentional: two are the self-exemptions inside the hygiene
-suite (`branding.py` may contain brand literals; `atomic.py` may write), and the
-third is the registry import-safety test, which stays skipped until Phase 4.
+Both skips are intentional — the self-exemptions inside the hygiene suite:
+`branding.py` may contain brand literals, and `atomic.py` may write directly.
 
 Environment: Windows, CPython 3.14, `.venv` from `pip install -e ".[dev]"`.
 
@@ -135,7 +145,7 @@ checks arrived with the server, as the architecture said they must.
 | `planning/*` | current. `reconciliation.md` is superseded by ADR 0009 and deletable |
 | `cloud-api.md` | design-stage; data-handling now points at the terms constant |
 | `README.md` | current |
-| `CHANGELOG.md` | current through Phase 2 |
+| `CHANGELOG.md` | current through M2 |
 | `development/*` | **missing** — no setup, testing or contributing guide |
 | `api/*` | not needed until the HTTP layer exists |
 
@@ -209,14 +219,15 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**Phase 4 — Tool registry.** It is the first phase to *port* rather than write:
-`core/registry.py` exists on `m1-foundations`, complete and lint-clean, and
-[ADR 0007](../adr/0007-m1-foundations-reconciliation.md) says to port it rather
-than rewrite it. Re-read it against Phase 2's Core first — it was written before
-`EngineStrategy` gained required `cancellation`.
+**M3 — `compress` plus a real `setup` / `doctor`.** The first tool needing an
+external binary (Ghostscript), so it is also the first to exercise
+`atomic_path` and the `needs_binary` test marker.
 
-Its definition of done is concrete: un-skip
-`test_building_the_registry_pulls_in_nothing_heavy` and have it pass.
+**One decision is owed first**, found while building M2 and *not* acted on:
+`ToolSpec` cannot say "this tool produces no output". `get-info` and a bare
+`metadata` therefore accept an `OutputTarget` they ignore, and the CLI builds
+one directly rather than letting the router resolve a destination that would
+never be written. A `produces_output` flag on `ToolSpec` would close it, but
+that is a core and registry change and belongs in an ADR rather than a diff.
 
-**Do not start it without direction.** Each phase is scoped explicitly, and the
-next one is decided separately.
+**Do not start it without direction** — each phase is scoped explicitly.

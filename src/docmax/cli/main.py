@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 
 from docmax import __version__
+from docmax.cli import commands
 from docmax.cli.render import console, out
 from docmax.core.branding import APP_NAME, CLI_NAME, HOMEPAGE
 from docmax.core.models import Engine
@@ -118,6 +119,13 @@ def merge(
         outline=outline,
     )
     render_result(result, dry_run=dry_run)
+
+
+# The M2 tool commands live in their own module so this file stays the
+# application shell. Registered rather than imported one by one, so adding a
+# tool command touches `commands.py` alone.
+for _command in commands.app_commands.registered_commands:
+    app.registered_commands.append(_command)
 
 
 @app.command()
