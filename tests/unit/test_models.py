@@ -195,10 +195,14 @@ def test_case_differing_paths_are_the_same_input_when_the_filesystem_says_so(
     """`-o DOC.PDF` against an input of `doc.pdf` is in-place on Windows and macOS.
 
     This is the most destructive failure class in the project, and comparing the
-    strings would miss it. It works because `DocumentRef.from_path` and
-    `OutputTarget.resolve` both call `Path.resolve()`, which returns the name as
-    the filesystem actually stores it — so both sides normalise to the same path
-    before they are compared.
+    strings misses it. `Path.resolve()` returns the name as the filesystem
+    stores it on Windows, so both sides normalise and a string comparison
+    happens to work there — but on macOS `resolve()` leaves the case exactly as
+    typed, so the two paths differ while naming one file.
+
+    `OutputTarget.resolve` therefore asks the operating system, via `samefile`,
+    rather than comparing paths. This test failed on all three macOS legs before
+    it did.
     """
     source = tmp_path / "doc.pdf"
     source.write_bytes(b"x")
@@ -211,6 +215,26 @@ def test_case_differing_paths_are_the_same_input_when_the_filesystem_says_so(
     else:
         target = OutputTarget.resolve(inputs=[document], requested=shouting, force=True)
         assert target.destination.name == "DOC.PDF", "a distinct file on a case-sensitive fs"
+
+
+def test_a_hard_link_to_an_input_is_still_that_input(tmp_path: Path) -> None:
+    """Two different names, one file, no case-folding involved.
+
+    The case test above only reaches the `samefile` check on a case-insensitive
+    volume, so on Linux it proves nothing. A hard link is the same defect
+    expressed in a way every filesystem understands: no amount of path
+    normalisation would ever equate these two names.
+    """
+    source = tmp_path / "doc.pdf"
+    source.write_bytes(b"x")
+    link = tmp_path / "same-file-other-name.pdf"
+    try:
+        link.hardlink_to(source)
+    except (OSError, NotImplementedError):  # pragma: no cover - fs without links
+        pytest.skip("this filesystem does not support hard links")
+
+    with pytest.raises(InPlaceOverwriteError):
+        OutputTarget.resolve(inputs=[DocumentRef.from_path(source)], requested=link, force=True)
 
 
 def test_every_input_is_checked_not_only_the_first(tmp_path: Path) -> None:
