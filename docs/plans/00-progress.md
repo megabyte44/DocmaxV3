@@ -34,18 +34,35 @@ pytest              867 passed, 2 skipped in 34s
 `feat/core-foundation`. Every file in both exists at the stack tip. ADR 0009
 settles it: `origin/main` is the authoritative base and the phase line was
 reconciled onto it by `feat/core-reconciliation`, so these two are the
-pre-reconciliation copies. Deleted, but tagged first —
-`archive/architecture` and `archive/core-foundation` — so nothing is
-unrecoverable.
+pre-reconciliation copies. Tagged `archive/architecture` and
+`archive/core-foundation` (both pushed) so the deletion is reversible.
 
 **New — one branch.** `docs/build-leverage-plans`, carrying this directory,
 ADRs 0010 and 0011, and `CLAUDE.md`.
 
-## Open item
+## Open items — four commands, all needing a human
 
-**PR #10 is open and not merged.** The merge was blocked by a permission
-prompt, not by a failure — the branch is green and the PR is ready. Merge it,
-then delete the six stack branches and the four merged ones.
+Two PRs are open and green. Merging a PR and deleting a remote branch both
+require a permission the agent session did not have, so they are left for you.
+Nothing here is blocked on a failure.
+
+```bash
+# 1. the M1-M3 stack -- verified green locally, see above
+gh pr merge 10 --merge --delete-branch
+
+# 2. these plans (depends on #10 being in first)
+gh pr merge 11 --merge --delete-branch
+
+# 3. the five stack branches below the tip, now merged transitively
+git push origin --delete feat/core-reconciliation feat/engine-router     feat/merge-tool feat/cli-integration feat/m2-pypdf-tools
+
+# 4. the merged and superseded remotes
+git push origin --delete chore/bump-version-3.0.0a7     chore/rename-pypi-distribution fix/ci-color-and-golden-exit-code     m1-foundations architecture feat/core-foundation
+```
+
+Local branches are already cleaned: only `main` and
+`docs/build-leverage-plans` remain. After step 4 the remote should hold `main`
+alone.
 
 ## What changed in the plans because of the stack
 
@@ -78,7 +95,8 @@ ADRs were renumbered **0006 → 0010** and **0007 → 0011**: the stack ships AD
 
 ## Start here
 
-1. Merge PR #10, delete the ten dead branches.
+1. Run the four commands above: merge #10 and #11, delete the eleven dead
+   remote branches.
 2. Plan 01 — the generation layer. Do it at ten commands, not forty. The 867
    tests make the refactor cheap; migrate one command at a time.
 3. Plan 02 — the contract suite, as a bug hunt across the ten existing tools.
