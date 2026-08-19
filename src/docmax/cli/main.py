@@ -8,7 +8,6 @@ any process-terminating call.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Annotated
 
@@ -28,15 +27,6 @@ app = typer.Typer(
     rich_markup_mode="rich",
     no_args_is_help=True,
 )
-
-#: External binaries a local engine may need, with the tools that depend on them.
-#: ``docmax setup`` (M3) installs these; ``doctor`` only reports.
-EXTERNAL_BINARIES: dict[str, tuple[str, ...]] = {
-    "tesseract": ("ocr",),
-    "gs": ("compress", "pdfa"),
-    "pdftoppm": ("ocr", "to-images"),
-    "pandoc": ("convert",),
-}
 
 
 def _version_callback(value: bool) -> None:
@@ -138,31 +128,39 @@ def doctor() -> None:
     """
     from rich.table import Table
 
+    from docmax.tools import _binaries
+
     table = Table(title="External tool status", title_justify="left")
     table.add_column("Tool")
     table.add_column("Status")
     table.add_column("Path")
     table.add_column("Needed by")
 
-    missing: list[str] = []
-    for binary, used_by in EXTERNAL_BINARIES.items():
-        path = shutil.which(binary)
-        if path:
-            table.add_row(binary, "[green]found[/green]", path, ", ".join(used_by))
+    missing: list[_binaries.Binary] = []
+    for binary in _binaries.EXTERNAL_BINARIES:
+        used_by = ", ".join(binary.used_by)
+        found = _binaries.find(binary.name)
+        if found:
+            table.add_row(binary.name, "[green]found[/green]", found, used_by)
         else:
             missing.append(binary)
-            table.add_row(binary, "[yellow]missing[/yellow]", "—", ", ".join(used_by))
+            table.add_row(binary.name, "[yellow]missing[/yellow]", "—", used_by)
 
     out.print(table)
 
-    if missing:
-        console.print(
-            f"\n[yellow]{len(missing)} tool(s) missing.[/yellow] "
-            "Affected operations can still run via the Cloud Engine, "
-            f"or install locally with [bold]{CLI_NAME} setup[/bold] (coming in M3)."
-        )
-    else:
+    if not missing:
         console.print("\n[green]All external tools available.[/green]")
+        return
+
+    console.print(f"\n[yellow]{len(missing)} tool(s) missing.[/yellow]")
+    for binary in missing:
+        # The exact install command, per platform. That is the difference
+        # between a report and something the user can act on.
+        console.print(f"  [bold]{binary.name}[/bold] — {binary.install_hint()}")
+    console.print(
+        "\nAffected operations can still run via the Cloud Engine (M6), "
+        f"or install locally with [bold]{CLI_NAME} setup[/bold] (coming later)."
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

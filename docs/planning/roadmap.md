@@ -11,7 +11,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M0** | Foundation — architecture, CI, safety mechanisms | ✅ complete |
 | **M1** | Core engine + `merge` as the reference implementation | ✅ complete |
 | **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ complete |
-| **M3** | `compress` + a real `setup` / `doctor` | planned |
+| **M3** | `compress` + external-binary support in `doctor` | ✅ complete |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | planned |
 | **M5** | `convert`, `to-images`, `from-images` | planned |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | planned |

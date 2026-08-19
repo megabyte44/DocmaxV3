@@ -209,6 +209,41 @@ def sanitize(
 
 
 @app_commands.command()
+def compress(
+    source: Annotated[Path, typer.Argument(help="The PDF to compress.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    preset: Annotated[
+        str, typer.Option("--preset", help="Ghostscript preset: screen, ebook, printer, prepress.")
+    ] = "ebook",
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Shrink a PDF with Ghostscript.
+
+    Needs Ghostscript installed — run `docmax doctor` to check, and it will
+    print the install line for your platform. The page count is verified before
+    the result replaces anything, because a smaller file with fewer pages is not
+    a compressed document.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "compress",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        preset=preset,
+    )
+    render_result(result, dry_run=dry_run)
+
+
+@app_commands.command()
 def metadata(
     source: Annotated[Path, typer.Argument(help="The PDF to inspect.", show_default=False)],
     set_: Annotated[

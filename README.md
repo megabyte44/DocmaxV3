@@ -84,12 +84,16 @@ pip install "DocmaxV3[all]"       # everything
 The base install is deliberately small. Heavy dependencies arrive only when you
 first ask for a local engine that needs them.
 
-Some local engines also need external programs (Ghostscript, Tesseract, Pandoc,
-Poppler):
+Some local engines also need external programs. `compress` needs
+**Ghostscript**; OCR and conversion will need Tesseract, Poppler and Pandoc.
 
 ```bash
-docmax doctor                     # what's installed, what's missing, what needs it
+docmax doctor      # what's installed, what's missing, and the command to fix it
 ```
+
+`doctor` prints the install line for your platform — `apt install ghostscript`,
+`brew install ghostscript`, or the winget package on Windows. It only reports;
+nothing is installed for you.
 
 ## Roadmap
 
@@ -98,7 +102,7 @@ docmax doctor                     # what's installed, what's missing, what needs
 | **M0** | Foundation — architecture, CI, safety mechanisms | ✅ done |
 | **M1** | Core engine + `merge` as the reference implementation | ✅ complete |
 | **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ done |
-| **M3** | `compress` + a real `setup` / `doctor` | |
+| **M3** | `compress` + external-binary support in `doctor` | ✅ done |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | |
 | **M5** | `convert`, `to-images`, `from-images` | |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | |

@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-17 · **Branch:** `feat/m2-pypdf-tools` · **Base:** `15b42c4` (`origin/main`, `v3.0.0a7`)
+**Last updated:** 2026-08-18 · **Branch:** `feat/m3-compress` · **Base:** `15b42c4` (`origin/main`, `v3.0.0a7`)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,7 +10,7 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–7 are complete. Milestones M1 and M2 are done; the published
+**Phases 0–8 are complete. Milestones M1, M2 and M3 are done; the published
 package is `DocmaxV3` 3.0.0a7, which predates them.**
 
 | Phase | | |
@@ -23,6 +23,7 @@ package is `DocmaxV3` 3.0.0a7, which predates them.**
 | 5 — Engine router | **complete** | `core/router.py`; Core is now finished |
 | 6 — `merge` as reference tool | **complete** | M1 closed; CLI wired to the router |
 | 7 — M2 pypdf tool set | **complete** | split, rotate, pages, reorder, metadata, sanitize, get-info |
+| 8 — M3 compress + binary doctor | **complete** | first external-binary engine |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -51,11 +52,14 @@ noticed. [ADR 0009](../adr/0009-main-is-the-base.md) records this.
 | `split` | done — and the first real consumer of `atomic_dir` |
 | `rotate`, `pages`, `reorder`, `sanitize` | done |
 | `metadata`, `get-info` | done — read-only paths write nothing |
+| `compress` | done — Ghostscript, via `atomic_path`; needs the binary installed |
 | `ocr` | **skeleton** — `run()` and both validators are `NotImplementedError`, M8 |
 
-Shared between them: `tools/_pagespec.py` parses page selections once, and
-`tools/_pdf.py` opens and saves PDFs once, so eight tools cannot drift into
-eight slightly different messages for the same failure.
+Shared between them: `tools/_pagespec.py` parses page selections once,
+`tools/_pdf.py` opens and saves PDFs once, and `tools/_binaries.py` finds and
+runs external programs once — with a timeout that cannot be forgotten and a
+kill switch wired to the cancellation token. `doctor` reads the same
+declaration, so the CLI and the tools cannot disagree about what is installed.
 
 Beyond the tools: `cloud_client/` is implemented; `server/` is implemented apart
 from its tool-execution bridge, which can now call the router. The CLI exposes
@@ -70,10 +74,10 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **773 passed, 2 skipped** |
+| `pytest -m "not golden and not needs_binary"` | **865 passed, 2 skipped, 2 deselected** |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 125 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 100 source files |
+| `ruff format --check .` | **passed** — 133 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 108 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
 Both skips are intentional — the self-exemptions inside the hygiene suite:
@@ -219,15 +223,16 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M3 — `compress` plus a real `setup` / `doctor`.** The first tool needing an
-external binary (Ghostscript), so it is also the first to exercise
-`atomic_path` and the `needs_binary` test marker.
+**M4 — `watermark`, `stamp`, `protect`, `unlock`, `permissions`.** All pypdf, so
+they follow the M2 pattern rather than compress's.
 
-**One decision is owed first**, found while building M2 and *not* acted on:
-`ToolSpec` cannot say "this tool produces no output". `get-info` and a bare
-`metadata` therefore accept an `OutputTarget` they ignore, and the CLI builds
-one directly rather than letting the router resolve a destination that would
-never be written. A `produces_output` flag on `ToolSpec` would close it, but
-that is a core and registry change and belongs in an ADR rather than a diff.
+**Still outstanding from M2**, and unchanged: `ToolSpec` cannot say "this tool
+produces no output", so `get-info` and a bare `metadata` accept an
+`OutputTarget` they ignore. Compress did not need it — it plainly produces
+output — so nothing was added. It remains a decision owed an ADR.
+
+**Ghostscript is not installed on the development machine**, so the two
+`needs_binary` compress tests are skipped locally and required in CI. Everything
+else about compress is covered by a stand-in program that is a real subprocess.
 
 **Do not start it without direction** — each phase is scoped explicitly.

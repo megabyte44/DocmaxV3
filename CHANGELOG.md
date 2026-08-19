@@ -28,6 +28,19 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **`compress`** — shrinks a PDF with Ghostscript, and the first engine that is
+  another program rather than a Python library. Output goes through
+  `atomic_path`, so a Ghostscript that fails, hangs, or exits zero having
+  written nothing leaves the destination untouched; the page count is verified
+  before the result replaces anything, because a smaller file with fewer pages
+  is not a compressed document.
+- **External-binary support in `doctor`** — one declaration now serves both the
+  report and the engines, where the list previously lived in the CLI layer where
+  no tool could reach it. `doctor` prints the install command for the running
+  platform, and Ghostscript's Windows spellings (`gswin64c`, `gswin32c`) are
+  recognised, so it is no longer reported missing on machines where it is
+  installed. Every external call takes a timeout from the cancellation token and
+  is killed on Ctrl-C rather than waited out.
 - **The M2 tool set** — `split`, `rotate`, `pages`, `reorder`, `metadata`,
   `sanitize` and `get-info`, all pure pypdf and all reached through the same
   router. `split` is the first tool to produce many outputs, so it is the first
