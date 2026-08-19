@@ -9,6 +9,7 @@ any process-terminating call.
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -16,6 +17,7 @@ import typer
 from docmax import __version__
 from docmax.cli.render import console, out
 from docmax.core.branding import APP_NAME, CLI_NAME, HOMEPAGE
+from docmax.core.models import Engine
 
 app = typer.Typer(
     name=CLI_NAME,
@@ -56,6 +58,66 @@ def main(
     ] = False,
 ) -> None:
     """Root callback. Global options live here."""
+
+
+@app.command()
+def merge(
+    inputs: Annotated[
+        list[Path],
+        typer.Argument(
+            help="PDFs to combine, in the order they should appear.",
+            show_default=False,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Where to write the merged PDF. Required.",
+            show_default=False,
+        ),
+    ],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Overwrite the output if it already exists."),
+    ] = False,
+    outline: Annotated[
+        bool,
+        typer.Option("--outline/--no-outline", help="Add a bookmark per source file."),
+    ] = True,
+    engine: Annotated[
+        Engine | None,
+        typer.Option("--engine", help="Force an engine. Default: decide from availability."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Say what would happen, and write nothing."),
+    ] = False,
+) -> None:
+    """Combine several PDFs into one, in the order given.
+
+    ``-o`` is required, and deliberately so. Every other tool can derive a
+    destination from its first input by swapping the extension — but merge's
+    inputs and its output are all PDFs, so a derived name would land exactly on
+    the first input and destroy it. That is the single most destructive bug v2
+    shipped. `OutputTarget` would refuse it anyway; requiring the flag means the
+    user is told at the boundary instead of after typing a command that could
+    never have worked.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "merge",
+        inputs,
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        outline=outline,
+    )
+    render_result(result, dry_run=dry_run)
 
 
 @app.command()
