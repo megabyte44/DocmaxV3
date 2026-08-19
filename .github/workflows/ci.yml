@@ -1,9 +1,22 @@
 name: CI
 
+# What runs, and when. The gate has to be strict enough that `main` is always
+# releasable and cheap enough that a typo fix does not cost fifteen jobs.
+#
+# So the matrix is chosen per event rather than fixed:
+#
+#   pull request   lint, four test legs, open-core          ~2 min
+#   push to main   lint, all nine test legs, golden, open-core
+#   release        the same as main, via workflow_call from release.yml
+#
+# A pull request that touches only prose runs nothing but the aggregate check.
+# Label a PR `ci:full` to get the whole gate before merging, which is worth
+# doing for anything touching engines or packaging.
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
   workflow_call:
 
@@ -11,17 +24,111 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   FORCE_COLOR: "1"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
   # --------------------------------------------------------------------------
+  # Decide what this event deserves. Everything below is gated on these outputs,
+  # rather than on `paths-ignore` at the trigger — a workflow skipped by a path
+  # filter never reports its required check, so the pull request waits forever
+  # for a status that will not arrive.
+  # --------------------------------------------------------------------------
+  scope:
+    name: what needs to run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.decide.outputs.code }}
+      golden: ${{ steps.decide.outputs.golden }}
+      matrix: ${{ steps.decide.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          full_label="${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}"
+
+          # --- did any code change? -------------------------------------
+          # Only a pull request has a base to diff against. Everywhere else,
+          # assume yes: guessing wrong on `main` is how a release breaks.
+          code=true
+          if [ "$event" = "pull_request" ]; then
+            git fetch --quiet origin "${{ github.base_ref }}"
+            merge_base=$(git merge-base FETCH_HEAD HEAD)
+            changed=$(git diff --name-only "$merge_base" HEAD)
+            echo "changed files:"; printf '%s\n' "$changed"
+
+            # grep -qv succeeds when *some* line is not prose. Negate it: every
+            # changed path is documentation, so no test can tell us anything.
+            if [ -n "$changed" ] && \
+               ! printf '%s\n' "$changed" | grep -qvE '(^docs/|\.md$|^LICENSE$|^\.gitignore$)'; then
+              code=false
+            fi
+          fi
+
+          # --- the expensive half ---------------------------------------
+          # Golden tests install Ghostscript, Tesseract, Pandoc and Poppler on
+          # three operating systems. That is minutes of package manager, and it
+          # cannot tell you anything a pull request has broken until the pull
+          # request has actually touched an engine.
+          #
+          # `[ x ] && y` would be wrong here: under `set -e` a false test is a
+          # failing command and aborts the step. Every branch is an `if`.
+          golden=false
+          case "$event" in
+            push|release|workflow_dispatch)
+              golden=true
+              ;;
+            pull_request)
+              if [ "$full_label" = "true" ]; then golden=true; fi
+              ;;
+          esac
+          if [ "$code" = "false" ]; then golden=false; fi
+
+          # --- the test matrix ------------------------------------------
+          # A pull request gets every operating system and both ends of the
+          # supported Python range: four legs instead of nine, and nothing that
+          # has ever caught a bug here is lost. The full cross product runs on
+          # `main` and before a release, where it is worth the wait.
+          if [ "$event" = "pull_request" ] && [ "$full_label" != "true" ]; then
+            matrix='{"include":[
+              {"os":"ubuntu-latest","python":"3.11"},
+              {"os":"ubuntu-latest","python":"3.13"},
+              {"os":"macos-latest","python":"3.12"},
+              {"os":"windows-latest","python":"3.12"}]}'
+          else
+            matrix='{"os":["ubuntu-latest","macos-latest","windows-latest"],
+                     "python":["3.11","3.12","3.13"]}'
+          fi
+
+          {
+            echo "code=$code"
+            echo "golden=$golden"
+            echo "matrix=$(printf '%s' "$matrix" | tr -d '\n ')"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "::notice::code=$code golden=$golden event=$event"
+
+  # --------------------------------------------------------------------------
   # Static gates. Fast, single-platform, fails the PR before burning the matrix.
   # --------------------------------------------------------------------------
   lint:
     name: lint & types
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,17 +152,18 @@ jobs:
         run: lint-imports
 
   # --------------------------------------------------------------------------
-  # The structural guarantees from docs/architecture/overview.md. These are the tests
-  # that make v2's failure modes unreintroducible, so they run everywhere.
+  # The structural guarantees from docs/architecture/overview.md. These are the
+  # tests that make v2's failure modes unreintroducible, so they run everywhere.
   # --------------------------------------------------------------------------
   test:
     name: test ${{ matrix.os }} / py${{ matrix.python }}
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.11", "3.12", "3.13"]
+      matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -74,10 +182,18 @@ jobs:
   # --------------------------------------------------------------------------
   # Golden tests need the real external tools. Skipped locally when a binary is
   # absent; REQUIRED here, so the badge means something.
+  #
+  # This is the slow half of the gate, and it has already cost a run: an
+  # `apt-get update` hung for twelve and a half minutes with no timeout to stop
+  # it, because a job with no `timeout-minutes` is allowed to run for six hours.
+  # Every job below has a limit, and this step retries rather than hanging.
   # --------------------------------------------------------------------------
   golden:
     name: golden ${{ matrix.os }}
+    needs: scope
+    if: needs.scope.outputs.golden == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -92,17 +208,28 @@ jobs:
 
       - name: external tools (Linux)
         if: runner.os == 'Linux'
+        timeout-minutes: 8
+        shell: bash
         run: |
-          sudo apt-get update
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo apt-get update -o Acquire::Retries=3; then
+              break
+            fi
+            echo "apt-get update failed (attempt $attempt), retrying"
+            sleep 5
+          done
           sudo apt-get install -y --no-install-recommends \
             ghostscript tesseract-ocr tesseract-ocr-deu poppler-utils pandoc
 
       - name: external tools (macOS)
         if: runner.os == 'macOS'
+        timeout-minutes: 15
         run: brew install ghostscript tesseract poppler pandoc
 
       - name: external tools (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 15
         run: choco install --no-progress -y ghostscript tesseract pandoc poppler
 
       - run: python -m pip install -e ".[dev,all]"
@@ -132,7 +259,10 @@ jobs:
   # --------------------------------------------------------------------------
   open-core:
     name: open core stands alone
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -150,19 +280,36 @@ jobs:
 
   # A single required status check, so branch protection needs one entry
   # instead of nine that change every time the matrix does.
+  #
+  # `skipped` counts as passing. That is what lets a docs-only pull request go
+  # green without running the suite, and it is safe because the decision to skip
+  # is made by `scope` above and visible in its log — not by a silent path
+  # filter that suppresses the whole workflow.
   ci-ok:
     name: CI
     if: always()
-    needs: [lint, test, golden, open-core]
+    needs: [scope, lint, test, golden, open-core]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: verify all jobs succeeded
+      - name: verify nothing failed
+        shell: bash
         run: |
-          echo "lint=${{ needs.lint.result }}"
-          echo "test=${{ needs.test.result }}"
-          echo "golden=${{ needs.golden.result }}"
-          echo "open-core=${{ needs.open-core.result }}"
-          [ "${{ needs.lint.result }}" = "success" ] \
-            && [ "${{ needs.test.result }}" = "success" ] \
-            && [ "${{ needs.golden.result }}" = "success" ] \
-            && [ "${{ needs.open-core.result }}" = "success" ]
+          set -uo pipefail
+          failed=0
+          for job in \
+            "scope=${{ needs.scope.result }}" \
+            "lint=${{ needs.lint.result }}" \
+            "test=${{ needs.test.result }}" \
+            "golden=${{ needs.golden.result }}" \
+            "open-core=${{ needs.open-core.result }}"
+          do
+            name=${job%%=*}
+            result=${job#*=}
+            echo "$name: $result"
+            case "$result" in
+              success|skipped) ;;
+              *) failed=1 ;;
+            esac
+          done
+          exit "$failed"
