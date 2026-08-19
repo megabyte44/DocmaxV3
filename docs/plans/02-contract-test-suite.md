@@ -19,16 +19,38 @@ The existing hygiene tests check *structure* (AST walks). This checks
 
 ## 1. Current state
 
-- `tests/` has 5 hygiene tests and 5 unit tests. No fixtures directory, no PDF
-  corpus, no `conftest.py`.
-- `hypothesis` is in `[dev]` and unused.
-- The markers `golden`, `property`, `slow`, and `needs_binary` are already
-  declared in `pyproject.toml` and used by nothing.
+Revised after the M1–M3 stack (PR #10).
 
-So the scaffolding was anticipated and never built. This plan builds it.
+- **867 tests pass.** The stack brought real coverage: `test_router.py`,
+  `test_merge.py`, `test_m2_tools.py`, `test_compress.py`, `test_cli_*.py`,
+  `test_pagespec.py`, `test_binaries.py`.
+- Ten tools are implemented — merge, split, rotate, pages, reorder, sanitize,
+  metadata, get-info, compress, and ocr (cloud only).
+- Still no `tests/contract/`, no `conftest.py`, no shared corpus.
+- `hypothesis` is in `[dev]` and still unused.
+- The markers `golden`, `property`, `slow`, and `needs_binary` are declared in
+  `pyproject.toml` and used by nothing.
 
-**Dependency:** needs `core.router.run_tool` from [plan 01](01-spec-driven-surfaces.md).
-Land 01 first, or stub `run_tool` and land them together.
+This changes the argument for this plan, in both directions.
+
+**Against:** the guarantees are no longer untested. Several of them are checked
+inside the per-tool files.
+
+**For, more strongly:** they are checked *per tool*, which is exactly the
+duplication this plan predicted. Ten tools have produced ten sets of overlapping
+assertions, and the interesting question is no longer "will they diverge" but
+"have they already". The first job of this plan is to find out — build the
+suite, run it across all ten, and see which tools quietly fail an invariant
+their own test file never checked.
+
+That is a much better return than the original framing. A suite written before
+any tool exists proves nothing on day one. A suite written across ten
+independently-authored tools is a bug hunt.
+
+**Dependency:** needs a generic way to invoke a tool. `EngineRouter.run()`
+exists and is enough — the suite does not have to wait for
+[plan 01](01-spec-driven-surfaces.md). Do them in either order; 01 first is
+slightly better, because the contract suite then also guards its refactor.
 
 ## 2. Layout
 
@@ -76,8 +98,13 @@ mutates its input cannot poison the rest of the session.
 
 ## 4. The invariants
 
-Every one of these is a claim the README or an ADR already makes. Right now
-nothing checks any of them.
+Every one of these is a claim the README or an ADR already makes. Some are
+checked for some tools, in that tool's own file. None is checked for *all*
+tools, and no tool's file checks all of them — which is the gap.
+
+Before writing the suite, grep the existing per-tool tests for each invariant
+and record which tools already cover it. That inventory is the shortest route
+to knowing which of the ten are actually at risk.
 
 | # | Invariant | Source |
 |---|---|---|
@@ -135,11 +162,12 @@ That single test is what makes the suite inheritable rather than opt-in.
 
 ### The unimplemented ledger
 
-Most `run()` methods are `NotImplementedError` today, and will be for several
-milestones. The suite must be written now and light up as tools land.
+Smaller than originally planned — ten tools now work — but not redundant.
+`ocr` has no local engine, several M4–M8 tools are declared before they are
+built, and every future tool passes through this state.
 
 ```python
-NOT_YET_IMPLEMENTED = frozenset({"merge", "ocr"})   # must only ever shrink
+NOT_YET_IMPLEMENTED = frozenset({"ocr"})   # must only ever shrink
 
 def test_unimplemented_ledger_is_accurate() -> None:
     """Fails when a listed tool starts working, forcing the list down."""
@@ -154,10 +182,15 @@ Contract tests `pytest.skip` on tools in that set. Without the ledger test, a
 tool ships and the skip silently persists forever — which is the failure mode
 of every "we'll add tests later" plan.
 
+Tools needing an absent binary (`compress` without Ghostscript) use the
+existing `needs_binary` marker instead: skipped locally, **required in CI**.
+That policy is already declared in `pyproject.toml` and has never been used.
+
 ## 6. Keeping it fast
 
-The suite runs on every push across 3 OSes × 3 Pythons. Budget: **under 60s per
-leg**, and it should stay there through M5.
+The suite runs on every push across 3 OSes × 3 Pythons. The existing 867 tests
+take **34s** locally on one core; the contract suite adds to that. Budget:
+**under 90s per leg** for everything, and it should stay there through M5.
 
 | Lever | Effect |
 |---|---|

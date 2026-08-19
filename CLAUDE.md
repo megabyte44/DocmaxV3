@@ -3,8 +3,12 @@
 Read this before changing anything. Most of the constraints here exist because
 v2 shipped the failure they prevent; the ADRs in `docs/adr/` explain each one.
 
-Every rule below is enforced by a test. If you find yourself wanting to argue
-with a rule, change the ADR and the test — do not work around it.
+Most rules below are enforced by a test, named under each. Rules 7, 8, and 9
+describe work that is planned but not yet built — they are marked, and they say
+what to do in the meantime.
+
+If you want to argue with a rule, change the ADR and the test. Do not work
+around it.
 
 ---
 
@@ -24,21 +28,27 @@ declaration.
 Facts about a tool live on that tool's spec. If a surface needs to know
 something about a tool, the answer is a spec field, not a lookup table.
 
-> ADR 0002, ADR 0006 · `tests/hygiene/test_no_handwritten_commands.py`
+> ADR 0002, ADR 0010 · `tests/hygiene/test_no_handwritten_commands.py`
 
-**This rule already got broken once.** `EXTERNAL_BINARIES` in `cli/main.py`
-appeared four days after ADR 0002 forbade exactly that shape, because there was
-no test. When adding a rule, add the test in the same commit.
+**This rule has already been broken twice.** `EXTERNAL_BINARIES` appeared in
+`cli/main.py` four days after ADR 0002 forbade that shape (since moved down to
+`tools/_binaries.py`, which fixed the layering half of it). Then
+`cli/commands.py` grew nine hand-written per-tool commands. Both were
+reasonable in the moment; both happened because nothing was checking.
 
-### 2. Interfaces call `run_tool`, they do not orchestrate
+When you add a rule, add the test in the same commit.
 
-`core/router.py:run_tool` resolves inputs, target, params, and engine, runs the
-strategy, and wraps anything unexpected in `InternalError`. Every interface
-calls it. Do not reassemble those steps in a CLI command or a route handler —
-four copies of a six-step sequence will disagree, and the disagreement will
-live in whichever interface is used least.
+### 2. Interfaces route; they do not orchestrate
 
-> ADR 0006
+`core/router.py:EngineRouter` resolves the engine, the target, and the run.
+`cli/execution.py:execute` is the CLI's single funnel into it. A command names
+its arguments, hands them to `execute`, and renders the result — nothing else.
+
+Do not reassemble those steps in a command or a route handler. A command that
+grows an `if offline` is the start of a second implementation of a rule that
+must never differ.
+
+> ADR 0010 · `tests/unit/test_cli_merge.py` asserts this structurally
 
 ### 3. Library code raises; only `cli` exits
 
@@ -77,28 +87,36 @@ framework and no tool. `cli` and `server` never import each other.
 
 ### 7. New tools enter the contract suite
 
-Registering a `ToolSpec` requires an entry in `tests/contract/samples.py`. The
+**Not built yet — plan 02.** When it lands: registering a `ToolSpec` requires
+an entry in `tests/contract/samples.py`, and a missing entry fails the suite. The
 suite then checks ~15 guarantees against it automatically. Do not re-test those
 guarantees in a per-tool file; do test behaviour specific to the tool.
 
 When a tool's `run()` becomes real, remove it from `NOT_YET_IMPLEMENTED`.
 
-> ADR 0007 · `tests/contract/`
+> ADR 0011 · `tests/contract/`
 
 ### 8. Machine-readable output is not optional
 
-Every tool supports `--json` for free through the generated command. Progress
-and logs go to **stderr**; stdout carries the envelope and nothing else. Error
-codes come from `ErrorCode` and are public API — renaming one is a breaking
-change.
+**Not built yet — plan 04.** When it lands: every tool supports `--json` for
+free through the generated command, progress and logs go to **stderr**, and
+stdout carries the envelope and nothing else. `cli/render.py` already routes
+progress to stderr for exactly this reason.
+
+Error codes come from `ErrorCode` and are public API — renaming one is a
+breaking change. That part is true today.
 
 > `docs/plans/04-json-envelope.md`
 
 ### 9. Engines use `ref.materialize()`, not `ref.path`
 
-`DocumentRef.path` is `Path | None` because a source may be a stream. Engines
-that need a real file open a `materialize()` context manager. Reading `.path`
-directly in `docmax/tools` is a test failure.
+**Not built yet — plan 03.** `DocumentRef.path` is `Path` today. When the plan
+lands it becomes `Path | None`, because a source may be a stream, and engines
+that need a real file will open a `materialize()` context manager.
+
+Until then: do not add new code that assumes a source is always on disk more
+deeply than it must. Every engine written before this lands is one more to
+migrate.
 
 > `docs/plans/03-stream-targets.md`
 
@@ -124,12 +142,15 @@ pytest && ruff check . && ruff format --check . && mypy && lint-imports
 1. `src/docmax/tools/<name>/tool.py` — the `ToolSpec`. Copy `merge/tool.py`.
 2. `src/docmax/tools/<name>/local.py` — the strategy. Heavy imports inside methods.
 3. `src/docmax/tools/<name>/validators.py` — what makes the output correct.
-4. `tests/contract/samples.py` — one line.
-5. `tests/unit/tools/test_<name>.py` — only what is specific to this tool.
+4. `tests/contract/samples.py` — one line. *(once plan 02 lands)*
+5. `tests/unit/test_<name>.py` — only what is specific to this tool.
+6. `src/docmax/cli/commands.py` — a command. **Temporary.** Plan 01 deletes
+   this step; until then, copy the shape of the neighbours exactly and add
+   nothing per-tool beyond argument names.
 
-You should not need to touch `cli/`, `server/`, or any file shared with another
-tool. **If you do, that is the bug** — the missing generality belongs in the
-spec or the router, not in a special case.
+Apart from step 6, you should not need to touch `cli/`, `server/`, or any file
+shared with another tool. **If you do, that is the bug** — the missing
+generality belongs in the spec or the router, not in a special case.
 
 ## Where decisions live
 
@@ -137,7 +158,8 @@ spec or the router, not in a special case.
   constraint quietly.
 - `docs/plans/` — decided but unwritten work. Delete a plan when it lands; its
   decision should have become an ADR and its rule a test.
-- `docs/architecture.md` — the layering and the structural guarantees.
+- `docs/architecture/` — the layering and the structural guarantees.
+- `docs/planning/` — where the project currently is. Not the same as `plans/`.
 
 ## Style
 

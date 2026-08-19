@@ -4,68 +4,88 @@
 No CLI command, no API schema, no TUI form, no MCP definition, no entry in a
 central table — anywhere.
 
-**Do this before tool #2.** The window is open exactly now: `cli/main.py` has
-one hand-written command (`doctor`) and it is not a tool. The moment a
-hand-written `merge` command exists, this becomes a refactor of N commands
-instead of a design decision.
+**Do this at ten tools, not at forty.** This is now a refactor rather than a
+greenfield decision — the M1–M3 stack landed nine hand-written commands. Ten is
+still cheap. Forty is a rewrite nobody schedules.
 
 ---
 
 ## 1. Where things actually stand
 
+Revised after the M1–M3 stack (PR #10) landed `core/router.py`, the CLI wiring,
+and ten tools.
+
 | Thing | State |
 |---|---|
-| `ToolSpec` / `Param` in `core/registry.py` | written, complete enough |
-| `Param` docstring promising CLI/TUI/API/MCP rendering | written, **unimplemented** |
-| `core/router.py` | **does not exist** — yet docstrings across the tree refer to "the router" |
-| Per-tool CLI commands | **none yet** |
-| `EXTERNAL_BINARIES` in `cli/main.py` | a hardcoded central tool→binary map — see R1 |
+| `ToolSpec` / `Param` in `core/registry.py` | written; **unchanged by the stack** — R2 and R3 below still apply in full |
+| `Param` docstring promising CLI/TUI/API/MCP rendering | written, **still unimplemented** |
+| `core/router.py` | ✅ exists, with the precedence ladder in one place |
+| `cli/execution.py` | ✅ exists — one `execute()` that every command calls |
+| Per-tool CLI commands | ❌ **nine hand-written** in `cli/commands.py` |
+| `EXTERNAL_BINARIES` | moved to `tools/_binaries.py` — layering fixed, table still central. See R1 |
 
-The router is the missing keystone. It should be written generically the first
-time, because it will never be rewritten generically later.
+Two of the three things this plan originally called for already exist. The
+router is written and `cli/execution.py` is exactly the single funnel rule 2
+asks for — commands name their arguments, hand off to `execute()`, and render.
+
+What remains is the last step: the commands themselves are still typed out by
+hand, nine times, and the spec fields that would let them be generated were
+never added.
+
+The stack's own code says so. `cli/commands.py` opens with *"Each command here
+does the same three things and nothing else"* — nine near-identical functions,
+which is the definition of something that should be generated. And
+`tools/get_info/local.py` notes that the clean fix for read-only tools is *"a
+`produces_output` flag on `ToolSpec`, which is a core change and is being
+reported rather than made."* That is R3, identified independently.
 
 ## 2. Rectifications to existing code
 
-### R1 — `EXTERNAL_BINARIES` violates ADR 0002
+### R1 — the binary table: half fixed, and the other half is arguable
 
-`cli/main.py:31` holds:
+**Superseded in part.** This plan originally said `EXTERNAL_BINARIES` in
+`cli/main.py` was a central table in the wrong layer. The stack moved it to
+`tools/_binaries.py` and said why, correctly: `tools` sits below `cli`, so the
+engines can now consult the same list `doctor` reports from, instead of two
+lists that can disagree. It also gained per-platform `install` commands and an
+`install_hint()` — most of [plan 06](06-doctor-remedies.md), built already.
 
-```python
-EXTERNAL_BINARIES: dict[str, tuple[str, ...]] = {
-    "tesseract": ("ocr",),
-    "gs": ("compress", "pdfa"),
-    ...
-}
-```
-
-This is precisely the central file ADR 0002 exists to abolish: adding tool #51
-requires editing it, nothing detects the drift when someone forgets, and it
-lives in `cli`, so the server and the MCP adapter cannot see it.
-
-**Fix:** the dependency belongs to the tool that has it.
+What remains is narrower, and the original plan was too blunt about it. The
+`Binary.used_by` field still names tools from a central list:
 
 ```python
-# core/registry.py — ToolSpec gains:
-    #: External programs this tool's local engine needs. `doctor` derives its
-    #: whole table from these; `setup` derives what it installs. Declared here
-    #: rather than in a central map so tool #51 touches no shared file.
-    requires_binaries: tuple[str, ...] = ()
+Binary(name="gs", used_by=("compress", "pdfa"), ...)
 ```
 
-`doctor` then inverts the registry at call time:
+and `pdfa`, `to-images`, and `convert` do not exist yet. The stack's docstring
+defends this deliberately: *"a list that grows tool by tool is a list that gets
+out of step with the roadmap."* That is a fair point, and it kills the naive
+version of this rectification — moving `used_by` wholesale onto `ToolSpec`
+would make `doctor` unable to report on binaries for unwritten tools.
 
-```python
-def binaries_needed() -> dict[str, tuple[str, ...]]:
-    """binary -> tools that need it, derived from the registry."""
-    index: dict[str, list[str]] = {}
-    for spec in all_specs():
-        for binary in spec.requires_binaries:
-            index.setdefault(binary, []).append(spec.name)
-    return {b: tuple(sorted(t)) for b, t in sorted(index.items())}
-```
+**Revised fix — keep the catalogue, invert the ownership, check for drift:**
 
-Delete `EXTERNAL_BINARIES`. `ocr/local.py:BINARIES` becomes the spec's
-`requires_binaries` and stops being duplicated.
+1. `EXTERNAL_BINARIES` **stays** in `tools/_binaries.py`. It is knowledge about
+   *binaries* — names, platform commands, install lines — which genuinely is
+   global. `used_by` stays too, as the roadmap's forward declaration.
+2. `ToolSpec` gains `requires_binaries`, so a tool that exists declares its own
+   dependency where the engine can reach it without a lookup:
+
+   ```python
+   #: External programs this tool's local engine needs, by Binary.name.
+   requires_binaries: tuple[str, ...] = ()
+   ```
+
+3. A hygiene test asserts the two agree for every **registered** tool:
+
+   ```python
+   def test_binary_catalogue_matches_the_registry() -> None:
+       """used_by may name unwritten tools. It may not contradict written ones."""
+   ```
+
+That keeps `doctor` roadmap-aware, gives engines a local declaration, and makes
+the two impossible to drift apart. `ocr/local.py:BINARIES` then stops being a
+third copy.
 
 ### R2 — `Param` is missing what 45 tools will need
 
@@ -109,73 +129,50 @@ quietly re-couple the registry to the CLI.
     #: True for split / to-images: output is a directory, so the router picks
     #: atomic_dir rather than atomic_write.
     produces_directory: bool = False
+    #: False for get-info and a bare `metadata` read: the tool writes nothing,
+    #: so no destination should be resolved or checked.
+    produces_output: bool = True
     #: See R1.
     requires_binaries: tuple[str, ...] = ()
 ```
 
-`produces_directory` is the one that will hurt if it is late: `split` is M2,
-and without it `OutputTarget.resolve` derives a `.pdf` destination for a tool
-that produces a folder.
+`produces_output` is not speculative — it is already costing something.
+`cli/commands.py` documents the workaround it forced:
+
+> *"`get-info` and a bare `metadata` write nothing, but `EngineStrategy.run`
+> requires an `OutputTarget`. Those two build one directly rather than through
+> `router.target_for`, because resolution would check a destination that is
+> never written — and would refuse the run with `OutputExistsError` if a file
+> happened to sit at the derived path."*
+
+The workaround works — nothing is broken for users today. The cost is that two
+commands construct an `OutputTarget` by hand rather than going through the
+router, which is the one thing rule 2 exists to prevent, and every future
+read-only tool (`get-info`, `metadata`, `formats`, anything in M9's inspection
+work) will copy the same bypass. A one-line spec field retires it.
+
+`produces_directory` is the same shape — `split` writes a directory, and
+`OutputTarget.resolve`'s `default_suffix` logic assumes a file.
 
 ### R4 — `merge/tool.py` updated to match
 
 Mechanical. It is also the file every future `tool.py` gets copied from, so it
 should show the new fields even where they hold their defaults.
 
-## 3. New modules
+## 3. Modules
 
-### `core/router.py` — the missing keystone
+### `core/router.py` — ✅ already built, one thing to fold in
 
-Two responsibilities and nothing else. Must not import `rich`, `typer`, or any
-tool module.
+`EngineRouter` exists with `resolve()`, `target_for()`, and `run()`, and the
+precedence ladder lives in exactly one place. Nothing in this plan changes it.
 
-```python
-def resolve_engine(
-    spec: ToolSpec,
-    requested: Engine = Engine.AUTO,
-    *,
-    offline: bool = False,
-    consent: ConsentPolicy | None = None,
-) -> tuple[Engine, EngineStrategy]:
-    """Pick the engine that will run, or explain why none can.
+One consequence to collect once R3 lands: `cli/execution.py` currently exposes
+both `execute()` and `execute_read_only()`, and the second exists *only*
+because a tool cannot say it writes nothing. With `produces_output` on
+`ToolSpec`, `target_for()` returns `None` for those tools and the two funnels
+become one.
 
-    AUTO prefers LOCAL when available (private and free), and falls back to
-    CLOUD only when the tool supports it, the user is not offline, and consent
-    for this tool has been given. An explicit request is never silently
-    overridden — asking for LOCAL and getting CLOUD would upload a document the
-    user asked to keep local.
-    """
-```
-
-Failure modes, all already typed in `errors.py`: `EngineNotSupportedError`,
-`NoEngineAvailableError` (quoting **both** strategies' `unavailable_reason()`),
-`ConsentRequiredError`.
-
-```python
-def run_tool(
-    spec: ToolSpec,
-    inputs: Sequence[str | Path],
-    *,
-    output: Path | None = None,
-    force: bool = False,
-    engine: Engine = Engine.AUTO,
-    params: Mapping[str, Any] | None = None,
-    progress: ProgressSink | None = None,
-    cancellation: CancellationToken | None = None,
-) -> ToolResult:
-    """The one code path every interface calls: CLI, server, TUI, MCP, batch.
-
-    refs -> target -> params -> engine -> run -> result. Anything escaping a
-    strategy that is not a DocMaxError is wrapped in InternalError here, which
-    is what makes "no tracebacks" true rather than aspirational.
-    """
-```
-
-If four interfaces each assemble those six steps themselves, they will disagree
-about at least one of them, and the disagreement will be a bug in whichever one
-nobody uses daily.
-
-### `core/params.py` — validate once
+### `core/params.py` — validate once (new)
 
 ```python
 def validate(spec: ToolSpec, raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -190,12 +187,23 @@ def validate(spec: ToolSpec, raw: Mapping[str, Any]) -> dict[str, Any]:
 Unknown parameter names are an error, not a silent ignore — `**params: Any` in
 `EngineStrategy.run` means a typo would otherwise vanish without a trace.
 
-### `cli/build.py` — generate the commands
+### `cli/build.py` — generate the commands (new; replaces `cli/commands.py`)
 
 ```python
 def register_tool_commands(app: typer.Typer) -> None:
     """Attach one generated command per registered ToolSpec."""
 ```
+
+`cli/commands.py` is deleted by this change. Its nine functions become nine
+`ToolSpec.params` declarations, most of which already exist — the option
+definitions in `commands.py` (`_EngineOption`, `_ForceOption`, `_PagesOption`,
+`_DryRunOption`) are exactly the uniform set below, already factored out by
+hand because they had to mean the same thing seven times.
+
+Do this migration one command at a time, keeping `test_cli_m2.py`,
+`test_cli_merge.py`, and `test_cli_compress.py` green throughout. Those 867
+tests are the safety net that makes this refactor cheap; they were not there
+when this plan was first written.
 
 Each generated command gets, uniformly:
 
@@ -213,36 +221,44 @@ Cost check: this imports every `tool.py` at CLI startup. That is exactly what
 `test_no_heavy_imports.py` already guards it. Extend that test to assert that
 building the full command tree imports neither `pypdf` nor `cv2`.
 
-### `cli/errors.py` — the one exit boundary
+### Exit codes — extend `cli/execution.py`, do not add a module
 
-`main.py` claims to be "where typed errors become exit codes" but contains no
-such mapping. One decorator wrapping every generated command:
+The boundary exists. `cli/execution.py` defines `EXIT_CANCELLED = 130` and
+`EXIT_FAILURE = 1`, and every command already funnels through it — so this is
+now a five-line change rather than a new file.
+
+What is missing is that **every non-cancellation failure is exit 1**. A script
+cannot tell "you passed a bad page range" from "Ghostscript is not installed"
+from "this is our bug", which is the whole point of having a stable
+`ErrorCode` taxonomy.
 
 ```python
-EXIT_CODES = {
+EXIT_BY_FAMILY = {
     "input": 2, "output": 3, "dependency": 4,
-    "engine": 5, "cloud": 6, "cancelled": 130, "internal": 70,
+    "engine": 5, "cloud": 6, "internal": 70,
 }
 ```
 
-Match on the family prefix (`code.value.split(".")[0]`), so a new `ErrorCode`
-member never requires a new entry here. Shared with
-[plan 04](04-json-envelope.md), which uses the same boundary.
+Match on the family prefix (`code.value.split(".")[0]`) so a new `ErrorCode`
+member never requires a new entry, and keep `EXIT_FAILURE = 1` as the fallback
+for an unmatched family. Shared with [plan 04](04-json-envelope.md).
 
 ## 4. The standing rule
 
 > **A tool is declared once, in its `ToolSpec`. Every interface is generated
 > from the declaration. No interface may contain per-tool code.**
 
-Recorded in [ADR 0006](../adr/0006-spec-driven-surfaces.md). Enforced by
+Recorded in [ADR 0010](../adr/0010-spec-driven-surfaces.md). Enforced by
 `tests/hygiene/test_no_handwritten_commands.py`, which AST-walks `docmax/cli`
 (and `docmax/server`, and `docmax/mcp` when it lands) and fails when a decorated
 command name, a route path segment, or a dict key matches a registered tool
 name.
 
-The test is the point. ADR 0002 already forbade central tool tables, and one
-appeared anyway in `cli/main.py:31` — because nothing was checking. A rule
-without a test is a comment.
+The test is the point, and the repository has now demonstrated it twice. ADR
+0002 forbade central tool tables; one appeared in `cli/main.py` anyway. ADR 0002
+also implied tools should not need per-tool interface code; nine such commands
+were then written. Both were reasonable at the time, and both happened because
+nothing was checking. **A rule without a test is a comment.**
 
 Permitted exceptions, allowlisted explicitly in the test: `doctor`, `setup`,
 `tools`, `formats`, `config`, `version`, `mcp`, `serve` — commands that are
@@ -250,9 +266,12 @@ Permitted exceptions, allowlisted explicitly in the test: `doctor`, `setup`,
 
 ## 5. Acceptance
 
-- [ ] `EXTERNAL_BINARIES` deleted; `docmax doctor` derives its table from the registry
-- [ ] `merge` has a working CLI command that nobody wrote
+- [ ] `cli/commands.py` is deleted; all ten tools have generated commands
+- [ ] `test_cli_m2.py`, `test_cli_merge.py`, `test_cli_compress.py` pass unchanged
 - [ ] registering a `ToolSpec` with a fake name makes a command appear with no other edit
+- [ ] `ToolSpec` carries `produces_output`; `execute_read_only()` is gone
+- [ ] `Binary.used_by` and `ToolSpec.requires_binaries` agree for every registered tool
+- [ ] failures exit with a family-specific code, not a blanket 1
 - [ ] `lint-imports` still passes; `core` imports no `typer`
 - [ ] `docmax --help` imports neither `pypdf` nor `cv2` (asserted in `test_no_heavy_imports.py`)
 - [ ] `test_no_handwritten_commands.py` fails when a `@app.command()` named `merge` is added

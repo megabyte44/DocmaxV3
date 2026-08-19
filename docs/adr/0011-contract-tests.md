@@ -1,4 +1,4 @@
-# ADR 0007 — A tool's guarantees are verified by one suite, not by its own tests
+# ADR 0011 — A tool's guarantees are verified by one suite, not by its own tests
 
 **Status:** Accepted · 2026-08-20
 
@@ -10,16 +10,19 @@ accident, no operation ever shows a traceback. `docs/architecture.md` calls
 these the structural guarantees and says they are "enforced by tests that run on
 every commit — not by good intentions."
 
-Today they are enforced for `core` and for nothing else. `tests/` holds five
-hygiene tests and five unit tests over `atomic`, `cancellation`, `errors`,
-`registry`, and the CLI. No tool has behavioural tests, because no tool has
-behaviour yet.
+The M1--M3 stack brought the suite to 867 tests across ten tools, organised
+per tool: `test_merge.py`, `test_m2_tools.py`, `test_compress.py`, and the
+matching `test_cli_*.py` files. That is real coverage and it found real bugs.
 
-The natural next step is per-tool test files, and it is the wrong one. Forty-odd
-tools times fifteen guarantees is six hundred tests, nearly all of which are the
-same test with a different `ToolSpec`. Written that way they will be copy-pasted,
-they will diverge, and the tool most likely to skip them is the one written in a
-hurry — which is also the one most likely to need them.
+It is also the shape this ADR exists to stop. Forty-odd tools times fifteen
+guarantees is six hundred tests, nearly all of which are the same test with a
+different `ToolSpec`. Written per tool they get copy-pasted, they diverge, and
+the tool most likely to skip them is the one written in a hurry -- which is
+also the one most likely to need them.
+
+Ten tools in, the question is no longer whether they will diverge. It is
+whether they already have, and nothing currently answers it: no single
+assertion runs across all ten, and no tool's file checks all fifteen.
 
 The hygiene suite already demonstrates the alternative: one AST walk,
 parametrized over every source file, that no new file can escape.

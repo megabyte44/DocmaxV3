@@ -1,4 +1,4 @@
-# ADR 0006 — A tool is declared once; interfaces are generated
+# ADR 0010 — A tool is declared once; interfaces are generated
 
 **Status:** Accepted · 2026-08-20
 
@@ -13,27 +13,33 @@ options, the TUI into form fields, the API server into request validation, and
 the M10 MCP server into a JSON schema. A tool that described its parameters only
 in its typer signature could not do any of that."*
 
-That was written and never implemented. There are no generated commands, and
-`cli/main.py:31` contains this:
+That was written and never implemented, and the gap has since been filled by
+hand twice.
 
-```python
-EXTERNAL_BINARIES: dict[str, tuple[str, ...]] = {
-    "tesseract": ("ocr",),
-    "gs": ("compress", "pdfa"),
-    "pdftoppm": ("ocr", "to-images"),
-    "pandoc": ("convert",),
-}
-```
+**Once with a table.** `EXTERNAL_BINARIES` appeared in `cli/main.py` four days
+after ADR 0002 was accepted: a hardcoded central map from tools to their
+dependencies, in the interface layer, invisible to the server. The M1–M3 stack
+moved it down to `tools/_binaries.py`, which fixed the layering — `tools` sits
+below `cli`, so engines and `doctor` now read one list instead of two. The
+remaining coupling, `Binary.used_by` naming tools from a central list, is
+narrower and partly justified: it declares tools that do not exist yet so
+`doctor` can report on the whole roadmap.
 
-A hardcoded central table mapping tools to their dependencies, in the interface
-layer, invisible to the server — which is the exact structure ADR 0002 exists to
-abolish, and the exact structure that failed in v2 as a silently-drifting
-dispatch chain. It appeared four days after the ADR was accepted, because
-nothing was checking.
+**Once with commands.** `cli/commands.py` now hand-writes nine per-tool
+commands. Its own docstring says each one "does the same three things and
+nothing else", and the file factors out `_EngineOption`, `_ForceOption`,
+`_PagesOption`, and `_DryRunOption` by hand — because those options had to mean
+the same thing seven times. That factoring is the correct instinct applied one
+level too low: the thing that should be shared is the whole command, not the
+options inside it.
 
-Meanwhile the project is at one tool with forty-odd to come, and four planned
+Neither was careless. Both happened because the generic path did not exist and
+nothing objected to the specific one.
+
+The project is now at ten tools with thirty-odd to come, and four planned
 interfaces (CLI, TUI, HTTP, MCP). Hand-writing per-tool code in each surface is
 45 × 4 opportunities for the surfaces to disagree about what a tool accepts.
+Ten commands is a cheap refactor; forty is one nobody schedules.
 
 ## Decision
 
