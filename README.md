@@ -71,7 +71,7 @@ This is the part most tools get wrong, so it is worth being specific.
 
 These are enforced by tests that run on every commit across Linux, macOS, and
 Windows — not by good intentions. See
-[architecture.md](docs/architecture.md#the-structural-guarantees).
+[architecture.md](docs/architecture/overview.md#the-structural-guarantees).
 
 ## Install
 
@@ -84,21 +84,25 @@ pip install "DocmaxV3[all]"       # everything
 The base install is deliberately small. Heavy dependencies arrive only when you
 first ask for a local engine that needs them.
 
-Some local engines also need external programs (Ghostscript, Tesseract, Pandoc,
-Poppler):
+Some local engines also need external programs. `compress` needs
+**Ghostscript**; OCR and conversion will need Tesseract, Poppler and Pandoc.
 
 ```bash
-docmax doctor                     # what's installed, what's missing, what needs it
+docmax doctor      # what's installed, what's missing, and the command to fix it
 ```
+
+`doctor` prints the install line for your platform — `apt install ghostscript`,
+`brew install ghostscript`, or the winget package on Windows. It only reports;
+nothing is installed for you.
 
 ## Roadmap
 
 | | | |
 |---|---|---|
 | **M0** | Foundation — architecture, CI, safety mechanisms | ✅ done |
-| **M1** | Core engine + `merge` as the reference implementation | in progress |
-| **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | |
-| **M3** | `compress` + a real `setup` / `doctor` | |
+| **M1** | Core engine + `merge` as the reference implementation | ✅ complete |
+| **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ done |
+| **M3** | `compress` + external-binary support in `doctor` | ✅ done |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | |
 | **M5** | `convert`, `to-images`, `from-images` | |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | |
@@ -109,6 +113,16 @@ docmax doctor                     # what's installed, what's missing, what needs
 
 Benchmarks will be published in `benchmarks/` with real hardware and
 methodology. No numbers appear in this README until they are measured.
+
+## Documentation
+
+[**docs/**](docs/README.md) is the index. The short version:
+
+- [architecture/overview.md](docs/architecture/overview.md) — how DocMax is put
+  together, and why
+- [adr/](docs/adr/README.md) — the decisions, and what they cost
+- [planning/current-status.md](docs/planning/current-status.md) — what is done,
+  what is next, what is missing
 
 ## Contributing
 
@@ -121,7 +135,7 @@ pre-commit install
 pytest && ruff check . && mypy && lint-imports
 ```
 
-Start with [docs/architecture.md](docs/architecture.md) and the
+Start with [docs/architecture/overview.md](docs/architecture/overview.md) and the
 [ADRs](docs/adr/) — they explain the constraints, most of which exist for a
 specific reason.
 

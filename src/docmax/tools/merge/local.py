@@ -14,11 +14,20 @@ from __future__ import annotations
 import importlib.util
 from typing import TYPE_CHECKING, Any
 
+from docmax.core.errors import (
+    CorruptDocumentError,
+    EncryptedDocumentError,
+    InvalidParameterError,
+    UnsupportedFormatError,
+)
 from docmax.core.models import Engine, ToolResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pypdf import PdfReader
+
+    from docmax.core.cancellation import CancellationToken
     from docmax.core.models import DocumentRef, OutputTarget
     from docmax.core.protocols import EngineStrategy, ProgressSink
 
@@ -43,16 +52,128 @@ class MergeLocal:
         docs: Sequence[DocumentRef],
         target: OutputTarget,
         *,
-        progress: ProgressSink | None = None,
+        progress: ProgressSink,
+        cancellation: CancellationToken,
         **params: Any,
     ) -> ToolResult:
-        """Merge ``docs`` into ``target``.
+        """Merge ``docs`` into ``target``, in the order given.
 
-        Lands in M1 together with ``core/atomic.py``: pages are appended into a
-        temp file on the destination's filesystem, ``validators.page_count_is``
-        checks it, and only then is it renamed into place.
+        Pages are appended into a temp file on the destination's filesystem,
+        the validators check it, and only then is it renamed into place — so a
+        failure anywhere below leaves the destination exactly as it was.
+
+        **Progress convention, worth copying.** The tool calls ``start`` and
+        ``advance``; it does *not* call ``finish``. Only the tool knows what the
+        work is called and how many units it has, and only the router can
+        guarantee the region closes on every path — it does so in a ``finally``.
+        A tool that finished its own sink would double-finish on the happy path
+        and still leak on the paths it did not anticipate.
         """
-        raise NotImplementedError
+        import time
+
+        from docmax.core.atomic import atomic_write
+        from docmax.tools.merge.validators import is_readable_pdf, page_count_is
+
+        if not docs:
+            raise InvalidParameterError(
+                "Merge needs at least one document.",
+                remedy="Pass the files to merge, in the order you want them.",
+            )
+
+        outline = self._outline_option(params)
+        started = time.monotonic()
+
+        # pypdf is imported here rather than at module scope so that discovering
+        # this tool — which happens on every `--help` — costs nothing.
+        from pypdf import PdfWriter
+
+        writer = PdfWriter()
+        bookmarks: list[tuple[str, int]] = []
+
+        progress.start(f"Merging {len(docs)} document(s)", total=len(docs))
+        for document in docs:
+            # Between files is the safe checkpoint: nothing is on disk yet, and
+            # the staged file is discarded by the writer below.
+            cancellation.raise_if_cancelled(operation="merge")
+
+            reader = self._open(document)
+            bookmarks.append((document.path.stem, len(writer.pages)))
+            for page in reader.pages:
+                writer.add_page(page)
+            progress.advance()
+
+        if outline:
+            for title, first_page in bookmarks:
+                writer.add_outline_item(title, first_page)
+
+        pages = len(writer.pages)
+        cancellation.raise_if_cancelled(operation="merge")
+
+        with atomic_write(
+            target,
+            validators=(is_readable_pdf, page_count_is(pages)),
+        ) as handle:
+            writer.write(handle)
+
+        return self._result(
+            target,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            pages=pages,
+        )
+
+    @staticmethod
+    def _outline_option(params: dict[str, Any]) -> bool:
+        """Read the ``outline`` parameter, or explain what it should have been.
+
+        Declared in ``tool.py`` as a bool defaulting to true. Both interfaces
+        validate parameters against that declaration before calling, so this is
+        a second line rather than the first — but a library caller reaches this
+        method directly, and ``outline="yes"`` silently meaning *true* is the
+        class of bug the project's config layer already refuses.
+        """
+        value = params.get("outline", True)
+        if isinstance(value, bool):
+            return value
+        raise InvalidParameterError(
+            f"outline must be true or false, not {value!r}.",
+            remedy="Pass --outline or --no-outline.",
+            context={"parameter": "outline"},
+        )
+
+    @staticmethod
+    def _open(document: DocumentRef) -> PdfReader:
+        """Open one input, or raise the typed error that names what is wrong.
+
+        Three distinct failures, three distinct errors, because "merge failed"
+        sends a user looking in the wrong place: a Word document, a damaged
+        file, and a password-protected one each need a different next step.
+        """
+        from pypdf import PdfReader
+        from pypdf.errors import PyPdfError
+
+        if document.suffix != ".pdf":
+            raise UnsupportedFormatError(
+                f"merge only reads PDFs, and {document.path.name} is not one.",
+                context={"path": str(document.path), "suffix": document.suffix},
+            )
+
+        try:
+            reader = PdfReader(str(document.path))
+        except (PyPdfError, OSError, ValueError) as exc:
+            raise CorruptDocumentError(
+                f"{document.path.name} could not be read as a PDF: {exc}",
+                context={"path": str(document.path)},
+            ) from exc
+
+        if reader.is_encrypted:
+            # Checked before touching .pages, which raises its own error for
+            # this case with a far less useful message.
+            raise EncryptedDocumentError(
+                f"{document.path.name} is password-protected.",
+                context={"path": str(document.path)},
+            )
+
+        return reader
 
     def _result(self, target: OutputTarget, *, duration_ms: int, pages: int) -> ToolResult:
         """Shape of what ``run`` returns, once it does.

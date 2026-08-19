@@ -45,7 +45,7 @@ jobs:
         run: lint-imports
 
   # --------------------------------------------------------------------------
-  # The structural guarantees from docs/architecture.md. These are the tests
+  # The structural guarantees from docs/architecture/overview.md. These are the tests
   # that make v2's failure modes unreintroducible, so they run everywhere.
   # --------------------------------------------------------------------------
   test:

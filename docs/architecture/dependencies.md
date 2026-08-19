@@ -1,0 +1,133 @@
+# Dependency rules
+
+This document and [`.importlinter`](../../.importlinter) describe the same rules.
+When they disagree, one of them is a bug — see [Keeping this honest](#keeping-this-honest).
+
+## The direction
+
+```
+┌─────────────────────────────────────────────────┐
+│  Interfaces      cli · tui · server · mcp       │  may import everything below
+├─────────────────────────────────────────────────┤
+│  Application     tools                          │  may import cloud_client, core
+├─────────────────────────────────────────────────┤
+│  Integration     cloud_client                   │  may import core
+├─────────────────────────────────────────────────┤
+│  Foundation      core                           │  imports nothing internal
+└─────────────────────────────────────────────────┘
+```
+
+Dependencies point **downward only**. There is no upward import anywhere, and no
+sideways import between two interfaces.
+
+The rule that does the most work is the last line: `core` imports nothing from
+the rest of the package and no UI framework. That is what lets one core drive a
+CLI, a TUI, a batch runner, an HTTP server and an MCP server without
+modification — each of them is a *driver* of core, not a layer core knows about.
+
+## Currently enforced
+
+**Five** contracts run in CI via `lint-imports`, in the `lint` job. A violation
+fails the pull request.
+
+| Contract | Rule |
+|---|---|
+| `layers` | `cli` → `server` → `tools` → `cloud_client` → `core`, downward only |
+| `core-is-ui-free` | `core` may not import `rich`, `textual`, `typer`, `fastapi`, `mcp` |
+| `interfaces-are-independent` | `cli` and `server` may not import each other |
+| `core-is-standalone` | `core` may not import `tools`, `cli`, `cloud_client`, `server` |
+| `server-is-not-a-client` | `server` may not import `cloud_client` or `cli` |
+
+`cli` and `server` appear on separate lines in `layers` only because a layers
+contract is a *total order* and has to put one somewhere. They are peers, and
+`interfaces-are-independent` is what actually forbids traffic between them.
+
+Plus two AST-based hygiene tests that enforce related boundaries:
+
+| Test | Rule |
+|---|---|
+| `test_no_heavy_imports.py` | `docmax` and each `docmax.core` submodule pull in no heavy dependency, no interface framework and no cloud SDK (runs in a subprocess, one probe per module) |
+| `test_no_sys_exit.py` | library packages — including `server` — never terminate the process |
+| `test_wheel_excludes_server.py` | `docmax.server` does not ship in the wheel |
+
+## Not yet enforced
+
+**Nothing.** Every rule in this document has a check behind it.
+
+This section is kept deliberately rather than deleted: it is where a rule goes
+when it is written down before it can be enforced, and leaving the heading
+present makes an empty list a visible claim rather than an omission. The
+`docmax.tui` and `docmax.mcp` layers will each arrive with their own contracts
+(M7 and M10), and until they do there is no rule about them to leave unenforced.
+
+## Interfaces are peers, not a stack
+
+`cli`, `tui`, `server` and `mcp` are siblings. None is built on another, and
+none may import another.
+
+This needs saying because a `layers` contract is a *total order* — it has to put
+one interface above another, and that ordering will read as meaningful when it
+is not. When the second interface lands, the ordering inside `layers` becomes an
+artefact of the contract format, and an `independence` contract is what actually
+forbids traffic between them.
+
+The direction that matters most is `cli → server`: without a rule, importing the
+CLI could pull in a web framework, and `pip install docmax` would owe every user
+FastAPI in order to run `docmax merge`.
+
+## Optional dependencies
+
+The base install is deliberately small — five pure-Python packages that install
+in seconds on every platform. See [ADR 0001](../adr/0001-python-311.md) and
+non-negotiable #3.
+
+| Extra | Contains | For |
+|---|---|---|
+| *(base)* | `typer`, `rich`, `pypdf`, `platformdirs`, `httpx` | the shell and the cloud client |
+| `ocr` | Tesseract bindings, OpenCV, numpy | local OCR |
+| `tables` | pdfplumber, pandas, openpyxl | local table extraction |
+| `images` | Pillow, img2pdf | local image conversion |
+| `tui` | textual | the TUI (M7) |
+| `all` | every extra above | everything a *user* can run |
+| `dev` | pytest, ruff, mypy, import-linter, … | contributors |
+
+Two rules govern extras:
+
+- **`all` means every document capability, not every package in the repository.**
+  A dependency that a user cannot benefit from does not belong in it.
+- **Extras are self-referencing** (`docmax[ocr,tables,images,tui]`) so there is
+  one list rather than two that can drift. v2 shipped a `full` extra that
+  silently omitted OpenCV and broke the entire OCR path for anyone who used it.
+
+## Lazy loading and import safety
+
+`import docmax` must stay cheap, and `docmax --help` must not import OpenCV.
+Two mechanisms make that true:
+
+1. **The registry discovers tools by metadata.** A `ToolSpec` carries a tool's
+   name, summary and parameters plus the *dotted path* to its package — never
+   the package itself. `tools/<name>/local.py` is imported only when the router
+   has resolved that engine for that call. See
+   [ADR 0002](../adr/0002-registry-mechanism.md).
+2. **Heavy imports live inside functions.** A strategy answers `is_available()`
+   with `importlib.util.find_spec` or `shutil.which` — never by importing the
+   dependency, because availability is asked on every routing decision including
+   the ones that choose the other engine.
+
+`test_no_heavy_imports.py` asserts this in a **subprocess**. An in-process
+assertion would prove nothing: once pytest or another test has imported OpenCV,
+`sys.modules` reports it regardless of what `docmax` did.
+
+## Keeping this honest
+
+`.importlinter` is the authority; this document explains it. Whenever a contract
+changes:
+
+1. Update `.importlinter`.
+2. Update the tables above.
+3. If the *direction* of a dependency changed, write an ADR — that is an
+   architecture change, not a configuration tweak.
+
+If you find this document describing a rule CI does not enforce, that is a bug in
+this document, not an aspiration. Either add the check or move the line to
+[Not yet enforced](#not-yet-enforced).

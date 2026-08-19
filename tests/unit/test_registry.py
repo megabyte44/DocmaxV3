@@ -8,7 +8,9 @@ free.
 
 from __future__ import annotations
 
+import subprocess
 import sys
+import textwrap
 
 import pytest
 
@@ -31,11 +33,49 @@ def test_discovery_does_not_import_implementations() -> None:
     The strategy modules stay out of ``sys.modules`` until something asks for
     an engine — which is the whole reason ``ToolSpec`` carries a dotted path
     instead of a callable.
-    """
-    build_registry()
 
-    assert "docmax.tools.merge.local" not in sys.modules
-    assert "docmax.tools.ocr.local" not in sys.modules
+    Checked in a **subprocess**, for the same reason
+    ``tests/hygiene/test_no_heavy_imports.py`` does: pytest imports every test
+    module during collection, so as soon as any test file imports ``MergeLocal``
+    to exercise it, an in-process assertion here reports that module as loaded
+    and fails — regardless of what the registry actually did. The property is
+    real and worth pinning; only the measurement had to move.
+    """
+    probe = textwrap.dedent(
+        """
+        import sys
+        from docmax.core.registry import build_registry
+
+        build_registry()
+
+        # Discovery legitimately imports each tool package and its `tool.py` —
+        # that is where the metadata lives. What must stay out is the code that
+        # does the work, and the validators that pull in the same heavy deps.
+        implementation = {"local", "cloud", "validators"}
+        leaked = sorted(
+            name
+            for name in sys.modules
+            if name.startswith("docmax.tools.") and name.rsplit(".", 1)[-1] in implementation
+        )
+        if leaked:
+            print(",".join(leaked))
+            sys.exit(1)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        "Building the registry imported tool implementations: "
+        f"{result.stdout.strip()}\n"
+        "Discovery must read metadata only — see docs/adr/0002-registry-mechanism.md.\n"
+        f"{result.stderr}"
+    )
 
 
 def test_specs_declare_their_engines() -> None:
