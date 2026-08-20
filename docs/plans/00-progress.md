@@ -1,6 +1,7 @@
 # Progress — where to pick this up
 
-Written 2026-08-20. Delete when plans 01–06 have landed.
+Written 2026-08-20, updated the same day once #10, #11, and #12 merged. Delete
+when plans 01–06 have landed.
 
 ## Branch state, resolved
 
@@ -40,29 +41,39 @@ pre-reconciliation copies. Tagged `archive/architecture` and
 **New — one branch.** `docs/build-leverage-plans`, carrying this directory,
 ADRs 0010 and 0011, and `CLAUDE.md`.
 
-## Open items — four commands, all needing a human
+## Merged since this was written
 
-Two PRs are open and green. Merging a PR and deleting a remote branch both
-require a permission the agent session did not have, so they are left for you.
-Nothing here is blocked on a failure.
+PR #10 (the M1–M3 stack), #11 (these plans), and #12 (a macOS data-loss fix in
+`OutputTarget.resolve`, plus the CI matrix rework below) are all merged into
+`main`. `main` is green.
+
+**One thing left, still needing a human:** the remote holds thirteen branches
+with no unmerged content — confirmed with `git cherry origin/main <branch>`
+for every one, `-` on all of them. Deleting a remote branch is blocked for the
+agent session by the same permission that blocks merging a PR.
 
 ```bash
-# 1. the M1-M3 stack -- verified green locally, see above
-gh pr merge 10 --merge --delete-branch
-
-# 2. these plans (depends on #10 being in first)
-gh pr merge 11 --merge --delete-branch
-
-# 3. the five stack branches below the tip, now merged transitively
-git push origin --delete feat/core-reconciliation feat/engine-router     feat/merge-tool feat/cli-integration feat/m2-pypdf-tools
-
-# 4. the merged and superseded remotes
-git push origin --delete chore/bump-version-3.0.0a7     chore/rename-pypi-distribution fix/ci-color-and-golden-exit-code     m1-foundations architecture feat/core-foundation
+git push origin --delete \
+  feat/m3-compress feat/m2-pypdf-tools feat/cli-integration \
+  feat/merge-tool feat/engine-router feat/core-reconciliation \
+  docs/build-leverage-plans fix/ci-macos-and-matrix \
+  chore/bump-version-3.0.0a7 chore/rename-pypi-distribution \
+  fix/ci-color-and-golden-exit-code m1-foundations \
+  architecture feat/core-foundation
 ```
 
-Local branches are already cleaned: only `main` and
-`docs/build-leverage-plans` remain. After step 4 the remote should hold `main`
-alone.
+That leaves `main` alone on the remote.
+
+## A CI incident, also since this was written
+
+`main` briefly went red after #11: the macOS legs failed a real bug (see PR
+#12's description — `OutputTarget.resolve` compared paths as strings, which
+misses a case-only difference on a case-insensitive volume, so
+`-o A.PDF` against input `a.pdf` was silently in-place on macOS), and a hung
+`apt-get update` ran for 12 minutes with no timeout to stop it. Fixed, and the
+CI matrix now scales with the event — 4 legs on a normal PR instead of 9, full
+matrix on `main`/release/`ci:full`, every job capped. Wall clock for a PR run
+went from ~13 minutes (cancelled, still red) to ~1m36s.
 
 ## What changed in the plans because of the stack
 
@@ -95,21 +106,20 @@ ADRs were renumbered **0006 → 0010** and **0007 → 0011**: the stack ships AD
 
 ## Start here
 
-1. Run the four commands above: merge #10 and #11, delete the eleven dead
-   remote branches.
-2. Plan 01 — the generation layer. Do it at ten commands, not forty. The 867
+1. Delete the thirteen dead remote branches, command above.
+2. Plan 01 — the generation layer. Do it at ten commands, not forty. The 868
    tests make the refactor cheap; migrate one command at a time.
 3. Plan 02 — the contract suite, as a bug hunt across the ten existing tools.
 4. Plan 03 next if M9 pipelines still matter, since it only gets dearer.
 
-## Two loose threads, neither blocking
+## Two loose threads, now filed rather than left here
 
-**`mypy` fails locally when the `ocr` extra is installed.** numpy's bundled
-stubs use `type` statements that need `python_version >= 3.12`, and
-`[tool.mypy]` pins `3.11`. CI never sees it because `[dev]` does not install
-numpy — so this hits contributors and not the pipeline, which is the worst way
-round. `mypy --python-version=3.12` is the workaround.
+Per the workflow in `CLAUDE.md` § Git & issues: found, not fixed, and moved out
+of a progress doc into something that survives past this file's deletion.
 
-**`docs/plans/` and `docs/planning/` sit side by side** and mean different
-things: this directory is what to build next, `docs/planning/` is where the
-project is. Worth renaming one of them.
+- [#13](https://github.com/megabyte44/DocmaxV3/issues/13) — `mypy` fails
+  locally with the `ocr` extra installed (numpy's stubs need
+  `python_version >= 3.12`; `[tool.mypy]` pins `3.11`, and CI never sees the
+  failure because `[dev]` does not install numpy).
+- [#14](https://github.com/megabyte44/DocmaxV3/issues/14) — `docs/plans/` and
+  `docs/planning/` read as the same thing; rename one.
