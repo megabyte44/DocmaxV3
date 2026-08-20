@@ -152,6 +152,51 @@ Apart from step 6, you should not need to touch `cli/`, `server/`, or any file
 shared with another tool. **If you do, that is the bug** — the missing
 generality belongs in the spec or the router, not in a special case.
 
+## Git & issues
+
+### Branches
+
+`<type>/<kebab-slug>`, matching the commit type below. CI-only work branches as
+`fix/ci-<slug>`, not `ci/<slug>` — that is the pattern already in this repo's
+history (`fix/ci-workflow-call`, `fix/ci-macos-and-matrix`), and it keeps one
+prefix per concern instead of two competing ones.
+
+Other examples already in the repo: `feat/merge-tool`, `feat/m3-compress`,
+`docs/build-leverage-plans`, `chore/bump-version-3.0.0a7`.
+
+### Commits
+
+Conventional commits, imperative mood: `type(scope): summary`. `scope` names
+the package touched — `core`, `tools`, `cli`, `server`, `cloud_client`,
+`tests`, `ci`, `packaging` — and is omitted only when a change has no single
+owner (`docs:`, `chore:`, a repo-wide `ci:`).
+
+Types: `feat`, `fix`, `chore`, `docs`, `ci`, `style`, `refactor`, `test`.
+
+### File it before you build it
+
+Found a bug, a gap, or an idea for a tool while working on something else?
+**Open an issue, not a branch.** `gh issue create`, labelled `area:*` for the
+package it touches. A filed issue is a proposal; it becomes work when the
+person who owns that area decides it is worth doing — not the moment it is
+noticed.
+
+This binds Claude specifically: report and file, do not implement, unless the
+current conversation already asked for that fix or that feature. Two narrow
+exceptions — a defect in the exact code you were just asked to change (fix it,
+do not file it and walk off), and anything the user names directly.
+
+Labels: `area:core`, `area:tools`, `area:cli`, `area:server`,
+`area:cloud-client`, `area:ci`, `area:docs` — one per package. Type is covered
+by the existing defaults (`bug`, `enhancement`, `documentation`, `question`).
+
+### Pushing
+
+Every change is a branch and a PR — never push to `main` directly, even for a
+one-line fix. Never force-push a branch someone else might be using. Merging a
+PR and deleting a remote branch are for the person running the session to do,
+not something to carry out unasked.
+
 ## Where decisions live
 
 - `docs/adr/` — accepted decisions and why. Add one rather than reversing a
