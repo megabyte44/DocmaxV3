@@ -12,7 +12,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M1** | Core engine + `merge` as the reference implementation | ✅ complete |
 | **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ complete |
 | **M3** | `compress` + external-binary support in `doctor` | ✅ complete |
-| **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | planned |
+| **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ complete |
 | **M5** | `convert`, `to-images`, `from-images` | planned |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | planned |
 | **M7** | Textual TUI + visual pickers for crop and reorder | planned |

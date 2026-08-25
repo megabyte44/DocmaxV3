@@ -28,6 +28,38 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **The M4 tool set** — `watermark`, `stamp`, `protect`, `unlock` and
+  `permissions`, all pure pypdf and all reached through the same router.
+  - `watermark` draws vector text over the page in Helvetica, one of the
+    fourteen faces every PDF reader has built in — so nothing is embedded,
+    nothing is rasterised, and no new dependency was needed. Text the standard
+    font cannot draw is refused rather than silently rendered as the wrong
+    glyphs.
+  - `stamp` overlays another PDF's first page. The overlay is passed as a second
+    *input* rather than as a path parameter, so the existing "an input can never
+    be the output" check covers it and `stamp a.pdf --stamp logo.pdf -o logo.pdf`
+    is refused instead of consuming the logo while reading it.
+  - `protect` encrypts with **AES-256 by default**, which needs the new `crypto`
+    extra. The weaker RC4 algorithms still work with no extra install but have
+    to be named explicitly: a tool called `protect` should not quietly hand you
+    broken encryption. Its output is checked for *being encrypted* before it
+    replaces anything, because a readable unencrypted PDF is the one failure
+    here that looks exactly like success.
+  - `unlock` removes a password you already have. It does not recover, guess or
+    break one. Because PDF permissions live inside the encryption dictionary,
+    an unlocked copy allows everything — stated rather than left to be found.
+  - `permissions` reports what a document allows, and says plainly that those
+    bits are advisory: a reader that ignores them is not breaking anything.
+    Setting them is `protect --allow`, so encryption has one implementation
+    rather than two.
+
+  Shared vocabularies keep the five consistent with each other and with what came
+  before: `_position.py` owns the nine named positions `watermark` and `stamp`
+  share, and `_permissions.py` owns the eight permission names `protect` writes
+  and `permissions` reads.
+- **A `crypto` extra** — `pip install "DocmaxV3[crypto]"`, which is what pypdf
+  needs to read or write anything stronger than RC4. Absent, `protect` names the
+  install line instead of failing obscurely or downgrading in silence.
 - **`compress`** — shrinks a PDF with Ghostscript, and the first engine that is
   another program rather than a Python library. Output goes through
   `atomic_path`, so a Ghostscript that fails, hangs, or exits zero having

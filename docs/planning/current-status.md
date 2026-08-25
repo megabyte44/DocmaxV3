@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-18 · **Branch:** `feat/m3-compress` · **Base:** `15b42c4` (`origin/main`, `v3.0.0a7`)
+**Last updated:** 2026-08-25 · **Branch:** `feat/m4-pdf-tools` · **Base:** `4a5d74a` (M3 complete)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,7 +10,7 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–8 are complete. Milestones M1, M2 and M3 are done; the published
+**Phases 0–8 are complete. Milestones M1 through M4 are done; the published
 package is `DocmaxV3` 3.0.0a7, which predates them.**
 
 | Phase | | |
@@ -24,10 +24,21 @@ package is `DocmaxV3` 3.0.0a7, which predates them.**
 | 6 — `merge` as reference tool | **complete** | M1 closed; CLI wired to the router |
 | 7 — M2 pypdf tool set | **complete** | split, rotate, pages, reorder, metadata, sanitize, get-info |
 | 8 — M3 compress + binary doctor | **complete** | first external-binary engine |
+| M4 — marking and encryption | **complete** | watermark, stamp, protect, unlock, permissions — no new phase; see the note below |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
 noticed. [ADR 0009](../adr/0009-main-is-the-base.md) records this.
+
+**The phase numbers in this table are not the ones in
+[phases.md](phases.md).** That file numbers the *engineering foundations* and
+its Phases 7–9 are the cloud client, the HTTP server and the TUI; this table has
+been reusing those numbers for the feature milestones that shipped on top of
+them. The drift predates M4 and is not resolved here. M4 is listed without a
+number rather than taking `9`, which phases.md has already spent on the TUI —
+and it needs no phase of its own in any case, since phases.md says milestones
+from M2 onward are increments over a finished foundation rather than new
+foundations.
 
 ### Core as it stands
 
@@ -53,6 +64,11 @@ noticed. [ADR 0009](../adr/0009-main-is-the-base.md) records this.
 | `rotate`, `pages`, `reorder`, `sanitize` | done |
 | `metadata`, `get-info` | done — read-only paths write nothing |
 | `compress` | done — Ghostscript, via `atomic_path`; needs the binary installed |
+| `watermark` | done — vector text overlay, no new dependency and nothing rasterised |
+| `stamp` | done — overlays another PDF's first page; the overlay is a second *input* |
+| `protect` | done — AES-256 by default, which needs the `crypto` extra |
+| `unlock` | done — needs a password that already opens the file; never guesses one |
+| `permissions` | done — read-only, like `get-info` |
 | `ocr` | **skeleton** — `run()` and both validators are `NotImplementedError`, M8 |
 
 Shared between them: `tools/_pagespec.py` parses page selections once,
@@ -61,9 +77,18 @@ runs external programs once — with a timeout that cannot be forgotten and a
 kill switch wired to the cancellation token. `doctor` reads the same
 declaration, so the CLI and the tools cannot disagree about what is installed.
 
+M4 added two more of the same kind: `tools/_position.py` owns the nine named
+positions `watermark` and `stamp` share, and `tools/_permissions.py` owns the
+permission vocabulary `protect` writes and `permissions` reads. Both exist for
+`_pagespec`'s reason — a user who learns `bottom-right` or `copy` for one tool
+must not find the other spells it differently. `_pdf.py` also grew
+`open_encrypted_pdf`, the counterpart to `open_pdf` for the two tools whose
+*subject* is a locked document.
+
 Beyond the tools: `cloud_client/` is implemented; `server/` is implemented apart
 from its tool-execution bridge, which can now call the router. The CLI exposes
-all eight working tools plus `doctor`.
+all fourteen working tools plus `doctor` — every registered tool except
+`ocr`, which is still a skeleton.
 
 ---
 
@@ -74,16 +99,23 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **865 passed, 2 skipped, 2 deselected** |
+| `pytest -m "not golden and not needs_binary"` | **1148 passed, 2 skipped, 2 deselected** |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 133 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 108 source files |
+| `ruff format --check .` | **passed** — 156 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 131 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
 Both skips are intentional — the self-exemptions inside the hygiene suite:
 `branding.py` may contain brand literals, and `atomic.py` may write directly.
 
-Environment: Windows, CPython 3.14, `.venv` from `pip install -e ".[dev]"`.
+Environment: Windows, CPython 3.14, `.venv` from `pip install -e ".[dev]"`,
+plus `cryptography` for the `crypto` extra M4 introduced.
+
+**`mypy` had to be reinstalled from its sdist to run here.** The wheel ships a
+compiled `mypyc` extension, and this machine's Windows Application Control
+policy blocks loading it — `pip install --no-binary mypy` produces the pure
+Python build, which runs and passes. This is a property of the development
+machine, not of the project; CI installs the wheel and is unaffected.
 
 **Still unverified:** the CI matrix — Linux and macOS, and Python 3.11–3.13.
 Everything above is one platform and one interpreter, and 3.14 is not in the
@@ -149,7 +181,7 @@ checks arrived with the server, as the architecture said they must.
 | `planning/*` | current. `reconciliation.md` is superseded by ADR 0009 and deletable |
 | `cloud-api.md` | design-stage; data-handling now points at the terms constant |
 | `README.md` | current |
-| `CHANGELOG.md` | current through M2 |
+| `CHANGELOG.md` | current through M4 |
 | `development/*` | **missing** — no setup, testing or contributing guide |
 | `api/*` | not needed until the HTTP layer exists |
 
@@ -223,13 +255,27 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M4 — `watermark`, `stamp`, `protect`, `unlock`, `permissions`.** All pypdf, so
-they follow the M2 pattern rather than compress's.
+**M5 — `convert`, `to-images`, `from-images`.** The first tools that read and
+write something other than a PDF, so the first to need `OutputTarget` to think
+about a suffix that is not `.pdf`, and the first consumers of the `images`
+extra.
 
-**Still outstanding from M2**, and unchanged: `ToolSpec` cannot say "this tool
-produces no output", so `get-info` and a bare `metadata` accept an
-`OutputTarget` they ignore. Compress did not need it — it plainly produces
-output — so nothing was added. It remains a decision owed an ADR.
+**Outstanding from M2, and now larger**: `ToolSpec` still cannot say "this tool
+produces no output", so `get-info`, a bare `metadata`, and now `permissions`
+accept an `OutputTarget` they ignore, and the CLI builds one directly for them
+through `execute_read_only`. Three tools is where a seam stops being a curiosity.
+The fix is a `produces_output` flag on `ToolSpec` that the router honours; it is
+a change to core and to the registry, and it remains **a decision owed an ADR**
+rather than something to slip into a feature branch.
+
+**`permissions` reads and does not write, and that was a judgement call.**
+Nothing in the repository documented what the tool should do. `metadata`'s
+dual read/write shape was the obvious precedent, but writing a permission bit
+means encrypting the document — algorithm, user password, owner password — which
+is the whole of `protect`. Rather than have two tools implement encryption,
+`protect --allow` sets permissions and `permissions` reports them. Recorded here
+because it is a contract decision made in the absence of one, and it should be
+confirmed or overturned deliberately.
 
 **Ghostscript is not installed on the development machine**, so the two
 `needs_binary` compress tests are skipped locally and required in CI. Everything

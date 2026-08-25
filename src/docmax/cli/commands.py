@@ -1,4 +1,4 @@
-"""The M2 tool commands.
+"""The tool commands — everything except ``merge`` and ``doctor``.
 
 Kept out of ``main.py`` so that file stays the application shell — the app
 object, global options, and `doctor`. Each command here does the same three
@@ -13,13 +13,25 @@ none has.
 
 ## Read-only commands
 
-``get-info`` and a bare ``metadata`` write nothing, but ``EngineStrategy.run``
-requires an ``OutputTarget``. Those two build one directly rather than through
-``router.target_for``, because resolution would check a destination that is
-never written — and would refuse the run with ``OutputExistsError`` if a file
-happened to sit at the derived path. See the note in ``tools/get_info/local.py``:
-the clean fix is a ``produces_output`` flag on ``ToolSpec``, which is a core
-change and is being reported rather than made.
+``get-info``, ``permissions`` and a bare ``metadata`` write nothing, but
+``EngineStrategy.run`` requires an ``OutputTarget``. Those three build one
+directly rather than through ``router.target_for``, because resolution would
+check a destination that is never written — and would refuse the run with
+``OutputExistsError`` if a file happened to sit at the derived path. See the note
+in ``tools/get_info/local.py``: the clean fix is a ``produces_output`` flag on
+``ToolSpec``, which is a core change and is being reported rather than made. It
+was two tools at M2 and is three now, which is the point at which it stops being
+a curiosity.
+
+## Vocabularies come from the modules that own them
+
+``--position``, ``--allow`` and ``--algorithm`` list their accepted values by
+importing them from ``tools/_position.py``, ``tools/_permissions.py`` and
+``tools/protect/tool.py``. Retyping the names into help text would put a second
+copy of each list in the layer least likely to be updated when one changes.
+Those modules import nothing but ``core``, so this costs the CLI nothing at
+startup — the same property that lets the registry read every ``tool.py`` on
+every ``--help``.
 """
 
 from __future__ import annotations
@@ -30,6 +42,8 @@ from typing import Annotated
 import typer
 
 from docmax.core.models import Engine
+from docmax.tools import _permissions, _position
+from docmax.tools.protect import tool as protect_spec
 
 app_commands = typer.Typer()
 
@@ -51,6 +65,16 @@ _PagesOption = Annotated[
     str | None,
     typer.Option("--pages", help="Which pages, e.g. 1-3,7. Default: all."),
 ]
+
+#: Rendered into `--position` help so the nine names are listed by the module
+#: that defines them rather than retyped per command.
+_POSITIONS = ", ".join(_position.NAMES)
+
+#: Likewise for the permission vocabulary and the encryption algorithms:
+#: listed by the modules that define them rather than retyped in help text.
+_PERMISSIONS = ", ".join(_permissions.NAMES)
+_ALGORITHMS = ", ".join(protect_spec.ALGORITHMS)
+_DEFAULT_ALGORITHM = protect_spec.DEFAULT_ALGORITHM
 
 
 @app_commands.command()
@@ -209,6 +233,101 @@ def sanitize(
 
 
 @app_commands.command()
+def watermark(
+    source: Annotated[Path, typer.Argument(help="The PDF to mark.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    text: Annotated[str, typer.Option("--text", help="The words to draw.", show_default=False)],
+    position: Annotated[
+        str, typer.Option("--position", help=f"Where it sits: {_POSITIONS}.")
+    ] = "center",
+    size: Annotated[float, typer.Option("--size", help="Font size in points.")] = 48.0,
+    opacity: Annotated[float, typer.Option("--opacity", help="0 is invisible, 1 is solid.")] = 0.15,
+    angle: Annotated[
+        float, typer.Option("--angle", help="Degrees anticlockwise from horizontal.")
+    ] = 45.0,
+    pages: _PagesOption = None,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Draw text across every page.
+
+    Vector text in Helvetica, drawn over the existing content — nothing is
+    rasterised and nothing underneath is changed. A watermark is a *mark*, not a
+    protection: it sits in its own layer and any PDF editor can take it off
+    again. Use `protect` for a document that must not be opened.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "watermark",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        text=text,
+        position=position,
+        size=size,
+        opacity=opacity,
+        angle=angle,
+        pages=pages,
+    )
+    render_result(result, dry_run=dry_run)
+
+
+@app_commands.command()
+def stamp(
+    source: Annotated[Path, typer.Argument(help="The PDF to stamp.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    overlay: Annotated[
+        Path,
+        typer.Option("--stamp", help="The PDF whose first page is the stamp.", show_default=False),
+    ],
+    position: Annotated[
+        str, typer.Option("--position", help=f"Where it sits: {_POSITIONS}.")
+    ] = "bottom-right",
+    scale: Annotated[
+        float, typer.Option("--scale", help="Resize the stamp. 1 is its own size.")
+    ] = 1.0,
+    pages: _PagesOption = None,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Draw another PDF's first page onto every page.
+
+    The stamp keeps whatever it is — vector artwork stays vector, embedded fonts
+    stay embedded — because its content stream is transformed and merged rather
+    than rendered. Only the first page of the stamp document is used.
+
+    `--stamp` is a genuine input, not just a path: it is checked against `-o` the
+    same way the source is, so a command that would overwrite the stamp while
+    reading it is refused.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "stamp",
+        [source, overlay],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        position=position,
+        scale=scale,
+        pages=pages,
+    )
+    render_result(result, dry_run=dry_run)
+
+
+@app_commands.command()
 def compress(
     source: Annotated[Path, typer.Argument(help="The PDF to compress.", show_default=False)],
     output: Annotated[
@@ -241,6 +360,123 @@ def compress(
         preset=preset,
     )
     render_result(result, dry_run=dry_run)
+
+
+@app_commands.command()
+def protect(
+    source: Annotated[Path, typer.Argument(help="The PDF to encrypt.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    password: Annotated[
+        str,
+        typer.Option("--password", help="The password needed to open it.", show_default=False),
+    ],
+    owner_password: Annotated[
+        str | None,
+        typer.Option(
+            "--owner-password",
+            help="The password that bypasses the permissions. Default: the same one.",
+        ),
+    ] = None,
+    allow: Annotated[
+        list[str] | None,
+        typer.Option("--allow", help=f"What a reader may do: {_PERMISSIONS}, all, none."),
+    ] = None,
+    algorithm: Annotated[
+        str, typer.Option("--algorithm", help=f"One of: {_ALGORITHMS}.")
+    ] = _DEFAULT_ALGORITHM,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Encrypt a PDF with a password.
+
+    AES-256 by default, which needs the `crypto` extra —
+    `pip install "DocmaxV3[crypto]"`. The weaker RC4 algorithms work with no
+    extra install and have to be asked for by name, because a tool called
+    `protect` should not quietly hand you broken encryption.
+
+    `--allow` narrows what a reader may do. Those bits are **advisory**: they
+    tell a conforming reader what you would prefer, and nothing forces one to
+    obey. The encryption is the boundary; the permissions are a request.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "protect",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        password=password,
+        owner_password=owner_password,
+        allow=allow,
+        algorithm=algorithm,
+    )
+    render_result(result, dry_run=dry_run)
+
+
+@app_commands.command()
+def unlock(
+    source: Annotated[Path, typer.Argument(help="The PDF to unlock.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    password: Annotated[
+        str,
+        typer.Option("--password", help="The password that opens it.", show_default=False),
+    ],
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Write a copy of an encrypted PDF with the password removed.
+
+    You have to supply a password that already opens the document — either the
+    user or the owner one. This does not recover, guess or break a password, and
+    it never will.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "unlock",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        password=password,
+    )
+    render_result(result, dry_run=dry_run)
+
+
+@app_commands.command()
+def permissions(
+    source: Annotated[Path, typer.Argument(help="The PDF to inspect.", show_default=False)],
+    password: Annotated[
+        str | None,
+        typer.Option("--password", help="Needed if the document is encrypted."),
+    ] = None,
+    engine: _EngineOption = None,
+) -> None:
+    """Report what a PDF says a reader may do with it.
+
+    Read-only: it never writes a file, so it takes no `-o`. `protect` is where
+    permissions are set.
+
+    A PDF with no encryption has no permission field at all, so everything is
+    reported as allowed — that is the truth about the file rather than a
+    default. And every bit here is advisory: a reader that ignores them is not
+    breaking anything.
+    """
+    from docmax.cli.execution import execute_read_only
+    from docmax.cli.render import render_permissions
+
+    render_permissions(execute_read_only("permissions", source, engine=engine, password=password))
 
 
 @app_commands.command()

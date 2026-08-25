@@ -66,6 +66,14 @@ images = [
 tui = [
     "textual>=0.60.0",
 ]
+# What pypdf needs in order to write anything stronger than RC4. Small, pure
+# wheels on every supported platform -- but still an extra rather than a base
+# dependency, because it is a compiled package and non-negotiable #3 says the
+# base install stays pure Python. `protect` names it in the error when the
+# default algorithm needs it and it is absent.
+crypto = [
+    "cryptography>=42.0",
+]
 # Dependencies for the reference API server — the half a self-hoster deploys.
 # Not in `all`: installing DocMax should never install a web framework by
 # accident. Note this extra installs what the server *needs*, not the server
@@ -86,7 +94,7 @@ server = [
 # resolve to that external package instead of self-referencing, shadowing the
 # local editable install with v2's incompatible module layout.
 all = [
-    "DocmaxV3[ocr,tables,images,tui]",
+    "DocmaxV3[ocr,tables,images,tui,crypto]",
 ]
 dev = [
     "pytest>=8.2.0",

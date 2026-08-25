@@ -117,6 +117,44 @@ def render_metadata(result: ToolResult) -> None:
     out.print(table)
 
 
+def render_permissions(result: ToolResult) -> None:
+    """Print what `permissions` found, as a table of what is and is not allowed.
+
+    The advisory note is printed every time rather than only for a restricted
+    document. Someone who reads "Copy text: no" and stops there has learned the
+    wrong thing, and the one line that corrects it costs nothing.
+    """
+    from rich.table import Table
+
+    details = result.details
+    table = Table(title=str(details.get("name", "")), title_justify="left")
+    table.add_column("Permission")
+    table.add_column("Allowed")
+    table.add_column("What it covers")
+
+    allowed = details.get("permissions", {})
+    descriptions = details.get("descriptions", {})
+    for name in allowed:
+        table.add_row(
+            name,
+            "[green]yes[/green]" if allowed[name] else "[red]no[/red]",
+            str(descriptions.get(name, "")),
+        )
+
+    out.print(table)
+
+    if not details.get("encrypted"):
+        console.print("  [dim]Not encrypted — a PDF with no encryption restricts nothing.[/dim]")
+        return
+
+    opened = details.get("opened_with")
+    if opened == "owner":
+        console.print(
+            "  [dim]Opened with the owner password, which bypasses all of these anyway.[/dim]"
+        )
+    console.print("  [dim]These are advisory: nothing forces a reader to honour them.[/dim]")
+
+
 def render_info(result: ToolResult) -> None:
     """Print what `get-info` found.
 
@@ -149,5 +187,6 @@ __all__ = [
     "render_error",
     "render_info",
     "render_metadata",
+    "render_permissions",
     "render_result",
 ]

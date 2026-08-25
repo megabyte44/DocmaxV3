@@ -97,7 +97,8 @@ pain and nothing else:
 | `pdfa` | Ghostscript |
 | `remove-bg` | an ONNX model download |
 
-Everything pypdf-only — `merge`, `split`, `rotate`, `sanitize`, `get-info` — sets
+Everything pypdf-only — `merge`, `split`, `rotate`, `sanitize`, `watermark`,
+`stamp`, `protect`, `unlock`, `get-info` — sets
 `cloud = None`. Uploading a document to perform a millisecond-long pure-Python
 operation is slower, less private, and needs a network. It would be architecture
 for its own sake.

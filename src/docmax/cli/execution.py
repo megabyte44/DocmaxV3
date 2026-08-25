@@ -183,6 +183,7 @@ def execute_read_only(
     *,
     router: EngineRouter | None = None,
     engine: Engine | None = None,
+    **params: Any,
 ) -> ToolResult:
     """Run a tool that writes nothing, and render whatever happens.
 
@@ -213,6 +214,7 @@ def execute_read_only(
                 requested=engine,
                 progress=progress,
                 cancellation=token,
+                **params,
             )
         except CancelledError as exc:
             console.print(f"[yellow]{exc.message}[/yellow]")

@@ -78,6 +78,7 @@ Windows — not by good intentions. See
 ```bash
 pip install DocmaxV3              # the shell and the cloud client
 pip install "DocmaxV3[ocr]"       # local OCR
+pip install "DocmaxV3[crypto]"    # AES encryption for `protect`
 pip install "DocmaxV3[all]"       # everything
 ```
 
@@ -86,6 +87,10 @@ first ask for a local engine that needs them.
 
 Some local engines also need external programs. `compress` needs
 **Ghostscript**; OCR and conversion will need Tesseract, Poppler and Pandoc.
+
+`protect` defaults to AES-256, which needs the `crypto` extra. It says so and
+names the install line rather than quietly falling back to RC4 — a tool called
+`protect` should not hand you broken encryption without mentioning it.
 
 ```bash
 docmax doctor      # what's installed, what's missing, and the command to fix it
@@ -103,7 +108,7 @@ nothing is installed for you.
 | **M1** | Core engine + `merge` as the reference implementation | ✅ complete |
 | **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ done |
 | **M3** | `compress` + external-binary support in `doctor` | ✅ done |
-| **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | |
+| **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ done |
 | **M5** | `convert`, `to-images`, `from-images` | |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | |
 | **M7** | Textual TUI + visual pickers for crop and reorder | |
