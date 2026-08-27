@@ -42,7 +42,7 @@ from typing import Annotated
 import typer
 
 from docmax.core.models import Engine
-from docmax.tools import _permissions, _position
+from docmax.tools import _formats, _permissions, _position
 from docmax.tools.protect import tool as protect_spec
 
 app_commands = typer.Typer()
@@ -75,6 +75,11 @@ _POSITIONS = ", ".join(_position.NAMES)
 _PERMISSIONS = ", ".join(_permissions.NAMES)
 _ALGORITHMS = ", ".join(protect_spec.ALGORITHMS)
 _DEFAULT_ALGORITHM = protect_spec.DEFAULT_ALGORITHM
+
+#: And the format vocabulary. `formats` renders the same declaration in
+#: full; these two strings are only the short version for `--help`. ADR 0010.
+_CONVERT_FORMATS = ", ".join(_formats.convertible_names())
+_IMAGE_FORMATS = ", ".join(_formats.rasterisable_names())
 
 
 @app_commands.command()
@@ -477,6 +482,137 @@ def permissions(
     from docmax.cli.render import render_permissions
 
     render_permissions(execute_read_only("permissions", source, engine=engine, password=password))
+
+
+@app_commands.command()
+def convert(
+    source: Annotated[Path, typer.Argument(help="The document to convert.", show_default=False)],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Where to write the result.", show_default=False),
+    ],
+    to: Annotated[
+        str,
+        typer.Option("--to", help=f"Target format: {_CONVERT_FORMATS}.", show_default=False),
+    ],
+    standalone: Annotated[
+        bool,
+        typer.Option(
+            "--standalone/--no-standalone",
+            help="Produce a complete document rather than a fragment.",
+        ),
+    ] = True,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Convert a document to another format with Pandoc.
+
+    **PDF is not supported in either direction.** Pandoc has no PDF reader, and
+    writing PDF needs a LaTeX distribution DocMax does not install — see
+    [ADR 0011](https://github.com/megabyte44/docmax/blob/main/docs/adr/0011-convert-is-pandoc-only.md).
+    To turn a PDF into images use `to-images`.
+
+    Needs Pandoc installed — run `docmax doctor` to check, and it will print the
+    install line for your platform. Run `docmax formats` for the full table.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "convert",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        to=to,
+        standalone=standalone,
+    )
+    render_result(result, dry_run=dry_run)
+
+
+@app_commands.command(name="to-images")
+def to_images(
+    source: Annotated[Path, typer.Argument(help="The PDF to render.", show_default=False)],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output", "-o", help="Directory to write the images into.", show_default=False
+        ),
+    ],
+    image_format: Annotated[
+        str, typer.Option("--format", help=f"Image format: {_IMAGE_FORMATS}.")
+    ] = "png",
+    dpi: Annotated[int, typer.Option("--dpi", help="Resolution in dots per inch.")] = 150,
+    pages: _PagesOption = None,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Render each page of a PDF as an image.
+
+    The output is a **directory**, staged and swapped in as a unit — a cancelled
+    run leaves the destination exactly as it was rather than holding the first
+    few pages.
+
+    Needs Poppler installed — run `docmax doctor` to check. Every image is
+    verified to carry a real header of its format before the directory replaces
+    anything.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "to-images",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        format=image_format,
+        dpi=dpi,
+        pages=pages,
+    )
+    render_result(result, dry_run=dry_run)
+
+
+@app_commands.command(name="from-images")
+def from_images(
+    images: Annotated[
+        list[Path],
+        typer.Argument(
+            help="Images to combine, in the order they should appear.",
+            show_default=False,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Where to write the PDF.", show_default=False),
+    ],
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+) -> None:
+    """Combine images into a PDF, one page per image.
+
+    Page order is argument order, and each page is exactly as large as its image
+    — nothing is scaled or cropped. JPEGs are embedded without being re-encoded.
+
+    `-o` pointing at one of the images is refused, not obeyed.
+    """
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    result = execute(
+        "from-images",
+        images,
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+    )
+    render_result(result, dry_run=dry_run)
 
 
 @app_commands.command()

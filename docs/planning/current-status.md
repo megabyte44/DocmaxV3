@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-25 · **Branch:** `feat/m4-pdf-tools` · **Base:** `4a5d74a` (M3 complete)
+**Last updated:** 2026-08-27 · **Branch:** `feat/m5-convert-images` · **Base:** `d8f3272` (M4 complete)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,7 +10,7 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–8 are complete. Milestones M1 through M4 are done; the published
+**Phases 0–8 are complete. Milestones M1 through M5 are done; the published
 package is `DocmaxV3` 3.0.0a7, which predates them.**
 
 | Phase | | |
@@ -25,6 +25,7 @@ package is `DocmaxV3` 3.0.0a7, which predates them.**
 | 7 — M2 pypdf tool set | **complete** | split, rotate, pages, reorder, metadata, sanitize, get-info |
 | 8 — M3 compress + binary doctor | **complete** | first external-binary engine |
 | M4 — marking and encryption | **complete** | watermark, stamp, protect, unlock, permissions — no new phase; see the note below |
+| M5 — conversion | **complete** | convert, to-images, from-images, `formats` — likewise no new phase |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -69,6 +70,9 @@ foundations.
 | `protect` | done — AES-256 by default, which needs the `crypto` extra |
 | `unlock` | done — needs a password that already opens the file; never guesses one |
 | `permissions` | done — read-only, like `get-info` |
+| `convert` | done — Pandoc, eight formats; **no PDF in or out**, see ADR 0011 |
+| `to-images` | done — Poppler, one process per page; needs no imaging library |
+| `from-images` | done — img2pdf + Pillow; the second multi-input tool after `merge` |
 | `ocr` | **skeleton** — `run()` and both validators are `NotImplementedError`, M8 |
 
 Shared between them: `tools/_pagespec.py` parses page selections once,
@@ -85,10 +89,15 @@ must not find the other spells it differently. `_pdf.py` also grew
 `open_encrypted_pdf`, the counterpart to `open_pdf` for the two tools whose
 *subject* is a locked document.
 
+M5 added the fourth: `tools/_formats.py` owns every format the three conversion
+tools accept, and `docmax formats` renders it and holds no list of its own. That
+command is the one `UnsupportedFormatError` has told users to run since M0 with
+nothing behind it — see [ADR 0010](../adr/0010-format-vocabulary.md).
+
 Beyond the tools: `cloud_client/` is implemented; `server/` is implemented apart
 from its tool-execution bridge, which can now call the router. The CLI exposes
-all fourteen working tools plus `doctor` — every registered tool except
-`ocr`, which is still a skeleton.
+all seventeen working tools plus `doctor` and `formats` — every registered tool
+except `ocr`, which is still a skeleton.
 
 ---
 
@@ -99,17 +108,18 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **1148 passed, 2 skipped, 2 deselected** |
+| `pytest -m "not golden and not needs_binary"` | **1341 passed, 2 skipped, 4 deselected** |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 156 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 131 source files |
+| `ruff format --check .` | **passed** — 173 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 146 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
 Both skips are intentional — the self-exemptions inside the hygiene suite:
 `branding.py` may contain brand literals, and `atomic.py` may write directly.
 
 Environment: Windows, CPython 3.14, `.venv` from `pip install -e ".[dev]"`,
-plus `cryptography` for the `crypto` extra M4 introduced.
+plus `cryptography` for the `crypto` extra M4 introduced and `Pillow`/`img2pdf`
+for the `images` extra M5's `from-images` needs.
 
 **`mypy` had to be reinstalled from its sdist to run here.** The wheel ships a
 compiled `mypyc` extension, and this machine's Windows Application Control
@@ -120,7 +130,10 @@ machine, not of the project; CI installs the wheel and is unaffected.
 **Still unverified:** the CI matrix — Linux and macOS, and Python 3.11–3.13.
 Everything above is one platform and one interpreter, and 3.14 is not in the
 project's supported matrix. The `golden` and `needs_binary` tests are also
-unrun, since the external binaries are absent locally; CI requires them.
+unrun, since the external binaries are absent locally; CI requires them. M5
+added two more of those: one real Pandoc conversion and one real Poppler render.
+Everything else about both tools is covered by fake binaries that are real
+subprocesses, following the pattern `compress` established at M3.
 
 ### What Phase 3 added
 
@@ -255,18 +268,31 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M5 — `convert`, `to-images`, `from-images`.** The first tools that read and
-write something other than a PDF, so the first to need `OutputTarget` to think
-about a suffix that is not `.pdf`, and the first consumers of the `images`
-extra.
+**M6 — cloud engines, `--json` everywhere, published benchmarks.** The local
+halves of all five cloud-backed tools now exist except `ocr`, so the contract
+`cloud-api.md` describes can finally be written against operations that are
+implemented rather than imagined — which is the ordering
+[roadmap.md](roadmap.md) defends.
 
-**Outstanding from M2, and now larger**: `ToolSpec` still cannot say "this tool
-produces no output", so `get-info`, a bare `metadata`, and now `permissions`
-accept an `OutputTarget` they ignore, and the CLI builds one directly for them
-through `execute_read_only`. Three tools is where a seam stops being a curiosity.
-The fix is a `produces_output` flag on `ToolSpec` that the router honours; it is
-a change to core and to the registry, and it remains **a decision owed an ADR**
-rather than something to slip into a feature branch.
+**`convert` handles no PDF, in either direction, and that is the largest gap in
+M5.** Pandoc has no PDF reader, and writing PDF needs a LaTeX distribution the
+project does not install; [ADR 0011](../adr/0011-convert-is-pandoc-only.md)
+records the decision and its cost. `docmax convert report.pdf --to docx` is the
+command most users will try first and it is refused — with a message naming the
+limitation and pointing at `to-images`, but refused. M6's cloud engine is the
+architecture's own answer to it.
+
+**`architecture/overview.md` names "Pandoc + a LaTeX distribution" for
+`convert`.** That describes the M6 cloud engine, which is what the table's
+column heading says. It is accurate about M6 and ahead of M5.
+
+**Two seams are now owed one ADR, not two.** `ToolSpec` still cannot say "this
+tool produces no output" — `get-info`, a bare `metadata` and `permissions` all
+accept an `OutputTarget` they ignore — and it cannot say "my output extension
+depends on a parameter", which is why `convert` requires `-o`. Both are the same
+shape: a tool wanting something from `ToolSpec` that it does not carry. They
+should be decided together, deliberately, rather than one at a time under
+feature pressure.
 
 **`permissions` reads and does not write, and that was a judgement call.**
 Nothing in the repository documented what the tool should do. `metadata`'s

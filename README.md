@@ -92,6 +92,20 @@ Some local engines also need external programs. `compress` needs
 names the install line rather than quietly falling back to RC4 — a tool called
 `protect` should not hand you broken encryption without mentioning it.
 
+`convert` needs **Pandoc**, and `to-images` needs **Poppler**.
+
+```bash
+docmax formats     # what every tool can read and write
+```
+
+**`convert` does not handle PDF in either direction.** Pandoc has no PDF reader,
+and writing PDF needs a LaTeX distribution DocMax does not install — so
+`convert report.pdf --to docx` is refused with an explanation rather than a bad
+answer. It converts between Markdown, HTML, Word, OpenDocument,
+reStructuredText, LaTeX source, EPUB and plain text. To turn a PDF into images,
+use `to-images`. See
+[ADR 0011](docs/adr/0011-convert-is-pandoc-only.md).
+
 ```bash
 docmax doctor      # what's installed, what's missing, and the command to fix it
 ```
@@ -109,7 +123,7 @@ nothing is installed for you.
 | **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ done |
 | **M3** | `compress` + external-binary support in `doctor` | ✅ done |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ done |
-| **M5** | `convert`, `to-images`, `from-images` | |
+| **M5** | `convert`, `to-images`, `from-images` | ✅ done |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | |
 | **M7** | Textual TUI + visual pickers for crop and reorder | |
 | **M8** | OCR, done properly | |

@@ -13,7 +13,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M2** | `split`, `rotate`, `reorder`, `pages`, `metadata`, `sanitize`, `get-info` | ✅ complete |
 | **M3** | `compress` + external-binary support in `doctor` | ✅ complete |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ complete |
-| **M5** | `convert`, `to-images`, `from-images` | planned |
+| **M5** | `convert`, `to-images`, `from-images` | ✅ complete |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | planned |
 | **M7** | Textual TUI + visual pickers for crop and reorder | planned |
 | **M8** | OCR, done properly | planned |

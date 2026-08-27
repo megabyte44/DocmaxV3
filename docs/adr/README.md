@@ -22,6 +22,8 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0007](0007-m1-foundations-reconciliation.md) | `m1-foundations` is a source branch, absorbed phase by phase | **Superseded by 0009** |
 | [0008](0008-consent-record.md) | Consent is machine-local state, scoped to an endpoint and a terms version | Accepted |
 | [0009](0009-main-is-the-base.md) | `main` is the base; ADR 0007 was overtaken by events | Accepted |
+| [0010](0010-format-vocabulary.md) | Formats are declared once, and `docmax formats` reads the declaration | Accepted |
+| [0011](0011-convert-is-pandoc-only.md) | `convert` is Pandoc-only at M5: no PDF in, no PDF out, no derived output path | Accepted |
 
 ## When to write one
 

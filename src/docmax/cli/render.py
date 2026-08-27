@@ -155,6 +155,69 @@ def render_permissions(result: ToolResult) -> None:
     console.print("  [dim]These are advisory: nothing forces a reader to honour them.[/dim]")
 
 
+def render_formats() -> None:
+    """Print the shared format declaration as two tables.
+
+    Every row comes from ``tools/_formats.py``. This function holds no format
+    names of its own, which is the whole point: ``--to``'s help text, the
+    validation that refuses a bad value, and this table are provably the same
+    list because there is only one. See ADR 0010.
+
+    Formats that cannot be used are shown rather than filtered out, with their
+    reason in the last column. Someone who types ``--to pdf`` and is told
+    "unknown format" learns nothing; someone who finds it here, marked with why,
+    learns what to do instead.
+    """
+    from rich.table import Table
+
+    from docmax.tools import _formats
+
+    documents = Table(title="convert", title_justify="left")
+    documents.add_column("Format")
+    documents.add_column("Name")
+    documents.add_column("Extensions")
+    documents.add_column("Read")
+    documents.add_column("Write")
+    documents.add_column("Notes")
+
+    for item in _formats.DOCUMENT_FORMATS:
+        documents.add_row(
+            item.label,
+            item.name,
+            " ".join(item.suffixes),
+            _yes_no(item.readable),
+            _yes_no(item.writable),
+            item.unavailable_note or "",
+        )
+    out.print(documents)
+
+    images = Table(title="to-images · from-images", title_justify="left")
+    images.add_column("Format")
+    images.add_column("Name")
+    images.add_column("Extensions")
+    images.add_column("to-images writes")
+    images.add_column("from-images reads")
+
+    for image in _formats.IMAGE_FORMATS:
+        images.add_row(
+            image.label,
+            image.name,
+            " ".join(image.suffixes),
+            _yes_no(image.rasterise_flag is not None),
+            _yes_no(image.readable),
+        )
+    out.print(images)
+
+    console.print(
+        "  [dim]Every other tool reads and writes PDF only. "
+        "A format not listed here is not supported.[/dim]"
+    )
+
+
+def _yes_no(value: bool) -> str:
+    return "[green]yes[/green]" if value else "[red]no[/red]"
+
+
 def render_info(result: ToolResult) -> None:
     """Print what `get-info` found.
 
@@ -185,6 +248,7 @@ __all__ = [
     "console",
     "out",
     "render_error",
+    "render_formats",
     "render_info",
     "render_metadata",
     "render_permissions",

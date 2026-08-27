@@ -28,6 +28,37 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **The M5 conversion tools** — `convert`, `to-images` and `from-images`, plus
+  the `docmax formats` command.
+  - `convert` runs Pandoc over eight formats: Markdown, HTML, Word,
+    OpenDocument, reStructuredText, LaTeX source, EPUB and plain text.
+    **PDF is not supported in either direction** — Pandoc has no PDF reader, and
+    writing PDF needs a LaTeX distribution DocMax does not install. Both
+    refusals name the limitation and point at `to-images` rather than reporting
+    an unknown format. See
+    [ADR 0011](docs/adr/0011-convert-is-pandoc-only.md).
+  - `to-images` renders pages with Poppler's `pdftoppm`, one process per page so
+    that page selections need not be contiguous and progress advances per page.
+    It needs **no Python imaging library**: pdftoppm writes PNG, JPEG and TIFF
+    itself, and loading each page into Pillow only to write it out again would
+    re-encode it for nothing. The output is a directory, staged and swapped in
+    as a unit.
+  - `from-images` assembles images into a PDF, one page per image, in argument
+    order and at each image's own size. JPEGs are embedded without being
+    re-encoded. It is the second multi-input tool after `merge`, so `-o`
+    pointing at one of the images is refused rather than destroying it.
+  - **`docmax formats`** finally exists. `UnsupportedFormatError` has told users
+    to run it since M0 with nothing behind it — the error was nearly unreachable
+    while every tool accepted only PDF, and M5 made it both reachable and wrong.
+    It renders `tools/_formats.py` and holds no list of its own, so `--to`'s
+    help, the validation that refuses a bad value, and the table are provably
+    the same declaration. Formats that cannot be used are shown *with the
+    reason*, because "unknown format: pdf" teaches nothing. See
+    [ADR 0010](docs/adr/0010-format-vocabulary.md).
+
+  Every image `to-images` writes is checked for a real header of its format
+  before the directory replaces anything — the exact failure v2's
+  `extract_images` shipped, and the one the validator mechanism was written for.
 - **The M4 tool set** — `watermark`, `stamp`, `protect`, `unlock` and
   `permissions`, all pure pypdf and all reached through the same router.
   - `watermark` draws vector text over the page in Helvetica, one of the

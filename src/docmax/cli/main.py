@@ -119,6 +119,23 @@ for _command in commands.app_commands.registered_commands:
 
 
 @app.command()
+def formats() -> None:
+    """List the formats each tool can read and write.
+
+    The command `UnsupportedFormatError` has told users to run since M0. It
+    renders `tools/_formats.py` and holds no list of its own, so what is printed
+    here and what a tool actually accepts cannot disagree — see
+    [ADR 0010](https://github.com/megabyte44/docmax/blob/main/docs/adr/0010-format-vocabulary.md).
+
+    Formats DocMax knows about but cannot use are listed too, with the reason.
+    "Unknown format" is a much worse answer than "here is why not".
+    """
+    from docmax.cli.render import render_formats
+
+    render_formats()
+
+
+@app.command()
 def doctor() -> None:
     """Report the status of external tools the local engines depend on.
 
