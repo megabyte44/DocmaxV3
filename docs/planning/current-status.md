@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-27 · **Branch:** `feat/m5-convert-images` · **Base:** `d8f3272` (M4 complete)
+**Last updated:** 2026-08-27 · **Branch:** `feat/m6-cloud` · **Base:** `39672a7` (M5 complete)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,7 +10,7 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–8 are complete. Milestones M1 through M5 are done; the published
+**Phases 0–8 are complete. Milestones M1 through M6 are done; the published
 package is `DocmaxV3` 3.0.0a7, which predates them.**
 
 | Phase | | |
@@ -26,6 +26,7 @@ package is `DocmaxV3` 3.0.0a7, which predates them.**
 | 8 — M3 compress + binary doctor | **complete** | first external-binary engine |
 | M4 — marking and encryption | **complete** | watermark, stamp, protect, unlock, permissions — no new phase; see the note below |
 | M5 — conversion | **complete** | convert, to-images, from-images, `formats` — likewise no new phase |
+| M6 — cloud, JSON, benchmarks | **complete** | cloud `compress`/`convert`, `--json`, `docmax cloud`, benchmark harness |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -73,6 +74,7 @@ foundations.
 | `convert` | done — Pandoc, eight formats; **no PDF in or out**, see ADR 0011 |
 | `to-images` | done — Poppler, one process per page; needs no imaging library |
 | `from-images` | done — img2pdf + Pillow; the second multi-input tool after `merge` |
+| `compress`, `convert` — cloud | done — M6; the only two with a cloud engine (ADR 0012) |
 | `ocr` | **skeleton** — `run()` and both validators are `NotImplementedError`, M8 |
 
 Shared between them: `tools/_pagespec.py` parses page selections once,
@@ -94,10 +96,22 @@ tools accept, and `docmax formats` renders it and holds no list of its own. That
 command is the one `UnsupportedFormatError` has told users to run since M0 with
 nothing behind it — see [ADR 0010](../adr/0010-format-vocabulary.md).
 
-Beyond the tools: `cloud_client/` is implemented; `server/` is implemented apart
-from its tool-execution bridge, which can now call the router. The CLI exposes
-all seventeen working tools plus `doctor` and `formats` — every registered tool
-except `ocr`, which is still a skeleton.
+M6 added `tools/_cloud.py`, which is a different kind of shared module: not a
+vocabulary but the whole cloud flow — upload, wait, fetch, validate, write
+atomically — so a tool's `cloud.py` supplies only its name and its validators.
+A cloud result goes through the *same* validators as a local one, which is what
+makes the dual-engine promise one set of guarantees rather than two.
+
+Beyond the tools: `cloud_client/` is implemented **and tested** — 46 `respx`
+tests, which `cloud-api.md` claimed existed since M1 and which did not. `server/`
+is complete: `RegistryRunner.start()` runs jobs in-process
+([ADR 0016](../adr/0016-jobs-run-in-process.md)), and `GET /v1/capabilities`
+reports what the deployment can actually run rather than what its build knows
+about ([ADR 0018](../adr/0018-capabilities-mean-runnable.md)).
+
+The CLI exposes all seventeen working tools plus `doctor`, `formats` and the
+`cloud` group — every registered tool except `ocr`, which is still a skeleton.
+Every command takes `--json`.
 
 ---
 
@@ -108,18 +122,20 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **1341 passed, 2 skipped, 4 deselected** |
+| `pytest -m "not golden and not needs_binary"` | **1539 passed, 2 skipped, 4 deselected** — 145s |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 173 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 146 source files |
+| `ruff format --check .` | **passed** — 195 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 158 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
 Both skips are intentional — the self-exemptions inside the hygiene suite:
 `branding.py` may contain brand literals, and `atomic.py` may write directly.
 
 Environment: Windows, CPython 3.14, `.venv` from `pip install -e ".[dev]"`,
-plus `cryptography` for the `crypto` extra M4 introduced and `Pillow`/`img2pdf`
-for the `images` extra M5's `from-images` needs.
+plus `cryptography` (M4's `crypto` extra), `Pillow`/`img2pdf` (M5's `images`
+extra), and `fastapi`/`uvicorn`/`respx` — M6 is the first milestone whose tests
+need the **server** extra, because the only honest way to verify a cloud engine
+is to run one against the reference server.
 
 **`mypy` had to be reinstalled from its sdist to run here.** The wheel ships a
 compiled `mypyc` extension, and this machine's Windows Application Control
@@ -268,11 +284,15 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M6 — cloud engines, `--json` everywhere, published benchmarks.** The local
-halves of all five cloud-backed tools now exist except `ocr`, so the contract
-`cloud-api.md` describes can finally be written against operations that are
-implemented rather than imagined — which is the ordering
-[roadmap.md](roadmap.md) defends.
+**M7 — Textual TUI + visual pickers for crop and reorder.** Another driver of
+the same core, per [ADR 0005](../adr/0005-gui-pickers.md). If it needs a change
+below the interface layer, that is a finding about the core contracts rather
+than a workaround to write.
+
+**No performance numbers have been published.** The M6 harness exists and runs;
+the development machine has neither Ghostscript nor Pandoc, so every row of the
+one committed results file is `skipped` with a reason. Publishing a number needs
+a machine with both installed.
 
 **`convert` handles no PDF, in either direction, and that is the largest gap in
 M5.** Pandoc has no PDF reader, and writing PDF needs a LaTeX distribution the
@@ -286,13 +306,17 @@ architecture's own answer to it.
 `convert`.** That describes the M6 cloud engine, which is what the table's
 column heading says. It is accurate about M6 and ahead of M5.
 
-**Two seams are now owed one ADR, not two.** `ToolSpec` still cannot say "this
-tool produces no output" — `get-info`, a bare `metadata` and `permissions` all
-accept an `OutputTarget` they ignore — and it cannot say "my output extension
-depends on a parameter", which is why `convert` requires `-o`. Both are the same
-shape: a tool wanting something from `ToolSpec` that it does not carry. They
-should be decided together, deliberately, rather than one at a time under
-feature pressure.
+**Three seams are now owed one ADR.** `ToolSpec` cannot say "this tool produces
+no output" (`get-info`, a bare `metadata`, `permissions`), cannot say "my output
+extension depends on a parameter" (which is why `convert` requires `-o`), and
+cannot carry configuration to a strategy — so a cloud strategy resolves its own
+through `core.config.load()` rather than receiving the router's
+([ADR 0013](../adr/0013-cloud-config-comes-from-the-resolved-config.md)). All
+three are the same shape: a tool wanting something from `ToolSpec` that it does
+not carry. They should be decided together.
+
+The third has a named trigger: **adding an `--endpoint` or `--api-key` flag
+makes it wrong**, because a runtime override cannot reach a strategy.
 
 **`permissions` reads and does not write, and that was a judgement call.**
 Nothing in the repository documented what the tool should do. `metadata`'s

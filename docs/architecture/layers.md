@@ -96,11 +96,15 @@ cannot be driven by an HTTP server.
 
 **The dual-engine rule**
 
-Only five tools have a cloud engine — `ocr`, `compress`, `convert`, `pdfa`,
-`remove-bg` — because cloud exists to eliminate install pain and nothing else.
+Only a handful of tools have a cloud engine, because cloud exists to eliminate
+install pain and nothing else. Two do today — `compress` and `convert`, since
+M6. `ocr` is declared and unimplemented until M8; `pdfa` and `remove-bg` are
+named in [overview.md](overview.md#the-dual-engine-model)'s end-state table and
+do not exist.
+
 Everything pypdf-only sets `cloud = None`: uploading a document to perform a
 millisecond-long pure-Python operation is slower, less private, and needs a
-network. See [overview.md](overview.md#the-dual-engine-model).
+network.
 
 ---
 

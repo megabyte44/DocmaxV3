@@ -22,7 +22,7 @@ from docmax.server.config import API_VERSION, ServerSettings
 from docmax.server.errors import install_error_handlers
 from docmax.server.execution import RegistryRunner
 from docmax.server.jobs import InMemoryJobStore
-from docmax.server.routes import capabilities, jobs, tools, uploads
+from docmax.server.routes import capabilities, jobs, outputs, tools, uploads
 from docmax.server.storage import InMemoryStorage
 
 if TYPE_CHECKING:
@@ -66,7 +66,7 @@ def create_app(
 
     install_error_handlers(app)
 
-    for router in (capabilities.router, tools.router, uploads.router, jobs.router):
+    for router in (capabilities.router, tools.router, uploads.router, jobs.router, outputs.router):
         app.include_router(router, prefix=API_PREFIX)
 
     @app.get("/healthz", include_in_schema=False)

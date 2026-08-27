@@ -18,12 +18,14 @@ SPEC = register(
         summary="Convert a document to another format with Pandoc.",
         category="convert",
         module=__name__.rpartition(".")[0],
-        # Cloud lands at M6, and `convert` is one of the five tools that will
-        # get it -- installing Pandoc and a LaTeX distribution is exactly the
-        # pain cloud exists to remove. But the engine does not exist yet, and
-        # declaring it now would make the router offer something that cannot
-        # run. Same reasoning as `compress` at M3.
-        supported_engines=frozenset({Engine.LOCAL}),
+        # Both, since M6. Installing Pandoc is exactly the pain cloud exists to
+        # remove, and `cloud.py` now implements it.
+        #
+        # The cloud engine does not widen what `convert` accepts: ADR 0011's
+        # format boundary is the shared `_formats` table, which both engines
+        # validate against, so `--to pdf` is refused on either path. An endpoint
+        # with a LaTeX distribution installed still will not be asked for one.
+        supported_engines=frozenset({Engine.LOCAL, Engine.CLOUD}),
         accepts_multiple_inputs=False,
         # Unused: the CLI requires `-o`, so a destination is never derived. It
         # stays at the default rather than becoming parameter-dependent, which

@@ -14,7 +14,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M3** | `compress` + external-binary support in `doctor` | ✅ complete |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ complete |
 | **M5** | `convert`, `to-images`, `from-images` | ✅ complete |
-| **M6** | Cloud engines, `--json` everywhere, published benchmarks | planned |
+| **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ complete |
 | **M7** | Textual TUI + visual pickers for crop and reorder | planned |
 | **M8** | OCR, done properly | planned |
 | **M9** | Pipelines, resumable batch, folder watch | planned |
@@ -59,3 +59,11 @@ Stated because their absence is a decision, not an oversight:
 Published in `benchmarks/` with real hardware and methodology, at M6. **No
 numbers appear in the README or anywhere else until they are measured** — a
 performance claim without a method behind it is marketing.
+
+The harness landed at M6: `python -m benchmarks`, two tools, four generated
+fixtures, one warmup and five timed runs reported as median and minimum. See
+[benchmarks/METHODOLOGY.md](../../benchmarks/METHODOLOGY.md).
+
+**There are still no published numbers.** The development machine has neither
+Ghostscript nor Pandoc, so the one committed results file records that every row
+was skipped and why. That is the rule working, not the rule being broken.

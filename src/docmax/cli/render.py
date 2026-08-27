@@ -13,12 +13,13 @@ boundary as the ``ProgressSink`` protocol.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+
+from docmax.cli import json_output
 
 if TYPE_CHECKING:
     from docmax.core.errors import DocMaxError
@@ -38,8 +39,8 @@ def render_error(exc: DocMaxError, *, as_json: bool = False) -> None:
     sees a traceback, that is a bug in its own right: it means something escaped
     the typed hierarchy.
     """
-    if as_json:
-        out.print_json(json.dumps({"ok": False, "error": exc.to_dict()}))
+    if as_json or json_output.enabled():
+        _emit(json_output.failure(exc))
         return
 
     body = Text()
@@ -59,7 +60,7 @@ def render_error(exc: DocMaxError, *, as_json: bool = False) -> None:
     )
 
 
-def render_result(result: ToolResult, *, dry_run: bool = False) -> None:
+def render_result(result: ToolResult, *, dry_run: bool = False, tool: str = "") -> None:
     """Report what an operation produced.
 
     Deliberately one line. The interesting output of a document tool is the
@@ -71,6 +72,13 @@ def render_result(result: ToolResult, *, dry_run: bool = False) -> None:
     looking at the file, and the one thing they may need to check — "did that
     run here, or did it go to the cloud?"
     """
+    if json_output.enabled():
+        # One object, on stdout, and nothing else. A dry run is still a result:
+        # it reports what *would* happen, and `outputs` is empty because nothing
+        # was written -- which is exactly what the envelope should say.
+        _emit(json_output.success(result, tool=tool))
+        return
+
     if dry_run:
         details = result.details
         out.print(
@@ -102,6 +110,10 @@ def render_metadata(result: ToolResult) -> None:
     A table rather than a line, because this *is* the result — unlike the other
     tools, where the document is the result and the summary is a footnote.
     """
+    if json_output.enabled():
+        _emit(json_output.report(dict(result.details.get("metadata", {}))))
+        return
+
     from rich.table import Table
 
     fields = result.details.get("metadata", {})
@@ -124,6 +136,10 @@ def render_permissions(result: ToolResult) -> None:
     document. Someone who reads "Copy text: no" and stops there has learned the
     wrong thing, and the one line that corrects it costs nothing.
     """
+    if json_output.enabled():
+        _emit(json_output.report(dict(result.details)))
+        return
+
     from rich.table import Table
 
     details = result.details
@@ -171,6 +187,10 @@ def render_formats() -> None:
     from rich.table import Table
 
     from docmax.tools import _formats
+
+    if json_output.enabled():
+        _emit(json_output.report(_formats_payload()))
+        return
 
     documents = Table(title="convert", title_justify="left")
     documents.add_column("Format")
@@ -225,6 +245,10 @@ def render_info(result: ToolResult) -> None:
     tree genuinely cannot be read without the password, and reporting 0 would
     be a wrong answer rather than an absent one.
     """
+    if json_output.enabled():
+        _emit(json_output.report(dict(result.details)))
+        return
+
     from rich.table import Table
 
     details = result.details
@@ -242,6 +266,49 @@ def render_info(result: ToolResult) -> None:
         table.add_row(str(key).lstrip("/"), str(fields[key]))
 
     out.print(table)
+
+
+def _emit(line: str) -> None:
+    """Put one JSON line on stdout, unstyled.
+
+    ``print`` rather than the Rich console: Rich would wrap a long path and
+    could add markup, and a JSON document that has been line-wrapped is not a
+    JSON document. This is the one place in the CLI that bypasses the console
+    on purpose.
+    """
+    import sys
+
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
+
+
+def _formats_payload() -> dict[str, object]:
+    """The format table as data, from the same declaration the tables render."""
+    from docmax.tools import _formats
+
+    return {
+        "documents": [
+            {
+                "name": item.name,
+                "label": item.label,
+                "suffixes": list(item.suffixes),
+                "readable": item.readable,
+                "writable": item.writable,
+                "note": item.unavailable_note,
+            }
+            for item in _formats.DOCUMENT_FORMATS
+        ],
+        "images": [
+            {
+                "name": item.name,
+                "label": item.label,
+                "suffixes": list(item.suffixes),
+                "rasterisable": item.rasterise_flag is not None,
+                "readable": item.readable,
+            }
+            for item in _formats.IMAGE_FORMATS
+        ],
+    }
 
 
 __all__ = [

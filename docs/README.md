@@ -26,14 +26,20 @@ Start here.
 | | |
 |---|---|
 | [implementation/config.md](implementation/config.md) | Configuration precedence and the consent record |
-| [cloud-api.md](cloud-api.md) | The Cloud Engine wire contract *(design stage — no server exists yet)* |
+| [implementation/core.md](implementation/core.md) | The core contracts, and the failure each prevents |
+| [implementation/json.md](implementation/json.md) | What `--json` produces, and which fields are stable |
+| [cloud-api.md](cloud-api.md) | The Cloud Engine wire contract *(implemented, for `compress` and `convert`)* |
+| [../benchmarks/METHODOLOGY.md](../benchmarks/METHODOLOGY.md) | How performance is measured, and what is not measured |
 | [migrating-from-v2.md](migrating-from-v2.md) | What changed, and what will break |
 
 ## Not written yet
 
-`docs/development/` (setup, testing, contributing) and `docs/implementation/`
-are listed in [the backlog](planning/backlog.md#required) and do not exist. Until
-they do, the architecture documents and the ADRs are the onboarding path.
+`docs/development/` (setup, testing, contributing) is listed in
+[the backlog](planning/backlog.md#required) and does not exist. Until it does,
+the architecture documents and the ADRs are the onboarding path.
+
+`docs/implementation/` was listed here as missing while three of its documents
+already existed. It is now indexed above.
 
 ## How these fit together
 

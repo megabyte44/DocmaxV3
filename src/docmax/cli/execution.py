@@ -29,15 +29,17 @@ get one at M6.
 from __future__ import annotations
 
 import signal
+import sys
 from typing import TYPE_CHECKING, Any
 
 import typer
 
 from docmax.cli.progress import ConsoleProgress
 from docmax.cli.render import console, render_error
+from docmax.core.branding import CLI_NAME
 from docmax.core.cancellation import CancellationToken
 from docmax.core.config import consent_file, load
-from docmax.core.errors import CancelledError, DocMaxError
+from docmax.core.errors import CancelledError, ConsentRequiredError, DocMaxError
 from docmax.core.router import EngineRouter
 
 if TYPE_CHECKING:
@@ -156,16 +158,34 @@ def execute(
         try:
             docs = [DocumentRef.from_path(path) for path in inputs]
             target = router.target_for(tool, docs, requested=str(output), force=force)
-            return router.run(
-                tool,
-                docs,
-                target,
-                requested=engine,
-                progress=progress,
-                cancellation=token,
-                dry_run=dry_run,
-                **params,
-            )
+            try:
+                return router.run(
+                    tool,
+                    docs,
+                    target,
+                    requested=engine,
+                    progress=progress,
+                    cancellation=token,
+                    dry_run=dry_run,
+                    **params,
+                )
+            except ConsentRequiredError as exc:
+                # The one error this layer answers with a question rather than a
+                # refusal. `errors.py` has said since M0 that the CLI turns this
+                # into a y/n prompt and the TUI into a modal; until M6 nothing
+                # did, and a user meeting it got a red panel telling them to
+                # agree with no way to.
+                _agree_or_exit(exc, router, progress)
+                return router.run(
+                    tool,
+                    docs,
+                    target,
+                    requested=engine,
+                    progress=progress,
+                    cancellation=token,
+                    dry_run=dry_run,
+                    **params,
+                )
         except CancelledError as exc:
             # Not a failure: the user asked for this, and the atomic writers
             # guarantee the destination is untouched. So it gets a plain line
@@ -175,6 +195,50 @@ def execute(
         except DocMaxError as exc:
             render_error(exc)
             raise typer.Exit(EXIT_FAILURE) from exc
+
+
+def _agree_or_exit(
+    exc: ConsentRequiredError,
+    router: EngineRouter,
+    progress: ConsoleProgress,
+) -> None:
+    """Ask whether the document may be uploaded, and record the answer.
+
+    Asked once, here, and only for a run that has already been routed to cloud —
+    ``EngineRouter`` decides that, and ``offline`` has already beaten any
+    ``--engine cloud`` before this point, so a policy never surfaces as a
+    question.
+
+    **Not asked when there is nobody to answer.** Under ``--json``, or when
+    stdin is not a terminal, a prompt would either hang a script forever or
+    corrupt its stdout. Both cases re-raise, so the caller gets the typed error
+    and its remedy — which names the command that grants consent without a
+    prompt.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.cloud import terms_summary
+
+    if json_output.enabled() or not sys.stdin.isatty():
+        raise exc
+
+    if router.consent is None:
+        # No store to record into. Agreeing would be a promise nothing kept.
+        raise exc
+
+    # Out of the live region: a Rich progress bar and a prompt cannot share the
+    # bottom of the terminal, and the half-drawn result is unreadable.
+    progress.finish()
+
+    console.print()
+    console.print(
+        "[bold yellow]Upload to the cloud?[/bold yellow] "
+        + terms_summary(exc.tool, router.config.cloud_endpoint)
+    )
+    if not typer.confirm(f"  Send {exc.tool!r} documents to this endpoint?", default=False):
+        raise exc
+
+    router.consent.record(exc.tool)
+    console.print(f"  [dim]Recorded. Revoke with `{CLI_NAME} cloud revoke {exc.tool}`.[/dim]")
 
 
 def execute_read_only(

@@ -47,9 +47,16 @@ docmax ocr scan.pdf --engine cloud      # skip installing Tesseract
 ```
 
 Cloud exists for exactly one reason — to let you use a tool without installing
-its heavy dependencies. Only five tools have it (`ocr`, `compress`, `convert`,
-`pdfa`, `remove-bg`), because for a pure-Python operation like `merge`,
-uploading your document would be slower, less private, and pointless.
+its heavy dependencies. Only a handful of tools have it — **`compress` and
+`convert` today** — because for a pure-Python operation like `merge`, uploading
+your document would be slower, less private, and pointless. OCR's cloud engine
+arrives with OCR itself, at M8.
+
+```bash
+docmax cloud login          # store an API key
+docmax cloud status         # endpoint, key, and what you have agreed to send
+docmax compress big.pdf -o small.pdf --engine cloud
+```
 
 **Nothing is ever uploaded without asking.** Consent is per-tool and remembered;
 `offline = true` in your config disables cloud entirely regardless of flags; and
@@ -124,14 +131,15 @@ nothing is installed for you.
 | **M3** | `compress` + external-binary support in `doctor` | ✅ done |
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ done |
 | **M5** | `convert`, `to-images`, `from-images` | ✅ done |
-| **M6** | Cloud engines, `--json` everywhere, published benchmarks | |
+| **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ done |
 | **M7** | Textual TUI + visual pickers for crop and reorder | |
 | **M8** | OCR, done properly | |
 | **M9** | Pipelines, resumable batch, folder watch | |
 | **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | |
 
-Benchmarks will be published in `benchmarks/` with real hardware and
-methodology. No numbers appear in this README until they are measured.
+Benchmarks live in [`benchmarks/`](benchmarks/METHODOLOGY.md) with the method
+written down. Run them with `python -m benchmarks`. No numbers appear in this
+README until they are measured — and none have been yet.
 
 ## Documentation
 

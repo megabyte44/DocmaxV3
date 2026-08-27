@@ -86,16 +86,27 @@ fifty OpenCV imports. See [ADR 0002](../adr/0002-registry-mechanism.md).
 `ToolResult` is engine-agnostic. The UI layer never knows or cares which one
 ran; it reads `result.engine_used` only to display a badge.
 
-**Only 5 tools have a cloud engine**, because cloud exists to eliminate install
-pain and nothing else:
+**Only a handful of tools have a cloud engine**, because cloud exists to
+eliminate install pain and nothing else:
 
-| Tool | Local install it lets you skip |
-|---|---|
-| `ocr` | Tesseract + language packs + OpenCV |
-| `compress` | Ghostscript |
-| `convert` | Pandoc + a LaTeX distribution |
-| `pdfa` | Ghostscript |
-| `remove-bg` | an ONNX model download |
+| Tool | Local install it lets you skip | Status |
+|---|---|---|
+| `compress` | Ghostscript | ✅ M6 |
+| `convert` | Pandoc | ✅ M6 |
+| `ocr` | Tesseract + language packs + OpenCV | M8 |
+| `pdfa` | Ghostscript | not built |
+| `remove-bg` | an ONNX model download | not built |
+
+**The last three rows describe an end state, not the present.** `ocr` is a
+skeleton whose `run()` raises and is M8's work; `pdfa` and `remove-bg` do not
+exist as tools at all and are on no roadmap row.
+[ADR 0012](../adr/0012-cloud-engines-are-compress-and-convert.md) records why M6
+shipped two rather than five — a cloud engine for a tool with no local engine is
+exactly what the roadmap's ordering forbids.
+
+`convert`'s row once read "Pandoc + a LaTeX distribution". It does not produce
+PDF on either engine ([ADR 0011](../adr/0011-convert-is-pandoc-only.md)), so
+there is no LaTeX distribution to skip.
 
 Everything pypdf-only — `merge`, `split`, `rotate`, `sanitize`, `watermark`,
 `stamp`, `protect`, `unlock`, `get-info` — sets

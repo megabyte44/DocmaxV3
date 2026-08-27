@@ -61,6 +61,14 @@ _DryRunOption = Annotated[
     bool,
     typer.Option("--dry-run", help="Say what would happen, and write nothing."),
 ]
+#: Also declared on the root callback, so `--json` is accepted both before and
+#: after the command name. Declared once here and reused, exactly as `--force`
+#: and `--engine` are: an option that means the same thing everywhere should
+#: gain a behaviour in one place rather than in eighteen.
+JsonOption = Annotated[
+    bool,
+    typer.Option("--json", help="Emit one JSON object on stdout. Diagnostics go to stderr."),
+]
 _PagesOption = Annotated[
     str | None,
     typer.Option("--pages", help="Which pages, e.g. 1-3,7. Default: all."),
@@ -98,6 +106,7 @@ def split(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Split a PDF into several files.
 
@@ -105,8 +114,11 @@ def split(
     run leaves the destination exactly as it was rather than holding the first
     few parts.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "split",
@@ -118,7 +130,7 @@ def split(
         every=every,
         pages=pages,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="split")
 
 
 @app_commands.command()
@@ -132,10 +144,14 @@ def rotate(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Rotate pages by a multiple of 90 degrees."""
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "rotate",
@@ -147,7 +163,7 @@ def rotate(
         by=by,
         pages=pages,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="rotate")
 
 
 @app_commands.command()
@@ -163,14 +179,18 @@ def pages(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Keep or delete selected pages.
 
     ``--select`` and ``--delete`` are two ways of saying the same thing and
     cannot be combined; the tool refuses rather than inventing a precedence.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "pages",
@@ -182,7 +202,7 @@ def pages(
         select=select,
         delete=delete,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="pages")
 
 
 @app_commands.command()
@@ -198,19 +218,23 @@ def reorder(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Reorder pages into a given sequence.
 
     The order must list every page exactly once. A reorder that quietly dropped
     or duplicated a page would be discovered far too late.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "reorder", [source], output, engine=engine, force=force, dry_run=dry_run, order=order
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="reorder")
 
 
 @app_commands.command()
@@ -222,6 +246,7 @@ def sanitize(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Remove JavaScript, embedded files and auto-actions.
 
@@ -230,11 +255,14 @@ def sanitize(
     content streams and is no defence against a PDF crafted to attack a viewer's
     parser. Outlines and links are lost along with the actions.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
 
+    json_output.note(json_out)
+
     result = execute("sanitize", [source], output, engine=engine, force=force, dry_run=dry_run)
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="reorder")
 
 
 @app_commands.command()
@@ -256,6 +284,7 @@ def watermark(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Draw text across every page.
 
@@ -264,8 +293,11 @@ def watermark(
     protection: it sits in its own layer and any PDF editor can take it off
     again. Use `protect` for a document that must not be opened.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "watermark",
@@ -281,7 +313,7 @@ def watermark(
         angle=angle,
         pages=pages,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="watermark")
 
 
 @app_commands.command()
@@ -304,6 +336,7 @@ def stamp(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Draw another PDF's first page onto every page.
 
@@ -315,8 +348,11 @@ def stamp(
     same way the source is, so a command that would overwrite the stamp while
     reading it is refused.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "stamp",
@@ -329,7 +365,7 @@ def stamp(
         scale=scale,
         pages=pages,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="stamp")
 
 
 @app_commands.command()
@@ -344,6 +380,7 @@ def compress(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Shrink a PDF with Ghostscript.
 
@@ -352,8 +389,11 @@ def compress(
     the result replaces anything, because a smaller file with fewer pages is not
     a compressed document.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "compress",
@@ -364,7 +404,7 @@ def compress(
         dry_run=dry_run,
         preset=preset,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="compress")
 
 
 @app_commands.command()
@@ -394,6 +434,7 @@ def protect(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Encrypt a PDF with a password.
 
@@ -406,8 +447,11 @@ def protect(
     tell a conforming reader what you would prefer, and nothing forces one to
     obey. The encryption is the boundary; the permissions are a request.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "protect",
@@ -421,7 +465,7 @@ def protect(
         allow=allow,
         algorithm=algorithm,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="protect")
 
 
 @app_commands.command()
@@ -437,6 +481,7 @@ def unlock(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Write a copy of an encrypted PDF with the password removed.
 
@@ -444,8 +489,11 @@ def unlock(
     user or the owner one. This does not recover, guess or break a password, and
     it never will.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "unlock",
@@ -456,7 +504,7 @@ def unlock(
         dry_run=dry_run,
         password=password,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="unlock")
 
 
 @app_commands.command()
@@ -467,6 +515,7 @@ def permissions(
         typer.Option("--password", help="Needed if the document is encrypted."),
     ] = None,
     engine: _EngineOption = None,
+    json_out: JsonOption = False,
 ) -> None:
     """Report what a PDF says a reader may do with it.
 
@@ -478,8 +527,11 @@ def permissions(
     default. And every bit here is advisory: a reader that ignores them is not
     breaking anything.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute_read_only
     from docmax.cli.render import render_permissions
+
+    json_output.note(json_out)
 
     render_permissions(execute_read_only("permissions", source, engine=engine, password=password))
 
@@ -505,6 +557,7 @@ def convert(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Convert a document to another format with Pandoc.
 
@@ -516,8 +569,11 @@ def convert(
     Needs Pandoc installed — run `docmax doctor` to check, and it will print the
     install line for your platform. Run `docmax formats` for the full table.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "convert",
@@ -529,7 +585,7 @@ def convert(
         to=to,
         standalone=standalone,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="convert")
 
 
 @app_commands.command(name="to-images")
@@ -549,6 +605,7 @@ def to_images(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Render each page of a PDF as an image.
 
@@ -560,8 +617,11 @@ def to_images(
     verified to carry a real header of its format before the directory replaces
     anything.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "to-images",
@@ -574,7 +634,7 @@ def to_images(
         dpi=dpi,
         pages=pages,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="to-images")
 
 
 @app_commands.command(name="from-images")
@@ -593,6 +653,7 @@ def from_images(
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
 ) -> None:
     """Combine images into a PDF, one page per image.
 
@@ -601,8 +662,11 @@ def from_images(
 
     `-o` pointing at one of the images is refused, not obeyed.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute
     from docmax.cli.render import render_result
+
+    json_output.note(json_out)
 
     result = execute(
         "from-images",
@@ -612,7 +676,7 @@ def from_images(
         force=force,
         dry_run=dry_run,
     )
-    render_result(result, dry_run=dry_run)
+    render_result(result, dry_run=dry_run, tool="from-images")
 
 
 @app_commands.command()
@@ -631,14 +695,18 @@ def metadata(
     ] = False,
     force: _ForceOption = False,
     engine: _EngineOption = None,
+    json_out: JsonOption = False,
 ) -> None:
     """Read or set document metadata.
 
     With no `--set` it reads and writes nothing. With `--set`, `-o` is required:
     the result is a new document, and this tool will not edit a file in place.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute, execute_read_only
     from docmax.cli.render import render_metadata, render_result
+
+    json_output.note(json_out)
 
     writing = bool(set_) or clear
     if writing and output is None:
@@ -657,7 +725,7 @@ def metadata(
             set=set_,
             clear=clear,
         )
-        render_result(result)
+        render_result(result, tool="metadata")
         return
 
     result = execute_read_only("metadata", source, engine=engine)
@@ -668,6 +736,7 @@ def metadata(
 def get_info(
     source: Annotated[Path, typer.Argument(help="The PDF to describe.", show_default=False)],
     engine: _EngineOption = None,
+    json_out: JsonOption = False,
 ) -> None:
     """Report page count, size, encryption and metadata.
 
@@ -675,10 +744,16 @@ def get_info(
     reported rather than refused — "is this locked?" is exactly the question
     this answers.
     """
+    from docmax.cli import json_output
     from docmax.cli.execution import execute_read_only
     from docmax.cli.render import render_info
+
+    json_output.note(json_out)
 
     render_info(execute_read_only("get-info", source, engine=engine))
 
 
-__all__ = ["app_commands"]
+#: Exported because ``main.py``'s own commands -- `merge`, `doctor`,
+#: `formats` -- need the same option, and two spellings of `--json` would be
+#: the drift this alias exists to prevent.
+__all__ = ["JsonOption", "app_commands"]

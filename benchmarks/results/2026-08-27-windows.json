@@ -1,0 +1,131 @@
+{
+  "environment": {
+    "docmax": "3.0.0a7",
+    "python": "3.14.2",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "binaries": {
+      "gs": null,
+      "tesseract": null,
+      "pdftoppm": null,
+      "pandoc": null
+    }
+  },
+  "method": {
+    "warmup_runs": 1,
+    "timed_runs": 5,
+    "reported": [
+      "median_ms",
+      "min_ms"
+    ],
+    "clock": "wall"
+  },
+  "fixtures": [
+    {
+      "name": "small",
+      "path": "C:\\Users\\Prana\\AppData\\Local\\Temp\\docmax-bench-93t1hjys\\fixtures\\small.pdf",
+      "kind": "pdf/10pp",
+      "size_bytes": 1523
+    },
+    {
+      "name": "large",
+      "path": "C:\\Users\\Prana\\AppData\\Local\\Temp\\docmax-bench-93t1hjys\\fixtures\\large.pdf",
+      "kind": "pdf/100pp",
+      "size_bytes": 12515
+    },
+    {
+      "name": "images",
+      "path": "C:\\Users\\Prana\\AppData\\Local\\Temp\\docmax-bench-93t1hjys\\fixtures\\images.pdf",
+      "kind": "pdf/image-heavy",
+      "size_bytes": 3136632
+    },
+    {
+      "name": "markdown",
+      "path": "C:\\Users\\Prana\\AppData\\Local\\Temp\\docmax-bench-93t1hjys\\fixtures\\notes.md",
+      "kind": "markdown",
+      "size_bytes": 2352
+    }
+  ],
+  "measurements": [
+    {
+      "tool": "compress",
+      "engine": "local",
+      "fixture": "small",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "gs is not installed"
+    },
+    {
+      "tool": "compress",
+      "engine": "local",
+      "fixture": "large",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "gs is not installed"
+    },
+    {
+      "tool": "compress",
+      "engine": "local",
+      "fixture": "images",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "gs is not installed"
+    },
+    {
+      "tool": "convert",
+      "engine": "local",
+      "fixture": "markdown",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "pandoc is not installed"
+    },
+    {
+      "tool": "compress",
+      "engine": "cloud",
+      "fixture": "small",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "gs is not installed on the server"
+    },
+    {
+      "tool": "compress",
+      "engine": "cloud",
+      "fixture": "large",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "gs is not installed on the server"
+    },
+    {
+      "tool": "compress",
+      "engine": "cloud",
+      "fixture": "images",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "gs is not installed on the server"
+    },
+    {
+      "tool": "convert",
+      "engine": "cloud",
+      "fixture": "markdown",
+      "median_ms": null,
+      "min_ms": null,
+      "runs": 0,
+      "output_bytes": null,
+      "skipped": "pandoc is not installed on the server"
+    }
+  ]
+}

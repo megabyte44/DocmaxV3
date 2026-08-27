@@ -24,6 +24,13 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0009](0009-main-is-the-base.md) | `main` is the base; ADR 0007 was overtaken by events | Accepted |
 | [0010](0010-format-vocabulary.md) | Formats are declared once, and `docmax formats` reads the declaration | Accepted |
 | [0011](0011-convert-is-pandoc-only.md) | `convert` is Pandoc-only at M5: no PDF in, no PDF out, no derived output path | Accepted |
+| [0012](0012-cloud-engines-are-compress-and-convert.md) | M6 ships two cloud engines, and a cloud run never falls back to local | Accepted |
+| [0013](0013-cloud-config-comes-from-the-resolved-config.md) | A cloud strategy takes its endpoint from the resolved configuration | Accepted |
+| [0014](0014-api-key-storage.md) | The API key lives in the config file in plaintext, and DocMax says so | Accepted |
+| [0015](0015-cancellation-crosses-the-network.md) | Cancellation reaches a cloud job, and a cloud job has a deadline | Accepted |
+| [0016](0016-jobs-run-in-process.md) | Cloud jobs run in the server process, and the job store is in memory | Accepted |
+| [0017](0017-json-output-contract.md) | `--json` is a global option and stdout carries only the envelope | Accepted |
+| [0018](0018-capabilities-mean-runnable.md) | `/v1/capabilities` lists what this deployment can run, not what this build knows about | Accepted |
 
 ## When to write one
 

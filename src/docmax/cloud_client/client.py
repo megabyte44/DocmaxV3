@@ -40,6 +40,7 @@ from docmax.cloud_client.models import (
     as_mapping,
 )
 from docmax.core.branding import CLI_NAME
+from docmax.core.cancellation import NEVER_CANCELLED
 from docmax.core.errors import (
     CloudAuthError,
     CloudEngineUnavailableError,
@@ -52,12 +53,27 @@ from docmax.core.errors import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from docmax.core.cancellation import CancellationToken
     from docmax.core.models import DocumentRef
 
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 #: How long to keep waiting for one job before giving up on it entirely.
+#:
+#: ``CloudConfig.read_timeout`` must be at least this, because the reference
+#: server answers synchronously (ADR 0016) and a long job is a long response.
 DEFAULT_JOB_TIMEOUT = 900.0
+
+#: The longest this sleeps without looking at the cancellation token.
+#:
+#: The server chooses ``poll_after_ms`` and that is honoured in aggregate; this
+#: only decides how finely the wait is chopped up. A cooperative token cannot
+#: interrupt ``time.sleep``, so without this a Ctrl-C during a job with a
+#: two-second poll interval would sit unnoticed for up to two seconds -- and
+#: with a server that asked for sixty, for a minute. ``core/cancellation.py``
+#: says "nothing here starts a thread", so the answer is to look often rather
+#: than to be woken.
+_CANCEL_CHECK_INTERVAL = 0.1
 
 _CHUNK = 1 << 20
 
@@ -142,9 +158,16 @@ class CloudClient:
         params: Mapping[str, Any] | None = None,
         *,
         timeout: float = DEFAULT_JOB_TIMEOUT,
+        cancellation: CancellationToken = NEVER_CANCELLED,
     ) -> CloudJob:
-        """Submit ``doc`` and block until the job reaches a terminal state."""
-        return self.wait(self.submit(tool, doc, params), timeout=timeout)
+        """Submit ``doc`` and block until the job reaches a terminal state.
+
+        ``cancellation`` defaults to the shared do-nothing token, mirroring
+        ``EngineRouter.run``: a caller with nothing to cancel still hands over a
+        real object, so no branch here has to check for ``None``.
+        """
+        cancellation.raise_if_cancelled(operation=tool)
+        return self.wait(self.submit(tool, doc, params), timeout=timeout, cancellation=cancellation)
 
     def submit(
         self,
@@ -165,20 +188,55 @@ class CloudClient:
             raise_for_error(500, body)
         return CloudJob.from_payload(body)
 
-    def wait(self, job: CloudJob, *, timeout: float = DEFAULT_JOB_TIMEOUT) -> CloudJob:
-        """Poll at the server's requested interval until the job settles."""
-        deadline = time.monotonic() + timeout
+    def wait(
+        self,
+        job: CloudJob,
+        *,
+        timeout: float = DEFAULT_JOB_TIMEOUT,
+        cancellation: CancellationToken = NEVER_CANCELLED,
+    ) -> CloudJob:
+        """Poll at the server's requested interval until the job settles.
+
+        Interruptible, which is the whole of ADR 0015. The deadline is the
+        earlier of ``timeout`` and whatever the token carries, so a deadline set
+        once at the top of an operation bounds a subprocess and a cloud job the
+        same way -- ``_binaries.run`` already reads ``remaining_seconds`` for
+        exactly this.
+
+        Cancelling stops DocMax waiting; it does not stop the server working.
+        The wire contract has no cancel endpoint, so the job runs to completion
+        over there and may be billed. That is stated in ``docmax cloud --help``
+        rather than being quietly true.
+        """
+        deadline = time.monotonic() + _effective_timeout(timeout, cancellation)
         current = job
         while not current.is_terminal:
+            cancellation.raise_if_cancelled(operation="cloud")
             if time.monotonic() >= deadline:
                 raise CloudTimeoutError(
                     f"The job did not finish within {timeout:.0f}s.",
                     remedy="Try again, or run locally with --engine local.",
                     context={"job_id": current.job_id},
                 )
-            time.sleep(current.poll_after_ms / 1000)
+            self._sleep(current.poll_after_ms / 1000, cancellation)
             current = self.poll(current.job_id)
         return current
+
+    @staticmethod
+    def _sleep(seconds: float, cancellation: CancellationToken) -> None:
+        """Wait, in slices, looking at the token between them.
+
+        Cut short by a cancel rather than raising here: the caller's loop checks
+        immediately afterwards, so there is one place that decides what a cancel
+        means instead of two.
+        """
+        remaining = seconds
+        while remaining > 0:
+            if cancellation.is_cancelled:
+                return
+            slice_ = min(_CANCEL_CHECK_INTERVAL, remaining)
+            time.sleep(slice_)
+            remaining -= slice_
 
     def fetch_output(self, job: CloudJob) -> bytes:
         """Download a finished job's document.
@@ -330,6 +388,19 @@ def _decode(response: httpx.Response, *, strict: bool = True) -> object:
             remedy="Check that the configured endpoint speaks this API version.",
             context={"content_type": response.headers.get("content-type", "")},
         ) from exc
+
+
+def _effective_timeout(timeout: float, cancellation: CancellationToken) -> float:
+    """The earlier of the caller's budget and the token's deadline.
+
+    A token with no deadline returns ``None`` from ``remaining_seconds``, in
+    which case the caller's own timeout is the only bound -- and there is always
+    one, because there is no way to call this without it.
+    """
+    remaining = cancellation.remaining_seconds()
+    if remaining is None:
+        return timeout
+    return min(timeout, remaining)
 
 
 def _backoff(attempt: int) -> float:

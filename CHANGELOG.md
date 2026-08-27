@@ -28,6 +28,64 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **Cloud engines for `compress` and `convert`.** Two, not the five the
+  architecture docs name: `ocr` is M8's, and `pdfa` and `remove-bg` do not
+  exist. A cloud engine for a tool with no local engine is exactly what the
+  roadmap's ordering forbids — see
+  [ADR 0012](docs/adr/0012-cloud-engines-are-compress-and-convert.md).
+  - The flow — upload, wait, fetch, validate, write atomically — lives once in
+    `tools/_cloud.py`; a tool's `cloud.py` supplies its name and its validators
+    and nothing else.
+  - **A cloud result is checked by the tool's own validators.** A cloud
+    `compress` that lost a page fails exactly where a local one would, and the
+    destination is untouched either way.
+  - **No automatic fallback to local.** The router picks one engine before any
+    work starts; a cloud failure is reported as one. Silently re-running would
+    double the work on a document you have already paid to upload.
+  - `docmax cloud login | logout | status | consent | revoke`, and the consent
+    prompt `errors.py` has described since M0 and which nothing implemented —
+    a user who met `engine.consent_required` was previously told to agree with
+    no way to do it.
+- **`--json` on every command.** One object on stdout, diagnostics on stderr,
+  exit codes unchanged. The error envelope is the one the Cloud API already
+  returns, so a script parsing a DocMax failure writes one parser for both. See
+  [docs/implementation/json.md](docs/implementation/json.md) and
+  [ADR 0017](docs/adr/0017-json-output-contract.md).
+- **A benchmark harness** — `python -m benchmarks`. Two tools, four generated
+  fixtures, one warmup and five timed runs reported as median and minimum, with
+  the machine recorded alongside. **No numbers are published**: the development
+  machine has neither Ghostscript nor Pandoc, so every row of the committed
+  results file says so. See
+  [benchmarks/METHODOLOGY.md](benchmarks/METHODOLOGY.md).
+- **The reference server runs tools.** `RegistryRunner.start()` was a
+  `NotImplementedError`; jobs now run in the request that submits them, with the
+  staged input deleted on failure as well as on success —
+  [ADR 0016](docs/adr/0016-jobs-run-in-process.md), which also closes the
+  execution-model decision the backlog has owed since Phase 1.
+
+### Fixed in M6
+
+- **`[cloud] endpoint` was documented, parsed, and silently ignored.** The
+  registry constructs a strategy with no arguments, so the only cloud strategy
+  fell back to reading the environment — and a user who pointed DocMax at a
+  self-hosted deployment in `config.toml` had their documents sent to the
+  default endpoint instead. For a feature whose premise is "your documents go
+  where you say", that was the worst possible direction to fail in.
+  [ADR 0013](docs/adr/0013-cloud-config-comes-from-the-resolved-config.md).
+- **Ctrl-C could not interrupt a cloud job.** `CloudClient.wait()` slept in
+  uninterruptible blocks and had no way to receive a cancellation token, so an
+  interrupt went unnoticed for up to the server's whole polling interval. The
+  same class of defect v2 shipped with subprocesses, through a different door.
+  [ADR 0015](docs/adr/0015-cancellation-crosses-the-network.md).
+- **The client's read timeout was shorter than its own job timeout** — 120s
+  against 900s — so a long synchronous job was killed from the client side
+  while the server was still succeeding.
+- **`GET /v1/capabilities` advertised a tool it could not run.** It answered
+  from the build rather than from the deployment, so an endpoint with nothing
+  installed listed `ocr`. It now asks each tool whether it is available on that
+  machine. [ADR 0018](docs/adr/0018-capabilities-mean-runnable.md).
+- **`cloud-api.md` claimed `respx`-based client tests existed.** They did not:
+  the cloud client shipped untested through five milestones. It now has 46.
 - **The M5 conversion tools** — `convert`, `to-images` and `from-images`, plus
   the `docmax formats` command.
   - `convert` runs Pandoc over eight formats: Markdown, HTML, Word,

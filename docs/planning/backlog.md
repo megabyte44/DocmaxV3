@@ -44,8 +44,11 @@ make the ADR a justification rather than a decision.
       [ADR 0008](../adr/0008-consent-record.md) and implemented in Phase 3:
       app-owned `consent.json` beside the user-owned `config.toml`, scoped to
       `(tool, endpoint)` and a hand-bumped terms version, failing closed.
-- [ ] **Execution model.** Whether jobs are in-process or queued, and what that
-      means for cancellation crossing a process boundary.
+- [x] ~~**Execution model.**~~ Settled by
+      [ADR 0016](../adr/0016-jobs-run-in-process.md) at M6: the reference server
+      runs jobs in-process, synchronously, with an in-memory job store. The wire
+      contract already permits a queued implementation to answer `202` later
+      without a client change, which is what makes the decision reversible.
 - [ ] **Observability.** One approach to logging, and the mechanism that keeps
       cloud-api.md's "document contents are never logged" true rather than
       merely stated.
@@ -56,8 +59,10 @@ make the ADR a justification rather than a decision.
       links contributors to ADRs and architecture, but never explains how to run
       anything
 - [x] ~~`docs/implementation/core.md`~~ — written in Phase 2
-- [ ] `benchmarks/` — the README promises published benchmarks with real
-      hardware and methodology, and no numbers appear until they are measured
+- [ ] `benchmarks/` — **the harness landed at M6** and the methodology is
+      written down, but **no numbers have been measured**: the development
+      machine has neither Ghostscript nor Pandoc. Publishing needs a machine
+      with both, and CI deliberately does not publish.
 
 ### Environment
 
@@ -98,8 +103,9 @@ Decided in principle, not scheduled. Mostly already on the
       needs a rule about outputs written into a watched directory.
 - [ ] **Third-party tool plugins.** The entry-point group exists in
       `branding.py`; the trust model for third-party code does not.
-- [ ] **`--json` everywhere** (M6). `ErrorCode` is already described as public
-      API, so this partly exists as a commitment already.
+- [x] ~~**`--json` everywhere**~~ — delivered at M6.
+      [ADR 0017](../adr/0017-json-output-contract.md) and
+      [implementation/json.md](../implementation/json.md).
 - [ ] **`docmax setup`** (M3) — idempotent, `--dry-run`, verifies afterwards
       rather than assuming success.
 

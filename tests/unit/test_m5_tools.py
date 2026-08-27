@@ -235,10 +235,28 @@ def test_every_m5_tool_is_discoverable(name: str) -> None:
     assert spec.supports(Engine.LOCAL)
 
 
-@pytest.mark.parametrize("name", M5)
-def test_no_m5_tool_declares_a_cloud_engine_yet(name: str) -> None:
-    """Cloud lands at M6. Declaring it now would offer something that cannot run."""
+@pytest.mark.parametrize("name", ["to-images", "from-images"])
+def test_the_image_tools_have_no_cloud_engine(name: str) -> None:
+    """And never will: ADR 0012 gives cloud only to tools with painful local deps.
+
+    Poppler is a small packaged install and `from-images` is pure Python, so
+    uploading a document to run either would buy nothing. `convert` is the M5
+    tool that *did* get a cloud engine at M6 — covered below.
+    """
     assert not get_tool(name).supports(Engine.CLOUD)
+
+
+def test_convert_gained_a_cloud_engine_at_m6() -> None:
+    """Installing Pandoc is the pain cloud exists to remove.
+
+    The format boundary is not widened by it: ADR 0011's rules live in the
+    shared `_formats` table, which both engines validate against.
+    """
+    spec = get_tool("convert")
+
+    assert spec.supports(Engine.LOCAL)
+    assert spec.supports(Engine.CLOUD)
+    assert "pdf" not in _formats.convertible_names(), "the cloud engine widens nothing"
 
 
 @pytest.mark.parametrize("name", M5)

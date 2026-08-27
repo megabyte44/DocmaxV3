@@ -166,12 +166,17 @@ ignore = [
 "tests/**" = ["S", "T20", "ARG", "PLR2004"]
 # The CLI layer is the one place that legitimately writes to stdout.
 "src/docmax/cli/**" = ["T20"]
+# The benchmark runner is a script whose entire output is a report to a
+# terminal. It is not library code and is not in the wheel.
+"benchmarks/**" = ["T20"]
 # FastAPI's dependency-injection idiom is a call in an argument default, which
 # B008 exists to catch. It is correct everywhere else.
 "src/docmax/server/**" = ["B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["docmax"]
+# `benchmarks` is first-party too: not shipped, but ours, and grouping it with
+# third-party packages would misfile it in every module that imports it.
+known-first-party = ["docmax", "benchmarks"]
 
 # ============================================================================
 # Mypy — strict. There is no legacy code to grandfather in.
@@ -183,7 +188,10 @@ warn_unreachable = true
 warn_no_return = true
 show_error_codes = true
 pretty = true
-files = ["src", "tests"]
+# `benchmarks` is included deliberately: it is not shipped, but it imports the
+# real router and the real client, and an unchecked script that reaches into
+# them is exactly where a stale call signature would hide.
+files = ["src", "tests", "benchmarks"]
 
 # Third-party packages without type stubs. Kept as a short, explicit list so
 # that adding one is a visible decision rather than a blanket ignore.
