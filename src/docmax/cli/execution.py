@@ -123,6 +123,16 @@ def _suppressed_value_error() -> AbstractContextManager[None]:
     return suppress(ValueError)
 
 
+def interruptible(token: CancellationToken) -> AbstractContextManager[None]:
+    """The Ctrl-C bridge, under a public name.
+
+    ``execute`` uses it for one document. M9's ``pipeline``, ``batch`` and
+    ``watch`` commands need exactly the same thing around a much longer run, and
+    a second implementation of signal handling is the last thing this CLI needs.
+    """
+    return _interruptible(token)
+
+
 def execute(
     tool: str,
     inputs: Sequence[Path],
@@ -294,4 +304,5 @@ __all__ = [
     "build_router",
     "execute",
     "execute_read_only",
+    "interruptible",
 ]

@@ -103,6 +103,21 @@ def report(payload: dict[str, Any]) -> str:
     return _dump({"ok": True, "result": payload})
 
 
+def many(payload: dict[str, Any], *, ok: bool) -> str:
+    """The envelope for a command that reports on several documents at once.
+
+    Same shape as :func:`report` — ``ok`` and ``result``, nothing else on stdout
+    — but ``ok`` is the caller's to state, because a batch of two hundred where
+    three failed is not a success and is not a failure either. The per-item
+    errors inside ``result`` use ``DocMaxError.to_dict``, which is the same
+    error envelope :func:`failure` puts on a single-command run.
+
+    This is not a second format. It is the one format, with the one field that
+    a multi-item command cannot infer for itself.
+    """
+    return _dump({"ok": ok, "result": payload})
+
+
 def _dump(payload: dict[str, Any]) -> str:
     # `ensure_ascii=False` so a filename with an accent in it round-trips as
     # itself rather than as escapes; the stream is UTF-8 either way.
@@ -133,4 +148,4 @@ def _fallback(value: object) -> str:
     return str(value)
 
 
-__all__ = ["enabled", "failure", "note", "report", "set_enabled", "success"]
+__all__ = ["enabled", "failure", "many", "note", "report", "set_enabled", "success"]

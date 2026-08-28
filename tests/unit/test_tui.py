@@ -78,6 +78,13 @@ def test_the_tui_offers_exactly_what_the_cli_exposes() -> None:
     `ocr` is registered and unimplemented until M8. The CLI never exposed it;
     the TUI must not either, and the day it ships this test is what makes the
     one-line deletion in `catalog.py` non-optional.
+
+    The allowed remainder is the set of CLI commands that are **not tools**, and
+    which the TUI therefore has nothing to generate a form from. `doctor` and
+    `formats` answer questions, `tui` is the entry point, and M9's `pipeline`,
+    `batch` and `watch` compose tools rather than being any — none of the six is
+    in the registry, which is what `offered <= exposed` above still asserts
+    strictly. See ADR 0021 and ADR 0023.
     """
     from docmax.cli.commands import app_commands
     from docmax.cli.main import app
@@ -93,7 +100,7 @@ def test_the_tui_offers_exactly_what_the_cli_exposes() -> None:
     offered = {spec.name for spec in catalog.offered_tools()}
 
     assert offered <= exposed
-    assert exposed - offered <= {"doctor", "formats", "tui"}
+    assert exposed - offered <= {"doctor", "formats", "tui", "pipeline", "batch", "watch"}
 
 
 def test_every_registered_tool_is_offered() -> None:

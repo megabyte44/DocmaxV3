@@ -14,7 +14,7 @@ from typing import Annotated
 import typer
 
 from docmax import __version__
-from docmax.cli import cloud, commands
+from docmax.cli import cloud, commands, workflows
 from docmax.cli.render import console, out
 from docmax.core.branding import APP_NAME, CLI_NAME, HOMEPAGE
 from docmax.core.models import Engine
@@ -224,6 +224,12 @@ def merge(
 # application shell. Registered rather than imported one by one, so adding a
 # tool command touches `commands.py` alone.
 for _command in commands.app_commands.registered_commands:
+    app.registered_commands.append(_command)
+
+# The M9 composition commands — `pipeline`, `batch`, `watch` — join the same
+# way. They are deliberately not in `commands.py`: that module is the per-tool
+# commands, and these compose tools rather than being ones.
+for _command in workflows.workflow_commands.registered_commands:
     app.registered_commands.append(_command)
 
 # `cloud` is a group rather than a command: credentials and consent are a
