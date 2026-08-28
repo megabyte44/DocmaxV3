@@ -194,6 +194,32 @@ def page_count(reader: PdfReader) -> int:
         ) from exc
 
 
+def page_geometry(reader: PdfReader, index: int = 0) -> tuple[float, float]:
+    """The width and height of one page, in points, translating a late failure.
+
+    Here rather than in ``crop`` because two callers need it and neither should
+    learn pypdf's spelling of it: the tool, which validates a box against the
+    media it is about to replace, and the box picker, which has to draw a page
+    of the right shape before the user can choose anything on it.
+
+    Keeping it here is also what lets a picker satisfy ADR 0005's rule that it
+    never imports an engine — it asks this module for a rectangle, exactly as
+    the tools do, and learns nothing else about the document.
+
+    Like :func:`page_count`, this walks the page tree, which is where a lazily
+    parsed file finally fails.
+    """
+    from pypdf.errors import PyPdfError
+
+    try:
+        box = reader.pages[index].mediabox
+        return float(box.width), float(box.height)
+    except (PyPdfError, OSError, ValueError, IndexError) as exc:
+        raise CorruptDocumentError(
+            f"The dimensions of page {index + 1} could not be read: {exc}",
+        ) from exc
+
+
 def save(
     writer: PdfWriter,
     target: OutputTarget,
@@ -234,6 +260,7 @@ __all__ = [
     "open_encrypted_pdf",
     "open_pdf",
     "page_count",
+    "page_geometry",
     "require_pdf",
     "save",
 ]

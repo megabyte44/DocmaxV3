@@ -12,7 +12,12 @@ SRC = REPO_ROOT / "src" / "docmax"
 #: ``cli`` and ``tui`` are deliberately excluded — they are the layer that is
 #: allowed to exit and to print. ``server`` is included: a request handler that
 #: exits the process takes every other in-flight request with it.
-LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server")
+#:
+#: ``pickers`` is included too, and that is the whole enforcement behind
+#: [ADR 0005](../docs/adr/0005-gui-pickers.md): a parameter picker "never opens
+#: a document for writing, never touches the filesystem". Listing it here makes
+#: a write outside ``core/atomic.py`` fail the build rather than fail review.
+LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server", "pickers")
 
 
 def library_sources() -> list[Path]:

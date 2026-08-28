@@ -15,7 +15,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ complete |
 | **M5** | `convert`, `to-images`, `from-images` | ✅ complete |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ complete |
-| **M7** | Textual TUI + visual pickers for crop and reorder | planned |
+| **M7** | Textual TUI + visual pickers for crop and reorder | ✅ complete |
 | **M8** | OCR, done properly | planned |
 | **M9** | Pipelines, resumable batch, folder watch | planned |
 | **M10** | Local MCP server — drive DocMax from an AI agent | planned |
@@ -35,6 +35,14 @@ installing Tesseract or a LaTeX distribution — which is only meaningful once
 those local engines exist to be skipped. Building the remote half first would
 mean specifying a contract for operations nobody has implemented, then finding
 out at M8 that the contract was wrong.
+
+**M7 had to build a tool to keep a promise.** The row says "pickers for crop
+and reorder", and `reorder` existed while `crop` did not —
+[ADR 0005](../adr/0005-gui-pickers.md) had assumed the headless flags shipped at
+M2, and they did not. Since that ADR's rule is that the headless form ships
+first, M7 built `crop --box` before `crop --interactive`. `redact`, the third
+picker ADR 0005 names, is on no roadmap row and has no headless form; it was not
+built.
 
 **OCR is M8, deliberately late.** It is the operation v2 got most wrong, it has
 the heaviest dependencies, and it benefits most from a mature router and a proven

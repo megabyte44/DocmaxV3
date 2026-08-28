@@ -8,9 +8,11 @@ make specific past failures unreachable.
 
 ```
 ┌──────────────────────────────────────────┐
-│  cli/          tui/  (M7)                │  may print, may exit
+│  cli/          tui/                       │  may print, may exit
 ├──────────────────────────────────────────┤
 │  server/       the Cloud Engine, hosted  │  not in the wheel, nothing imports it
+├──────────────────────────────────────────┤
+│  pickers/      ADR 0005 parameter pickers │  writes nothing, exits nothing
 ├──────────────────────────────────────────┤
 │  tools/        one package per operation  │  self-registering, lazily loaded
 ├──────────────────────────────────────────┤
@@ -178,3 +180,6 @@ See [`core/errors.py`](../../src/docmax/core/errors.py).
 - [ADR 0003 — Atomic writes and `OutputTarget`](../adr/0003-atomic-writes.md)
 - [ADR 0004 — Open-core boundary](../adr/0004-open-core-boundary.md)
 - [ADR 0005 — GUI pickers over localhost](../adr/0005-gui-pickers.md)
+- [ADR 0019 — Where pickers live, and how they render](../adr/0019-picker-package-and-rendering.md)
+- [ADR 0020 — The TUI entry point](../adr/0020-tui-entry-point.md)
+- [ADR 0021 — The TUI is generated from `ToolSpec`](../adr/0021-the-tui-is-generated-from-the-registry.md)

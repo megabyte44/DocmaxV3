@@ -15,6 +15,14 @@ and rebuilds everything underneath it.
 These are behaviour changes a v2 user can actually hit. See
 [docs/migrating-from-v2.md](docs/migrating-from-v2.md).
 
+- **A bare `docmax` may now open the TUI** instead of printing help — but only
+  at an interactive terminal, with `textual` installed, and without `--json`.
+  Piped, redirected, in CI, or on a machine without the `tui` extra, it prints
+  help and exits 0 exactly as before, so no script changes behaviour.
+- **`docmax reorder` accepts `--interactive` in place of `--order`.** `--order`
+  is still required in every non-interactive invocation; what was a missing-
+  option error from the argument parser is now the same refusal naming both
+  ways to supply it.
 - **Existing files are no longer silently overwritten.** Writing to a path that
   exists now requires `--force`. In v2, re-running any command destroyed the
   previous run's output without warning.
@@ -28,6 +36,45 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **A Textual TUI.** `docmax tui`, or a bare `docmax` at an interactive
+  terminal. A second driver of the same core, not a second implementation:
+  every run goes through `EngineRouter`, and there is no routing, consent rule,
+  validation or atomic write anywhere in the interface.
+  - **Generated from the registry.** One screen serves all eighteen tools,
+    built from `ToolSpec` and `Param` — the job `Param`'s docstring has
+    described since M0. There is no per-tool code in the TUI and a test
+    asserts it, because a hardcoded dispatch chain over tool names is exactly
+    how v2's interactive menu died. See
+    [ADR 0021](docs/adr/0021-the-tui-is-generated-from-the-registry.md).
+  - Runs on a worker thread so `ctrl+c` can cancel; the atomic writers then
+    leave the destination untouched, exactly as on the command line.
+  - Consent is the modal `errors.py` has specified since M0 and which nothing
+    implemented; errors are a message and a remedy, never a traceback.
+  - Optional: `pip install "DocmaxV3[tui]"`. Without it, `docmax tui` reports
+    the install line rather than an `ImportError`, and a bare `docmax` prints
+    help exactly as before.
+- **Visual pickers for `crop` and `reorder`.** `--interactive` opens a page in
+  your browser, you drag a box or rearrange the pages, and the value fills
+  `--box` or `--order`. Everything after that is identical to typing it.
+  - **A picker returns parameters, never results** — the rule
+    [ADR 0005](docs/adr/0005-gui-pickers.md) set at M0. Nothing in
+    `docmax/pickers/` writes a file, exits a process, or imports an engine, and
+    all three are enforced by the hygiene suite rather than by review.
+  - Zero new dependencies **and zero vendored assets**: `http.server`,
+    `webbrowser`, and the browser's own PDF viewer instead of a bundled copy of
+    pdf.js. [ADR 0019](docs/adr/0019-picker-package-and-rendering.md) records
+    that departure from ADR 0005's implementation note and what it costs.
+  - Over SSH the picker prints a URL, and the flag form works regardless.
+- **`crop`.** Trim every page to a rectangle, in points from the bottom-left.
+  New at M7 because ADR 0005 requires a picker's headless form to ship first
+  and this one never had: `--box` is the tested path, `--interactive` only
+  fills it in. Sets `/CropBox` as well as `/MediaBox`, since a viewer prefers
+  the former and writing only the latter looks cropped in some readers and not
+  others. A page the box does not fit is left alone and named in the result.
+- **`docmax.tui` and `docmax.pickers` joined the layering contracts** in the
+  same change as the code, as the architecture requires — five contracts still
+  kept, with one narrow, documented and separately tested exception for the
+  entry point ([ADR 0020](docs/adr/0020-tui-entry-point.md)).
 - **Cloud engines for `compress` and `convert`.** Two, not the five the
   architecture docs name: `ocr` is M8's, and `pdfa` and `remove-bg` do not
   exist. A cloud engine for a tool with no local engine is exactly what the

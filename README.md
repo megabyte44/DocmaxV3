@@ -117,6 +117,34 @@ use `to-images`. See
 docmax doctor      # what's installed, what's missing, and the command to fix it
 ```
 
+## An interface for when you are not scripting
+
+```bash
+pip install "DocmaxV3[tui]"
+docmax tui        # or just `docmax`, at a terminal
+```
+
+Every tool, the same router, the same engines — a second way in, not a second
+implementation. Pick a tool, fill in the form, watch the progress, press
+`ctrl+c` to stop. It is generated from the tool registry, so it always offers
+exactly what the CLI does.
+
+Two operations need a value a terminal cannot ask for — where to crop, and what
+order pages go in. Those get a browser tab:
+
+```bash
+docmax crop scan.pdf -o trimmed.pdf --box 36,36,540,720   # scriptable
+docmax crop scan.pdf -o trimmed.pdf --interactive         # drag a box instead
+
+docmax reorder in.pdf -o out.pdf --order 3,1,2
+docmax reorder in.pdf -o out.pdf --interactive
+```
+
+**The picker returns the parameter and nothing else.** It never opens your
+document for writing and has no route to an output file. The flag form is the
+one that is tested, works over SSH, and is what `--interactive` fills in — so
+nothing you can do in a browser is something you cannot do in a script.
+
 `doctor` prints the install line for your platform — `apt install ghostscript`,
 `brew install ghostscript`, or the winget package on Windows. It only reports;
 nothing is installed for you.
@@ -132,7 +160,7 @@ nothing is installed for you.
 | **M4** | `watermark`, `stamp`, `protect`, `unlock`, `permissions` | ✅ done |
 | **M5** | `convert`, `to-images`, `from-images` | ✅ done |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ done |
-| **M7** | Textual TUI + visual pickers for crop and reorder | |
+| **M7** | Textual TUI + visual pickers for crop and reorder | ✅ done |
 | **M8** | OCR, done properly | |
 | **M9** | Pipelines, resumable batch, folder watch | |
 | **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | |

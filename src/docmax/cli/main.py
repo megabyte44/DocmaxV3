@@ -25,7 +25,12 @@ app = typer.Typer(
     epilog=f"Docs: {HOMEPAGE}",
     add_completion=True,
     rich_markup_mode="rich",
-    no_args_is_help=True,
+    # Deliberately off. A bare `docmax` at an interactive terminal launches the
+    # TUI; everywhere else it still prints help. `_no_command` below owns that
+    # decision, because Typer's flag cannot express "unless there is a person
+    # here" and getting it wrong would break `docmax | less` and every CI log.
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
 
 
@@ -37,6 +42,7 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     _version: Annotated[
         bool,
         typer.Option(
@@ -66,6 +72,88 @@ def main(
     from docmax.cli import json_output
 
     json_output.set_enabled(json_out)
+
+    if ctx.invoked_subcommand is None:
+        _no_command(ctx)
+
+
+def _no_command(ctx: typer.Context) -> None:
+    """What a bare ``docmax`` does: start the TUI, or orient the user.
+
+    ``tests/unit/test_cli.py`` has said since M0 that a bare invocation must
+    never leave someone staring at nothing, and that at M7 it would launch the
+    TUI. It does — **when there is a person at a terminal to use it.**
+
+    Every other case still prints help, and each of the three guards is a real
+    failure that the unguarded version would cause:
+
+    * ``--json`` — a Textual app writes a screenful of escape sequences to
+      stdout, which is precisely the stream
+      [ADR 0017](../../../docs/adr/0017-json-output-contract.md) reserves for
+      one JSON object.
+    * not a terminal — ``docmax | less``, a CI step, a cron job. A TUI drawing
+      into a pipe produces garbage and may never exit.
+    * no ``textual`` — the extra is optional, and a bare command is the worst
+      possible place to meet a missing-dependency error.
+
+    Help is not a failure here, so the exit code is 0 either way.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.interactive import is_interactive
+
+    if json_output.enabled() or not is_interactive() or not _tui_is_available():
+        out.print(ctx.get_help())
+        raise typer.Exit
+
+    _launch_tui()
+
+
+# Two one-line indirections so the three guards above can be tested without a
+# real terminal and without a real Textual app. Importing inside them keeps
+# `docmax --help` free of the TUI on a machine that has none.
+def _tui_is_available() -> bool:
+    from docmax.tui import is_available
+
+    return is_available()
+
+
+def _launch_tui() -> None:
+    from docmax.tui import launch
+
+    launch()
+
+
+@app.command()
+def tui(json_out: commands.JsonOption = False) -> None:
+    """Open the interactive terminal interface.
+
+    The same tools, the same router, the same engines — a second driver of the
+    same core rather than a second implementation of anything. Every operation
+    it offers is available as a command, and the reverse is true too.
+
+    Needs the `tui` extra. Without it this reports the exact install line rather
+    than an import error.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.interactive import require_interactive_is_possible
+    from docmax.cli.render import render_error
+    from docmax.core.errors import DocMaxError
+    from docmax.tui import require_available
+
+    # Accepted like every other command, and then refused — which is the point.
+    # `--json` promises one machine-readable object on stdout, so the answer to
+    # `tui --json` has to *be* that object, saying why there will be no TUI.
+    json_output.note(json_out)
+
+    try:
+        require_interactive_is_possible(f"{CLI_NAME} tui")
+        require_available()
+        _launch_tui()
+    except DocMaxError as exc:
+        # Missing `textual`, `--json`, or no terminal. All three are anticipated
+        # and all three get a message and a remedy, not a traceback.
+        render_error(exc)
+        raise typer.Exit(1) from exc
 
 
 @app.command()

@@ -31,6 +31,9 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0016](0016-jobs-run-in-process.md) | Cloud jobs run in the server process, and the job store is in memory | Accepted |
 | [0017](0017-json-output-contract.md) | `--json` is a global option and stdout carries only the envelope | Accepted |
 | [0018](0018-capabilities-mean-runnable.md) | `/v1/capabilities` lists what this deployment can run, not what this build knows about | Accepted |
+| [0019](0019-picker-package-and-rendering.md) | Pickers are their own package below the interfaces, and render with the browser's own PDF viewer | Accepted |
+| [0020](0020-tui-entry-point.md) | The CLI launches the TUI; a bare `docmax` opens it only where there is someone to use it | Accepted |
+| [0021](0021-the-tui-is-generated-from-the-registry.md) | The TUI is generated from `ToolSpec` and names no tool | Accepted |
 
 ## When to write one
 

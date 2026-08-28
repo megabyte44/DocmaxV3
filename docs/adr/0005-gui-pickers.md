@@ -1,6 +1,7 @@
 # ADR 0005 — GUI escape hatches are parameter pickers served over localhost
 
-**Status:** Accepted · 2026-08-13
+**Status:** Accepted · 2026-08-13 · implementation details refined by
+[ADR 0019](0019-picker-package-and-rendering.md)
 
 ## Context
 

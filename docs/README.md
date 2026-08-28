@@ -28,6 +28,7 @@ Start here.
 | [implementation/config.md](implementation/config.md) | Configuration precedence and the consent record |
 | [implementation/core.md](implementation/core.md) | The core contracts, and the failure each prevents |
 | [implementation/json.md](implementation/json.md) | What `--json` produces, and which fields are stable |
+| [implementation/tui.md](implementation/tui.md) | The TUI and the two visual pickers, and the rules they obey |
 | [cloud-api.md](cloud-api.md) | The Cloud Engine wire contract *(implemented, for `compress` and `convert`)* |
 | [../benchmarks/METHODOLOGY.md](../benchmarks/METHODOLOGY.md) | How performance is measured, and what is not measured |
 | [migrating-from-v2.md](migrating-from-v2.md) | What changed, and what will break |

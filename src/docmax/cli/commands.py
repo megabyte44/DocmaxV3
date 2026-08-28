@@ -36,14 +36,18 @@ every ``--help``.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from docmax.core.models import Engine
 from docmax.tools import _formats, _permissions, _position
 from docmax.tools.protect import tool as protect_spec
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 app_commands = typer.Typer()
 
@@ -72,6 +76,13 @@ JsonOption = Annotated[
 _PagesOption = Annotated[
     str | None,
     typer.Option("--pages", help="Which pages, e.g. 1-3,7. Default: all."),
+]
+#: The two ADR 0005 pickers spell this the same way, and it means the same
+#: thing in both: choose the parameter visually instead of typing it, then
+#: proceed down the identical path.
+_InteractiveOption = Annotated[
+    bool,
+    typer.Option("--interactive", help="Choose the value visually, in a browser."),
 ]
 
 #: Rendered into `--position` help so the nine names are listed by the module
@@ -212,9 +223,10 @@ def reorder(
         Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
     ],
     order: Annotated[
-        str,
+        str | None,
         typer.Option("--order", help="The new order, e.g. 3,1,2.", show_default=False),
-    ],
+    ] = None,
+    interactive: _InteractiveOption = False,
     force: _ForceOption = False,
     engine: _EngineOption = None,
     dry_run: _DryRunOption = False,
@@ -224,6 +236,10 @@ def reorder(
 
     The order must list every page exactly once. A reorder that quietly dropped
     or duplicated a page would be discovered far too late.
+
+    `--interactive` opens the page list in your browser, you drag them into the
+    order you want, and the value fills `--order`. The picker returns a
+    parameter and never touches the document. See ADR 0005.
     """
     from docmax.cli import json_output
     from docmax.cli.execution import execute
@@ -231,10 +247,170 @@ def reorder(
 
     json_output.note(json_out)
 
+    order = _resolve_order(source, order=order, interactive=interactive)
+
     result = execute(
         "reorder", [source], output, engine=engine, force=force, dry_run=dry_run, order=order
     )
     render_result(result, dry_run=dry_run, tool="reorder")
+
+
+def _resolve_order(source: Path, *, order: str | None, interactive: bool) -> str:
+    """The page order, dragged in a browser when asked for and typed otherwise.
+
+    `--order` stays required in every non-interactive invocation, so no existing
+    command line changes meaning: what used to be a missing-option error from
+    Typer is now the same refusal from here, with the picker named as the other
+    way to supply it.
+    """
+    from docmax.cli.interactive import require_interactive_is_possible
+
+    if not interactive:
+        if order is None or not order.strip():
+            raise typer.BadParameter(
+                "Pass --order 3,1,2, or --interactive to arrange the pages visually.",
+                param_hint="--order",
+            )
+        return order
+
+    if order is not None:
+        raise typer.BadParameter("Pass --order or --interactive, not both.", param_hint="--order")
+
+    with _parameter_boundary():
+        require_interactive_is_possible("--interactive")
+
+        from docmax.pickers import pick_order
+
+        return pick_order(source, announce=_announce)
+
+
+def _announce(url: str) -> None:
+    """Put the picker's URL on stderr, where the CLI's diagnostics live.
+
+    stderr rather than stdout because a picker is a step on the way to a result,
+    not the result — and because `--json` reserves stdout entirely. (`--json`
+    refuses `--interactive` outright; this keeps the streams honest anyway.)
+    """
+    from docmax.cli.render import console
+
+    console.print(f"[cyan]Opening a picker:[/cyan] {url}")
+    console.print("[dim]  Close the tab or press Ctrl-C to cancel.[/dim]")
+
+
+@contextmanager
+def _parameter_boundary() -> Iterator[None]:
+    """The error boundary for work that happens *before* ``execute`` is reached.
+
+    ``cli/execution.py`` turns every typed error into a rendered panel and an
+    exit code, but it only covers the run itself. Parsing `--box` and opening a
+    picker both happen earlier, and both raise the same typed errors — a
+    malformed box, an unreadable document, a picker timeout. Without this they
+    would escape as tracebacks, which is the one thing the whole error contract
+    exists to prevent.
+
+    `PickerCancelledError` is deliberately not a `DocMaxError` — closing the tab is a
+    decision, not a failure, and `cli/execution.py` already treats the
+    equivalent Ctrl-C that way: a plain line and exit 130, because nothing was
+    written and nothing needs explaining.
+    """
+    from docmax.cli.execution import EXIT_CANCELLED, EXIT_FAILURE
+    from docmax.cli.render import console, render_error
+    from docmax.core.errors import DocMaxError
+    from docmax.pickers import PickerCancelledError
+
+    try:
+        yield
+    except PickerCancelledError as exc:
+        console.print("[yellow]Picker cancelled.[/yellow] Nothing was written.")
+        raise typer.Exit(EXIT_CANCELLED) from exc
+    except KeyboardInterrupt as exc:
+        console.print("\n[yellow]Picker cancelled.[/yellow] Nothing was written.")
+        raise typer.Exit(EXIT_CANCELLED) from exc
+    except DocMaxError as exc:
+        # The same panel and the same exit code the run itself would produce,
+        # including the `--json` envelope: `render_error` reads the switch, so a
+        # script gets one parseable shape whether the failure was the box it
+        # typed or the document it named.
+        render_error(exc)
+        raise typer.Exit(EXIT_FAILURE) from exc
+
+
+@app_commands.command()
+def crop(
+    source: Annotated[Path, typer.Argument(help="The PDF to crop.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    box: Annotated[
+        str | None,
+        typer.Option(
+            "--box",
+            help=(
+                "The rectangle to keep, as x,y,width,height in points, "
+                "measured from the bottom-left of the page."
+            ),
+            show_default=False,
+        ),
+    ] = None,
+    interactive: _InteractiveOption = False,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
+) -> None:
+    """Trim every page to a rectangle.
+
+    Coordinates are in points — 72 to the inch — and the origin is the
+    **bottom-left** of the page, which is the PDF coordinate system's own.
+
+    `--interactive` opens a page in your browser, you drag a box on it, and the
+    value fills `--box`. Everything after that is identical to typing the
+    numbers yourself: the picker returns a parameter and never touches the
+    document. See ADR 0005.
+
+    Cropping moves the page boundary; it does not delete the marks outside it.
+    Use `sanitize` when the point is to remove content rather than to reframe
+    it.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    json_output.note(json_out)
+
+    box = _resolve_box(source, box=box, interactive=interactive)
+
+    result = execute("crop", [source], output, engine=engine, force=force, dry_run=dry_run, box=box)
+    render_result(result, dry_run=dry_run, tool="crop")
+
+
+def _resolve_box(source: Path, *, box: str | None, interactive: bool) -> str:
+    """The box to crop to, drawn in a browser when asked for and typed otherwise.
+
+    The picker is reached only through this function, and it returns a string
+    that is then indistinguishable from one the user typed — which is what makes
+    ADR 0005's "the picker fills --box, then proceeds identically" true rather
+    than merely intended.
+    """
+    from docmax.cli.interactive import require_interactive_is_possible
+    from docmax.tools import _box
+
+    if not interactive:
+        # Parsed here so a malformed box is reported before any router,
+        # document or temp file is involved. The strategy parses it again;
+        # both go through the same module and cannot disagree.
+        with _parameter_boundary():
+            return _box.parse(box).as_spec()
+
+    if box is not None:
+        raise typer.BadParameter("Pass --box or --interactive, not both.", param_hint="--box")
+
+    with _parameter_boundary():
+        require_interactive_is_possible("--interactive")
+
+        from docmax.pickers import pick_box
+
+        return pick_box(source, announce=_announce).as_spec()
 
 
 @app_commands.command()

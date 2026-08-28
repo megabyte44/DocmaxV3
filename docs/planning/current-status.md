@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-27 · **Branch:** `feat/m6-cloud` · **Base:** `39672a7` (M5 complete)
+**Last updated:** 2026-08-28 · **Branch:** `feat/m7-tui` · **Base:** `64ea3f4` (M6 complete)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,7 +10,7 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–8 are complete. Milestones M1 through M6 are done; the published
+**Phases 0–9 are complete. Milestones M1 through M7 are done; the published
 package is `DocmaxV3` 3.0.0a7, which predates them.**
 
 | Phase | | |
@@ -27,6 +27,7 @@ package is `DocmaxV3` 3.0.0a7, which predates them.**
 | M4 — marking and encryption | **complete** | watermark, stamp, protect, unlock, permissions — no new phase; see the note below |
 | M5 — conversion | **complete** | convert, to-images, from-images, `formats` — likewise no new phase |
 | M6 — cloud, JSON, benchmarks | **complete** | cloud `compress`/`convert`, `--json`, `docmax cloud`, benchmark harness |
+| 9 — TUI and visual pickers | **complete** | `docmax.tui`, `docmax.pickers`, the `crop` tool, M7 |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -75,6 +76,7 @@ foundations.
 | `to-images` | done — Poppler, one process per page; needs no imaging library |
 | `from-images` | done — img2pdf + Pillow; the second multi-input tool after `merge` |
 | `compress`, `convert` — cloud | done — M6; the only two with a cloud engine (ADR 0012) |
+| `crop` | done — M7's one new tool; the headless half of the box picker, per ADR 0005 |
 | `ocr` | **skeleton** — `run()` and both validators are `NotImplementedError`, M8 |
 
 Shared between them: `tools/_pagespec.py` parses page selections once,
@@ -109,9 +111,36 @@ is complete: `RegistryRunner.start()` runs jobs in-process
 reports what the deployment can actually run rather than what its build knows
 about ([ADR 0018](../adr/0018-capabilities-mean-runnable.md)).
 
-The CLI exposes all seventeen working tools plus `doctor`, `formats` and the
-`cloud` group — every registered tool except `ocr`, which is still a skeleton.
-Every command takes `--json`.
+M7 added `tools/_box.py`, the fifth shared vocabulary: one rectangle syntax read
+by `crop`, by the box picker, and by the CLI before either. And one function to
+`tools/_pdf.py` — `page_geometry`, read-only — which is what lets a picker draw a
+page to scale without learning pypdf's spelling of a media box.
+
+The CLI exposes all eighteen working tools plus `doctor`, `formats`, `tui` and
+the `cloud` group — every registered tool except `ocr`, which is still a
+skeleton. Every command takes `--json`, including `tui`, which accepts it in
+order to refuse in the envelope.
+
+### Interfaces as they stand
+
+| Interface | State |
+|---|---|
+| `cli` | complete — eighteen tools, four other commands, global `--json` |
+| `tui` | done — M7. Generated from the registry; no per-tool code (ADR 0021) |
+| `pickers` | done — M7. `crop` and `reorder`; parameters only (ADR 0005, 0019) |
+| `server` | complete — routes, jobs, storage, auth, live tool execution |
+| `mcp` | not built — M10 |
+
+**M7 needed no change below the interface layer**, which was the phase's own
+test of the core contracts. `ProgressSink` took a Textual widget unmodified,
+`CancellationToken` took a keypress, and `ToolSpec`/`Param` generated eighteen
+forms. `core/`, `registry.py` and `router.py` are untouched by this milestone.
+
+`docmax.tui` and `docmax.pickers` arrived with their import-linter contracts in
+the same change. `pickers` is deliberately *not* an interface — it never prints
+and never exits — so it is in `LIBRARY_PACKAGES` and covered by the
+no-direct-writes and no-sys-exit hygiene tests. That is what makes ADR 0005's
+"a picker never touches the filesystem" a build failure rather than a promise.
 
 ---
 
@@ -122,10 +151,10 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **1539 passed, 2 skipped, 4 deselected** — 145s |
+| `pytest -m "not golden and not needs_binary"` | **1693 passed, 2 skipped, 4 deselected** — 146s |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 195 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 158 source files |
+| `ruff format --check .` | **passed** — 214 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 178 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
 Both skips are intentional — the self-exemptions inside the hygiene suite:
@@ -142,6 +171,13 @@ compiled `mypyc` extension, and this machine's Windows Application Control
 policy blocks loading it — `pip install --no-binary mypy` produces the pure
 Python build, which runs and passes. This is a property of the development
 machine, not of the project; CI installs the wheel and is unaffected.
+
+**Textual 8.2.8 is what M7 was verified against**, installed from the `tui`
+extra. The extra's floor was raised from `>=0.60.0` to `>=1.0.0`, and that floor
+is **not exercised** — nothing between 1.0 and 8.2 has been run. The 0.60 floor
+was demonstrably wrong (`Select`'s "nothing chosen" sentinel has been renamed
+since, and `push_screen_wait` did not exist), and `tui/app.py` avoids the APIs
+known to have churned rather than pinning to one release.
 
 **Still unverified:** the CI matrix — Linux and macOS, and Python 3.11–3.13.
 Everything above is one platform and one interpreter, and 3.14 is not in the
@@ -206,11 +242,12 @@ checks arrived with the server, as the architecture said they must.
 | `architecture/dependencies.md` | current |
 | `implementation/core.md` | current — new in Phase 2 |
 | `implementation/config.md` | current — new in Phase 3 |
-| `adr/README.md` | current — indexes 0009 |
+| `implementation/tui.md` | current — new at M7 |
+| `adr/README.md` | current — indexes 0021 |
 | `planning/*` | current. `reconciliation.md` is superseded by ADR 0009 and deletable |
 | `cloud-api.md` | design-stage; data-handling now points at the terms constant |
 | `README.md` | current |
-| `CHANGELOG.md` | current through M4 |
+| `CHANGELOG.md` | current through M7 |
 | `development/*` | **missing** — no setup, testing or contributing guide |
 | `api/*` | not needed until the HTTP layer exists |
 
@@ -284,10 +321,41 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M7 — Textual TUI + visual pickers for crop and reorder.** Another driver of
-the same core, per [ADR 0005](../adr/0005-gui-pickers.md). If it needs a change
-below the interface layer, that is a finding about the core contracts rather
-than a workaround to write.
+**M8 — OCR, done properly.** `tools/ocr/` is a skeleton with a full `ToolSpec`
+and a `run()` that raises. It is the operation v2 got most wrong, it has the
+heaviest dependencies, and it is the tool the roadmap deliberately left last.
+Shipping it also empties `tui/catalog.py`'s `UNIMPLEMENTED`, which a test will
+insist on.
+
+**Do not start it without direction.**
+
+### What M7 left behind
+
+**`redact` was not built, and neither was its picker.** [ADR
+0005](../adr/0005-gui-pickers.md) names three pickers — `crop`, `redact`,
+`reorder` — but the roadmap row says "crop and reorder", `redact` is on no
+milestone, and it has no headless `--pattern` form for a picker to fill. Building
+the picker first is precisely what that ADR forbids. The gap is now visible
+rather than implied.
+
+**The `crop` box uses a bottom-left origin**, which is the PDF coordinate
+system's own and is not what someone counting down from the top of a viewer will
+expect. It is documented in `--help`, in the picker page, and in
+[implementation/tui.md](../implementation/tui.md); the picker converts, so only
+users typing `--box` by hand meet it. Recorded because it is a contract decision
+that would be expensive to reverse later.
+
+**The reorder picker shows numbered cards, not thumbnails.** Thumbnails need
+either a rasteriser (an external binary) or a vendored pdf.js, and
+[ADR 0019](../adr/0019-picker-package-and-rendering.md) declined both. The
+document is displayed alongside the list for reference. This is a real loss and
+it is the price of the zero-dependency rule.
+
+**The crop backdrop's alignment is browser-dependent.** The page is displayed
+through the browser's own PDF viewer with `#view=Fit&toolbar=0`, which not every
+browser honours identically. The returned coordinates are unaffected — they come
+from the drawing surface, which is sized to the page's true aspect ratio — and
+the numeric fields are always shown and editable.
 
 **No performance numbers have been published.** The M6 harness exists and runs;
 the development machine has neither Ghostscript nor Pandoc, so every row of the
@@ -306,14 +374,24 @@ architecture's own answer to it.
 `convert`.** That describes the M6 cloud engine, which is what the table's
 column heading says. It is accurate about M6 and ahead of M5.
 
-**Three seams are now owed one ADR.** `ToolSpec` cannot say "this tool produces
+**A fourth instance of the `ToolSpec` seam arrived at M7, and was reported
+rather than patched.** `ToolSpec` cannot say "declared but not implemented", so a
+registry-driven tool list offers `ocr` — whose `run()` raises — and choosing it
+would produce an `InternalError` wrapping a `NotImplementedError`. The TUI names
+that one exception in `tui/catalog.py`, with two tests holding it, and the clean
+fix (an `implemented` flag on `ToolSpec`) is a Core change deliberately not made.
+[phases.md](phases.md) says to treat exactly this as a finding, and it belongs
+with the other three below rather than being decided alone.
+
+**Four seams are now owed one ADR.** `ToolSpec` cannot say "this tool produces
 no output" (`get-info`, a bare `metadata`, `permissions`), cannot say "my output
 extension depends on a parameter" (which is why `convert` requires `-o`), and
 cannot carry configuration to a strategy — so a cloud strategy resolves its own
 through `core.config.load()` rather than receiving the router's
-([ADR 0013](../adr/0013-cloud-config-comes-from-the-resolved-config.md)). All
-three are the same shape: a tool wanting something from `ToolSpec` that it does
-not carry. They should be decided together.
+([ADR 0013](../adr/0013-cloud-config-comes-from-the-resolved-config.md)) — and
+cannot say "declared but not implemented" (M7, above). All four are the same
+shape: a tool wanting something from `ToolSpec` that it does not carry. They
+should be decided together.
 
 The third has a named trigger: **adding an `--endpoint` or `--api-key` flag
 makes it wrong**, because a runtime override cannot reach a strategy.
@@ -331,4 +409,4 @@ confirmed or overturned deliberately.
 `needs_binary` compress tests are skipped locally and required in CI. Everything
 else about compress is covered by a stand-in program that is a real subprocess.
 
-**Do not start it without direction** — each phase is scoped explicitly.
+Each phase is scoped explicitly, and none should be started without direction.

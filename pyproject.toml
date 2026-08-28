@@ -63,8 +63,14 @@ images = [
     "Pillow>=10.3.0",
     "img2pdf>=0.5.0",
 ]
+# Textual moves its own API faster than this project moves. The floor was
+# 0.60 and was never exercised: Select's "nothing chosen" sentinel alone has
+# been renamed since, and 0.60-era Textual has no `push_screen_wait`. M7 was
+# built and verified against 8.2.8; 1.0 is the honest floor for the APIs the
+# TUI actually uses, and `src/docmax/tui/app.py` avoids the ones known to have
+# churned. See docs/planning/current-status.md for what was verified.
 tui = [
-    "textual>=0.60.0",
+    "textual>=1.0.0",
 ]
 # What pypdf needs in order to write anything stronger than RC4. Small, pure
 # wheels on every supported platform -- but still an extra rather than a base

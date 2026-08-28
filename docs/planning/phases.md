@@ -312,13 +312,56 @@ external-package rule needs no layer behind it.) See
 
 ---
 
-## Phase 9 — TUI (M7) · Phase 10 — MCP server (M10)
+## Phase 9 — TUI (M7)
+
+**Status** `complete` — 2026-08-28. Milestone M7.
+
+**Delivered** `docmax.tui` (app, generated forms, router bridge, catalog) ·
+`docmax.pickers` (the two ADR 0005 pickers) · the `crop` tool and its `--box`
+flag · `--interactive` on `crop` and `reorder` · `docmax tui` and the
+bare-invocation guards · ADRs 0019–0021 · two new import-linter layers.
+
+**It required no change below the interface layer.** That was this phase's own
+test of the core contracts, and they passed: `ProgressSink` took a Textual
+widget unmodified, `CancellationToken` took a keypress, and `ToolSpec`/`Param`
+generated eighteen forms with no per-tool code. `core/`, `registry.py` and
+`router.py` are untouched by this milestone.
+
+**One finding, reported rather than worked around.** `ToolSpec` cannot say
+"declared but not implemented", so a registry-driven tool list would offer `ocr`
+and fail with a wrapped `NotImplementedError`. The TUI names that one exception
+in `tui/catalog.py` with a test holding it, and the Core change is deferred — it
+is the fourth instance of the same `ToolSpec` gap
+[current-status.md](current-status.md) already says should be decided together.
+See [ADR 0021](../adr/0021-the-tui-is-generated-from-the-registry.md).
+
+**Two decisions changed enforced contracts**, so both were written before the
+code stayed: [ADR 0019](../adr/0019-picker-package-and-rendering.md) placed
+`pickers` as its own layer and settled how a page is rendered without vendoring
+pdf.js; [ADR 0020](../adr/0020-tui-entry-point.md) settled the single narrow
+import that lets the CLI start the TUI, and the three guards on a bare `docmax`.
+
+**Definition of done**
+- [x] `docmax tui` runs; a bare `docmax` opens it only at a real terminal
+- [x] no `textual` → a typed error naming the install command, never a traceback
+- [x] every screen generated from the registry; no per-tool code, asserted
+- [x] every run goes through `EngineRouter`; no routing in the interface
+- [x] cancellation leaves the destination untouched
+- [x] pickers return parameters, write nothing, and have headless equivalents
+- [x] `--json` and interactive sessions are mutually exclusive, both directions
+- [x] `.importlinter` carries the two new layers; 5 contracts kept
+- [ ] **CI matrix** — Windows / CPython 3.14 locally only, as for every phase
+      since Phase 2
+
+---
+
+## Phase 10 — MCP server (M10)
 
 **Status** `not started`.
 
-Both are additional drivers of the same core. Neither may import another
-interface. If either requires a change below the interface layer, that is a
-signal the core contracts are wrong — treat it as a finding, not a workaround.
+Another driver of the same core. It may not import another interface. If it
+requires a change below the interface layer, that is a signal the core contracts
+are wrong — treat it as a finding, not a workaround.
 
 ---
 

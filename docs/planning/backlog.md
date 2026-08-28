@@ -115,8 +115,11 @@ Decided in principle, not scheduled. Mostly already on the
 
 Ideas. No commitment, and none of these should be treated as planned.
 
-- [ ] A local HTTP mode for the TUI's visual pickers — see
-      [ADR 0005](../adr/0005-gui-pickers.md).
+- [x] ~~A local HTTP mode for the TUI's visual pickers.~~ This was never
+      exploratory — [ADR 0005](../adr/0005-gui-pickers.md) had already accepted
+      localhost HTTP as *the* implementation, and this line contradicted it.
+      Delivered at M7; see [ADR 0019](../adr/0019-picker-package-and-rendering.md)
+      for where the package lives and how a page is rendered.
 - [ ] Content-addressed caching of expensive operations (OCR, compression).
 - [ ] Streaming operations for documents larger than memory.
 - [ ] A `docmax explain` that prints which engine would run and why, without
