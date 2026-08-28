@@ -123,7 +123,20 @@ Decided in principle, not scheduled. Mostly already on the
       and is currently ahead of the code. The watcher's in-memory processed-set
       is the same gap seen from the other side.
 - [ ] **Third-party tool plugins.** The entry-point group exists in
-      `branding.py`; the trust model for third-party code does not.
+      `branding.py`; the trust model for third-party code does not. M10 raises
+      the stakes: a third-party tool would appear over MCP automatically, where
+      an agent could call it.
+- [ ] **MCP progress notifications.** M10 reports none, so a long call is silent
+      until it returns. Needs the request's progress token plumbed through and a
+      `ProgressSink` that emits async notifications from a worker thread — the
+      one place that interface must think about the async boundary. See
+      [ADR 0030](../adr/0030-mcp-cancellation-maps-onto-the-cancellation-token.md).
+- [ ] **Reconcile `main` with the feature line.** `docs/plans/` and `CLAUDE.md`
+      exist only on `main`, whose merge-base with this line is `4a5d74a` (M3).
+      `main` also carries `3ea4d3e fix(core): compare output against inputs by
+      identity, not by path string`, a `models.py` fix this line does not have.
+      M10's own specification was found on `main` and nowhere else, which is the
+      clearest sign yet that the divergence costs something.
 - [x] ~~**`--json` everywhere**~~ — delivered at M6.
       [ADR 0017](../adr/0017-json-output-contract.md) and
       [implementation/json.md](../implementation/json.md).

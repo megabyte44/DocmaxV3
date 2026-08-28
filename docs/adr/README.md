@@ -39,6 +39,10 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0024](0024-a-pipeline-is-a-toml-file.md) | A pipeline is a TOML file, and only its last stage writes a destination | Accepted |
 | [0025](0025-batch-mirrors-names-into-an-output-directory.md) | Batch mirrors input names into an output directory it may not share with its inputs | Accepted |
 | [0026](0026-the-watcher-polls-and-never-watches-its-own-output.md) | The watcher polls, waits for a file to settle, and may not write where it watches | Accepted |
+| [0027](0027-mcp-is-an-optional-interface-behind-an-extra.md) | MCP is an optional interface, behind the `mcp` extra, started by the CLI | Accepted |
+| [0028](0028-the-mcp-tool-surface-is-the-registry.md) | The MCP tool surface is the registry, and the schema says only what `ToolSpec` can | Accepted |
+| [0029](0029-the-mcp-policy-boundary.md) | MCP runs inside a policy boundary: roots, offline by default, and consent it may not grant | Accepted |
+| [0030](0030-mcp-cancellation-maps-onto-the-cancellation-token.md) | A cancelled MCP request cancels the DocMax run, through the existing token | Accepted |
 
 ## When to write one
 

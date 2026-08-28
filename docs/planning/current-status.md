@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-28 · **Branch:** `feat/m9-pipelines-batch-watch` · **Base:** `d050467` (M8 complete)
+**Last updated:** 2026-08-29 · **Branch:** `feat/m10-mcp` · **Base:** `498cc4e` (M9 complete)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,9 +10,9 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–9 are complete. Milestones M1 through M9 are done — with one row of
-M9 deliberately not delivered, below; the published package is `DocmaxV3`
-3.0.0a7, which predates all of them.**
+**Phases 0–10 are complete. Milestones M1 through M10 are done — the whole
+roadmap, with one row of M9 deliberately not delivered, below; the published
+package is `DocmaxV3` 3.0.0a7, which predates all of them.**
 
 | Phase | | |
 |---|---|---|
@@ -31,6 +31,7 @@ M9 deliberately not delivered, below; the published package is `DocmaxV3`
 | 9 — TUI and visual pickers | **complete** | `docmax.tui`, `docmax.pickers`, the `crop` tool, M7 |
 | M8 — OCR | **complete** | `ocr` local and cloud, `tools/_deskew.py`, `tools/_dpi.py` — no phase of its own, as for M4/M5 |
 | M9 — pipelines, batch, watch | **complete** | `docmax.runners`, three new commands, ADRs 0023–0026 — likewise no phase of its own. `--resume` deferred |
+| 10 — MCP server | **complete** | `docmax.mcp`, `docmax mcp`, the `mcp` extra, ADRs 0027–0030. M10 |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -148,7 +149,7 @@ are reportable without changing `ProgressSink`.
 | `pickers` | done — M7. `crop` and `reorder`; parameters only (ADR 0005, 0019) |
 | `runners` | done — M9. `pipeline`, `batch`, `watch`; library code, imports only `core` (ADR 0023) |
 | `server` | complete — routes, jobs, storage, auth, live tool execution |
-| `mcp` | not built — M10 |
+| `mcp` | done — M10. stdio JSON-RPC, generated from the registry, inside a root policy (ADRs 0027–0030) |
 
 **M7 needed no change below the interface layer**, which was the phase's own
 test of the core contracts. `ProgressSink` took a Textual widget unmodified,
@@ -306,11 +307,12 @@ checks arrived with the server, as the architecture said they must.
 | `implementation/tui.md` | current — new at M7 |
 | `implementation/ocr.md` | current — new at M8 |
 | `implementation/runners.md` | current — new at M9 |
-| `adr/README.md` | current — indexes 0026 |
+| `implementation/mcp.md` | current — new at M10 |
+| `adr/README.md` | current — indexes 0030 |
 | `planning/*` | current. `reconciliation.md` is superseded by ADR 0009 and deletable |
 | `cloud-api.md` | design-stage; data-handling now points at the terms constant |
 | `README.md` | current |
-| `CHANGELOG.md` | current through M9 |
+| `CHANGELOG.md` | current through M10 |
 | `development/*` | **missing** — no setup, testing or contributing guide |
 | `api/*` | not needed until the HTTP layer exists |
 
@@ -384,13 +386,63 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M10 — the local MCP server.** Another driver of the same core, and
-[phases.md](phases.md) is explicit about the test it constitutes: it may not
-import another interface, and if it requires a change below the interface layer
-that is a finding about the core contracts rather than a workaround. M7 and M9
-have now both passed that test without a Core change.
+**The roadmap is complete.** M0–M10 are all delivered. What remains is
+[backlog.md](backlog.md), and three items there now carry more weight than they
+did:
 
-**Do not start it without direction.**
+- **The three `ToolSpec` seams**, which four interfaces have now met and none has
+  closed. M10 declined a fourth (`input_suffixes`) on the same grounds M7
+  declined `implemented`. This is the most pressed-upon decision in the project.
+- **Phase 11 — contributor experience.** `docs/development/` is still missing,
+  and the project now has four interfaces to explain rather than one.
+- **The CI matrix**, unverified since Phase 2 and now covering five packages more
+  than it did.
+
+**Do not start anything without direction.**
+
+### What M10 left behind
+
+**No progress reaches an MCP client.** A long call is silent until it returns.
+The protocol has a progress notification; using it needs the request's progress
+token plumbed through and a `ProgressSink` emitting async notifications from a
+worker thread — the one place this interface would have to think about
+thread-safety across the async boundary. Deliberately additive, per
+[ADR 0030](../adr/0030-mcp-cancellation-maps-onto-the-cancellation-token.md).
+
+**The schema cannot say what a tool reads.** `inputs` is "a path", not "a PDF",
+because `ToolSpec` carries nothing describing input formats. This would have been
+a **fourth** seam and M10 refused to open it —
+[ADR 0028](../adr/0028-the-mcp-tool-surface-is-the-registry.md). The cost is one
+wasted round trip when a client hands `ocr` a spreadsheet.
+
+**The M9 runners are not exposed, and that is a recorded contradiction.**
+`docs/plans/05` proposed an MCP `run_pipeline` and ADR 0023 anticipated one, but
+pipelines, batch and watch are not registered tools — offering them needs a
+hand-written list, which ADR 0021 and `CLAUDE.md` rule 1 forbid. The registry
+rule won; a test holds the absence.
+
+**A TOCTOU window exists in the root check.** A path validated and then replaced
+with a symlink before the tool opens it would escape. Closing it needs
+`O_NOFOLLOW`-style handling inside every engine — Core, and nineteen tools.
+Small in the local-agent threat model, and named rather than fixed.
+
+**Roots are enforced at the interface, not in `OutputTarget`.** That was the
+closest call in M10: pushing it down would make it unbypassable, and would also
+put an agent-shaped policy into the type every CLI call uses, where a user
+naming a path has already authorised it. If a second non-human caller ever
+appears, the decision is revisited rather than copied —
+[ADR 0029](../adr/0029-the-mcp-policy-boundary.md).
+
+**The SDK floor is verified at exactly one point.** `mcp>=2.1,<3`, exercised
+against 2.1.1 on Windows / CPython 3.14. The `tui` extra has the same weakness
+with Textual, recorded below.
+
+**`docs/plans/` and `CLAUDE.md` exist only on `main`.** The audit that opened M10
+found its specification there — `docs/plans/05-mcp-pull-forward.md` — and that
+file is on no branch in this line. `main` has diverged since `4a5d74a` (M3) and
+also carries `3ea4d3e fix(core): compare output against inputs by identity, not
+by path string`, which touches `models.py`. Reconciling that divergence is
+unscheduled and is now the oldest untended thing in the repository.
 
 ### What M9 left behind
 

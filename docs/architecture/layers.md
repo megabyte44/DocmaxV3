@@ -12,7 +12,9 @@ See [current-status.md](../planning/current-status.md) for the live picture.
 ## Interfaces — `cli`, `tui`, `server`, `mcp`
 
 **Status:** `cli` complete · **`tui` implemented** (M7) · **`server` implemented**
-(routes, jobs, storage, auth, and a live tool-execution bridge) · `mcp` M10
+(routes, jobs, storage, auth, and a live tool-execution bridge) · **`mcp`
+implemented** (M10 — stdio JSON-RPC, generated from the registry, inside a
+filesystem-root policy boundary)
 
 The entry points. Each turns some external protocol — argv, keystrokes, HTTP,
 JSON-RPC — into a call on the layers below, and turns the result back into

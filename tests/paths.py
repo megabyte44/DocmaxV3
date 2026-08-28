@@ -23,7 +23,13 @@ SRC = REPO_ROOT / "src" / "docmax"
 #: ``Exception``, so every ``except Exception`` in the loop missed it and one
 #: missing dependency ended a 200-file run. The replacement loop is now itself
 #: covered by ``test_no_sys_exit.py``. See ADR 0023.
-LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server", "pickers", "runners")
+#:
+#: ``mcp`` (M10) is included for the reason ``server`` is: a tool handler that
+#: terminated the process would take the client's whole session with it, and a
+#: protocol server has even less excuse to write a file outside ``core/atomic.py``
+#: than a request handler does. ``cli`` and ``tui`` remain excluded because they
+#: are the layer that is *allowed* to exit. See ADR 0027.
+LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server", "pickers", "runners", "mcp")
 
 
 def library_sources() -> list[Path]:

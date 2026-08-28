@@ -18,7 +18,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M7** | Textual TUI + visual pickers for crop and reorder | ✅ complete |
 | **M8** | OCR, done properly | ✅ complete |
 | **M9** | Pipelines, resumable batch, folder watch | ✅ complete — except `--resume`, [deferred](#what-m9-did-not-deliver) |
-| **M10** | Local MCP server — drive DocMax from an AI agent | planned |
+| **M10** | Local MCP server — drive DocMax from an AI agent | ✅ complete |
 
 ## What the ordering is for
 
@@ -80,6 +80,20 @@ but it is not what the word "resumable" promises.
 
 The same deferral applies to the watcher, whose processed-file set lives in
 memory and does not survive a restart.
+
+**M10 is the fourth driver of one core, and the argument closes here.** The
+architecture has claimed since M0 that `ToolSpec` plus `EngineRouter` could serve
+a CLI, a TUI, an HTTP server and an MCP server without modification. M7 tested
+that and passed, M9 tested it again and passed, and M10 — the interface with the
+most reason to want a new field, a new execution model and a new error shape —
+needed **no change to `core/`, the registry or the router** either. Three
+milestones, one core, no amendments.
+
+What M10 did need was a *policy* layer, and that is not a Core change: an MCP
+client is a program acting on someone's behalf, so reads and writes are confined
+to `--root`, cloud engines are off unless asked for, and an agent cannot consent
+to an upload on the user's behalf. See
+[ADR 0029](../adr/0029-the-mcp-policy-boundary.md).
 
 ## What is not on the roadmap
 

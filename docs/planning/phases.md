@@ -402,11 +402,61 @@ See [roadmap.md](roadmap.md#what-m9-did-not-deliver).
 
 ## Phase 10 — MCP server (M10)
 
-**Status** `not started`.
+**Status** `complete` — 2026-08-29. Milestone M10.
 
-Another driver of the same core. It may not import another interface. If it
-requires a change below the interface layer, that is a signal the core contracts
-are wrong — treat it as a finding, not a workaround.
+**Delivered** `docmax.mcp` (`schema`, `policy`, `server`) · the `docmax mcp`
+command · the `mcp` extra (`mcp>=2.1,<3`) · a sixth interface layer entry and its
+independence-contract membership · ADRs 0027–0030.
+
+**It required no change below the interface layer**, which was this phase's own
+stated test:
+
+> If it requires a change below the interface layer, that is a signal the core
+> contracts are wrong — treat it as a finding, not a workaround.
+
+`core/`, `registry.py` and `router.py` are untouched. `iter_tools()` supplied the
+whole tool surface, `Param.type_`'s closed set supplied the JSON Schema mapping
+in four lines, `EngineRouter.run` took a protocol caller unmodified, and
+`CancellationToken` absorbed the protocol's cancellation without a second
+mechanism. **Three interfaces in a row — M7, M9, M10 — have now tested the core
+contracts and none has needed one changed.**
+
+**Two things were treated as findings rather than workarounds**, as this phase
+instructed:
+
+- **`input_suffixes`.** `docs/plans/05` assumes the field; `ToolSpec` does not
+  have it. Not added — it would be a *fourth* seam beside the three
+  [current-status.md](current-status.md) says should be decided together. The
+  schema says "a path" instead. [ADR 0028](../adr/0028-the-mcp-tool-surface-is-the-registry.md).
+- **An MCP `run_pipeline`.** Proposed by plan 05 and anticipated by ADR 0023, and
+  impossible without a hand-written tool list, which ADR 0021 forbids. The
+  registry rule won and the contradiction is recorded with a test holding the
+  absence.
+
+**One genuinely new piece of design**, and it is not a Core change: the policy
+boundary. An MCP client is a program acting on someone's behalf, so reads and
+writes are confined to `--root`, cloud is off unless asked for, and consent is
+read but never written. [ADR 0029](../adr/0029-the-mcp-policy-boundary.md)
+records why it lives at the interface rather than in `OutputTarget`.
+
+**Definition of done**
+- [x] `docmax mcp` serves every registered tool over stdio, generated from the
+      registry, with no tool named anywhere in the package
+- [x] a real client completes the handshake, lists tools and runs one end to end
+      — asserted over an actual protocol session, not by calling handlers
+- [x] reads and writes outside `--root` are refused before execution, including
+      `..`, symlinks and lookalike sibling names
+- [x] cloud engines are unreachable without `--allow-cloud`, and `--allow-cloud`
+      cannot clear a configured `offline`
+- [x] consent is never granted by the server
+- [x] an existing destination is never overwritten; `force` is not exposed
+- [x] cancellation reaches the existing `CancellationToken` and leaves no partial
+      output
+- [x] no traceback and no credential reaches a client
+- [x] `lint-imports` covers `docmax.mcp`; 5 contracts kept
+- [x] the SDK is optional, and `docmax mcp --help` works without it
+- [ ] **CI matrix** — Windows / CPython 3.14 locally only, as for every phase
+      since Phase 2
 
 ---
 

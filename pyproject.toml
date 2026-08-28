@@ -100,6 +100,21 @@ server = [
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
 ]
+# The MCP SDK, for `docmax mcp`. An extra rather than a base dependency: it
+# brings jsonschema, sse-starlette, httpx2, opentelemetry and (on Windows)
+# pywin32, and non-negotiable #3 says `pip install DocmaxV3` gets a terminal
+# tool and nothing else. Unlike the `server` extra, the *code* here ships in the
+# wheel -- `docmax mcp` is a command a user runs on their own machine, named in
+# their MCP client's configuration, so gating only the dependency is the whole
+# install story. See ADR 0027.
+#
+# Bounded below at 2.1 and above at 3: the 1.x -> 2.x change renamed and
+# restructured the server API this depends on (handlers are constructor
+# callbacks, not decorators), and there is no reason to assume 3.x will not do
+# the same. Verified against 2.1.1; see docs/implementation/mcp.md.
+mcp = [
+    "mcp>=2.1,<3",
+]
 # v2 shipped a `full` extra that silently omitted opencv, which broke the entire
 # OCR path for anyone who installed it. Self-referencing extras make that class
 # of mistake impossible — there is only one list.

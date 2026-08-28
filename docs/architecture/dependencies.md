@@ -34,10 +34,10 @@ fails the pull request.
 
 | Contract | Rule |
 |---|---|
-| `layers` | `cli` → `tui` → `server` → `pickers` → `runners` → `tools` → `cloud_client` → `core`, downward only |
+| `layers` | `cli` → `tui` → `server` → `mcp` → `pickers` → `runners` → `tools` → `cloud_client` → `core`, downward only |
 | `core-is-ui-free` | `core` may not import `rich`, `textual`, `typer`, `fastapi`, `mcp` |
-| `interfaces-are-independent` | `cli`, `tui` and `server` may not import each other |
-| `core-is-standalone` | `core` may not import `tools`, `cli`, `tui`, `pickers`, `runners`, `cloud_client`, `server` |
+| `interfaces-are-independent` | `cli`, `tui`, `server` and `mcp` may not import each other |
+| `core-is-standalone` | `core` may not import `tools`, `cli`, `tui`, `mcp`, `pickers`, `runners`, `cloud_client`, `server` |
 | `server-is-not-a-client` | `server` may not import `cloud_client`, `cli` or `tui` |
 
 `cli`, `tui` and `server` appear on separate lines in `layers` only because a
@@ -66,21 +66,23 @@ because a runner names a tool by string and lets the registry resolve it.
 reading the imports — an instance of the general rule below that a contract
 lint cannot express.
 
-**One import is ignored**, narrowly: `docmax.cli.main -> docmax.tui`. Something
-has to start the TUI and turning argv into a call is the CLI's job; the ignored
-pair reaches only the package root, whose entire surface is `is_available`,
-`require_available` and `launch`. Anything importing `docmax.tui.app`, `.runner`,
-`.forms` or `.catalog` still fails, and a test asserts it separately. The reverse
-direction is not ignored at all. See
-[ADR 0020](../adr/0020-tui-entry-point.md).
+**Two imports are ignored**, both narrowly: `docmax.cli.main -> docmax.tui` and
+`docmax.cli.main -> docmax.mcp`. Something has to start each of them, and turning
+argv into a call is the CLI's job. Each ignored pair reaches only a package root
+whose entire surface is three functions — `is_available`, `require_available` and
+`launch` for the TUI, `serve` in place of `launch` for MCP. Anything importing
+`docmax.tui.app`, `.runner`, `.forms`, `.catalog`, or `docmax.mcp.server`,
+`.policy`, `.schema` still fails, and tests assert both separately. The reverse
+direction is not ignored at all. See [ADR 0020](../adr/0020-tui-entry-point.md)
+and [ADR 0027](../adr/0027-mcp-is-an-optional-interface-behind-an-extra.md).
 
 Plus two AST-based hygiene tests that enforce related boundaries:
 
 | Test | Rule |
 |---|---|
 | `test_no_heavy_imports.py` | `docmax` and each `docmax.core` submodule pull in no heavy dependency, no interface framework and no cloud SDK (runs in a subprocess, one probe per module) |
-| `test_no_sys_exit.py` | library packages — including `server`, `pickers` and `runners` — never terminate the process |
-| `test_no_direct_writes.py` | library packages — including `pickers` and `runners` — never write outside `core/atomic.py` |
+| `test_no_sys_exit.py` | library packages — including `server`, `pickers`, `runners` and `mcp` — never terminate the process |
+| `test_no_direct_writes.py` | library packages — including `pickers`, `runners` and `mcp` — never write outside `core/atomic.py` |
 | `test_wheel_excludes_server.py` | `docmax.server` does not ship in the wheel |
 | `test_tui.py` | the TUI names no tool, imports no other interface, and the CLI reaches only its entry point |
 
@@ -92,8 +94,9 @@ This section is kept deliberately rather than deleted: it is where a rule goes
 when it is written down before it can be enforced, and leaving the heading
 present makes an empty list a visible claim rather than an omission.
 `docmax.tui` and `docmax.pickers` arrived at M7 with their contracts in the same
-change, as the architecture requires. `docmax.mcp` will do likewise at M10, and
-until then there is no rule about it to leave unenforced.
+change, `docmax.runners` at M9, and `docmax.mcp` at M10 — each with its layer
+entry, its contract membership and its hygiene coverage in the same commit, as
+the architecture requires.
 
 ## Interfaces are peers, not a stack
 

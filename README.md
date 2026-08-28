@@ -166,6 +166,45 @@ deferred rather than improvised. Re-running an interrupted batch repeats what
 already succeeded, safely — the outputs exist, and DocMax refuses to overwrite
 them without `--force`.
 
+## Drive it from an AI agent
+
+```bash
+pip install "DocmaxV3[mcp]"
+docmax mcp --root ~/Documents
+```
+
+Serves every tool over the Model Context Protocol on stdio, so an assistant can
+merge, split, compress or OCR your documents — **on your machine, with nothing
+uploaded**. Point your MCP client at it:
+
+```json
+{
+  "mcpServers": {
+    "docmax": { "command": "docmax", "args": ["mcp", "--root", "/home/you/Documents"] }
+  }
+}
+```
+
+The tool list is generated from the same registry the CLI reads, so an agent sees
+exactly what you can run, with the same parameters and the same validation.
+
+**An agent is not a person, and it is not trusted like one.**
+
+- **It can only touch `--root`.** Reads and writes outside it are refused before
+  anything runs — `..`, symlinks and lookalike directory names included. The
+  default is the directory you started the server in.
+- **It cannot overwrite your files.** There is no `--force` to give it; an
+  existing destination is an error.
+- **It cannot upload anything.** Cloud engines are off unless you pass
+  `--allow-cloud`, and even then only for tools *you* already agreed to with
+  `docmax cloud agree`. An agent cannot consent on your behalf, and a configured
+  `offline = true` cannot be overridden by a flag.
+- **It gets no shell, no filesystem browsing, and no tracebacks.**
+
+Cancelling a request cancels the underlying operation, and the atomic writes mean
+a cancelled run leaves your destination exactly as it was. See
+[docs/implementation/mcp.md](docs/implementation/mcp.md).
+
 ## An interface for when you are not scripting
 
 ```bash
@@ -212,7 +251,7 @@ nothing is installed for you.
 | **M7** | Textual TUI + visual pickers for crop and reorder | ✅ done |
 | **M8** | OCR, done properly | ✅ done |
 | **M9** | Pipelines, resumable batch, folder watch | ✅ |
-| **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | |
+| **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | ✅ |
 
 Benchmarks live in [`benchmarks/`](benchmarks/METHODOLOGY.md) with the method
 written down. Run them with `python -m benchmarks`. No numbers appear in this

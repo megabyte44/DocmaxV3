@@ -18,6 +18,7 @@ layers =
     docmax.cli
     docmax.tui
     docmax.server
+    docmax.mcp
     docmax.pickers
     docmax.runners
     docmax.tools
@@ -80,8 +81,10 @@ modules =
     docmax.cli
     docmax.tui
     docmax.server
+    docmax.mcp
 ignore_imports =
     docmax.cli.main -> docmax.tui
+    docmax.cli.main -> docmax.mcp
 ; CLI and HTTP are siblings — two front-ends over one tool layer, neither built
 ; on the other. The layers contract below must be totally ordered, so it cannot
 ; express "same level, mutually forbidden" on its own; this states it directly.
@@ -96,6 +99,11 @@ ignore_imports =
 ; start the TUI, and turning argv into a call is the CLI's entire job -- so
 ; `docmax tui` and a bare `docmax` reach `docmax.tui`, whose package root
 ; exposes exactly three things: is_available, require_available and launch.
+;
+; docmax.mcp (M10) joins on the same terms and for the same reason: `docmax mcp`
+; is a process entry point, and its package root exposes exactly three things --
+; is_available, require_available and serve. Two ignored pairs, both spelled as
+; module pairs, both reaching only a package root. See ADR 0027.
 ;
 ; It is deliberately spelled as one module pair rather than as a package-wide
 ; allowance. `cli.main -> docmax.tui` is a process entry point; anything
@@ -118,6 +126,7 @@ forbidden_modules =
     docmax.runners
     docmax.cloud_client
     docmax.server
+    docmax.mcp
 ; The registry resolves tools by lazy metadata, never by importing them. This
 ; is what keeps `import docmax` free of OpenCV.
 ;

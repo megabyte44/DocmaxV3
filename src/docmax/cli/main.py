@@ -157,6 +157,60 @@ def tui(json_out: commands.JsonOption = False) -> None:
 
 
 @app.command()
+def mcp(
+    root: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--root",
+            help="A directory the server may read and write. Repeatable. Default: the working directory.",
+        ),
+    ] = None,
+    allow_cloud: Annotated[
+        bool,
+        typer.Option("--allow-cloud", help="Permit cloud engines for tools you already agreed to."),
+    ] = False,
+    json_out: commands.JsonOption = False,
+) -> None:
+    """Serve the tools over MCP, so an AI agent can drive DocMax locally.
+
+    Speaks JSON-RPC on stdin and stdout, so it is started by an MCP client's
+    configuration rather than by hand. Every tool the registry knows is offered,
+    with a schema generated from its own declaration — the same router, the same
+    validators, the same atomic writes as every other way in.
+
+    **It may only touch what you allow.** Reads and writes are confined to
+    `--root` (the working directory by default) and an agent cannot reach outside
+    it. Existing files are never overwritten, and cloud engines are unavailable
+    unless you pass `--allow-cloud` *and* have already agreed to that tool with
+    `docmax cloud agree` — an agent cannot consent on your behalf.
+
+    Needs the `mcp` extra. Without it this reports the exact install line rather
+    than an import error.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.render import render_error
+    from docmax.core.errors import DocMaxError, InvalidParameterError
+    from docmax.mcp import require_available, serve
+
+    # Accepted and then refused, exactly as `tui --json` is: stdout carries the
+    # JSON-RPC stream, which is the one thing ADR 0017's single object cannot
+    # share a channel with.
+    json_output.note(json_out)
+
+    try:
+        if json_output.enabled():
+            raise InvalidParameterError(
+                f"`{CLI_NAME} mcp` speaks JSON-RPC on stdout, so --json cannot apply to it.",
+                remedy=f"Run `{CLI_NAME} mcp` without --json; the protocol is the output.",
+            )
+        require_available()
+        serve(root, allow_cloud=allow_cloud)
+    except DocMaxError as exc:
+        render_error(exc)
+        raise typer.Exit(1) from exc
+
+
+@app.command()
 def merge(
     inputs: Annotated[
         list[Path],

@@ -36,6 +36,50 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **`docmax mcp` — the tools over the Model Context Protocol, locally.** A fourth
+  interface and a fourth driver of the same core: an agent can merge, split,
+  compress or OCR documents through the same registry, router, validators and
+  atomic writes every other way in uses. Nothing is uploaded.
+  - **The tool list is the registry.** `list_tools` is `iter_tools()` rendered,
+    and the schema for each tool is generated from its own `ToolSpec` — parameter
+    types, defaults, `choices` as `enum`, required fields. Nothing in
+    `docmax.mcp` names a tool, and a test asserts it.
+    [ADR 0028](docs/adr/0028-the-mcp-tool-surface-is-the-registry.md).
+  - **An agent is confined to `--root`.** Repeatable, defaulting to the working
+    directory. Every path a client sends is resolved and checked before anything
+    runs, so `..`, symlinks out of the tree, and lookalike sibling directories
+    are all refused. This is the milestone's one genuinely new design and it is
+    enforced at a single funnel — there is one router call site in the package,
+    held by a test. [ADR 0029](docs/adr/0029-the-mcp-policy-boundary.md).
+  - **An agent cannot overwrite a file or upload a document.** `force` is not a
+    parameter, so an existing destination is an error. Cloud engines are off
+    unless `--allow-cloud`, which *declines to force* offline rather than
+    clearing it — a configured `offline = true` still wins. Consent is read and
+    never written: `ConsentRequiredError` names `docmax cloud agree`, which a
+    person runs.
+  - **Cancelling a request cancels the run.** The blocking tool goes to a worker
+    thread and protocol cancellation is translated into the existing
+    `CancellationToken`, so a cancelled call leaves no partial output — inherited
+    from `core/atomic.py` rather than rebuilt. No second cancellation mechanism.
+    [ADR 0030](docs/adr/0030-mcp-cancellation-maps-onto-the-cancellation-token.md).
+  - **Errors keep their identity.** A DocMax failure comes back as a structured
+    result carrying the same `to_dict()` envelope the CLI puts on stdout — same
+    codes, same remedies. A protocol failure stays on the JSON-RPC rung. No
+    traceback and no credential ever reaches a client, both asserted.
+  - **`pip install "DocmaxV3[mcp]"`** — `mcp>=2.1,<3`, an optional extra and not
+    a base dependency, verified against **2.1.1**, whose 2.x server API differs
+    from the 1.x most documentation describes. The *code* ships in the wheel
+    (unlike the server's), because `docmax mcp` is a command a user runs.
+    [ADR 0027](docs/adr/0027-mcp-is-an-optional-interface-behind-an-extra.md).
+  - **M10 changed no core contract.** `core/`, `registry.py` and `router.py` are
+    untouched, as they were by M7 and M9 — three interfaces over one core with no
+    amendments to it.
+  - **Not exposed, deliberately:** the M9 runners (`pipeline`/`batch`/`watch` are
+    not registered tools, and a hand-written list is forbidden by ADR 0021),
+    `force`, filesystem browsing, shell, resources and prompts. Input *formats*
+    are absent from the schema because `ToolSpec` cannot describe them, and M10
+    declined to add a field to Core for it.
+
 - **`pipeline`, `batch` and `watch` — composition, without a second execution
   path.** All three go through the same registry, the same `EngineRouter` and
   the same validators as the equivalent single command. A bare `--tool` is a
