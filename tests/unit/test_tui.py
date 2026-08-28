@@ -96,12 +96,20 @@ def test_the_tui_offers_exactly_what_the_cli_exposes() -> None:
     assert exposed - offered <= {"doctor", "formats", "tui"}
 
 
-def test_ocr_is_registered_and_not_offered() -> None:
+def test_every_registered_tool_is_offered() -> None:
+    """`UNIMPLEMENTED` held exactly one name — `ocr` — and M8 emptied it.
+
+    ADR 0021 predicted this: *"fails the day `ocr` ships unless `UNIMPLEMENTED`
+    is emptied."* It did, and this is the inverted assertion. The mechanism is
+    kept for the next tool that lands as a skeleton, and this test is what stops
+    it quietly refilling — a name added here without a matching CLI command
+    would also break `test_the_tui_offers_exactly_what_the_cli_exposes`.
+    """
     from docmax.core.registry import build_registry
 
-    assert "ocr" in build_registry()
-    assert not catalog.is_offered("ocr")
-    assert "ocr" in catalog.UNIMPLEMENTED
+    assert frozenset() == catalog.UNIMPLEMENTED
+    assert catalog.is_offered("ocr")
+    assert {spec.name for spec in catalog.offered_tools()} == set(build_registry())
 
 
 def test_every_offered_tool_is_grouped() -> None:
@@ -116,6 +124,13 @@ def test_crop_and_reorder_are_both_offered() -> None:
     """M7's two picker tools are reachable from the TUI as ordinary tools."""
     assert catalog.is_offered("crop")
     assert catalog.is_offered("reorder")
+
+
+def test_ocr_generates_a_form_with_no_tui_code() -> None:
+    """M8 added a tool and not one line of TUI. That is ADR 0021 working."""
+    fields = {field.name: field.kind for field in forms.fields_for(get_tool("ocr"))}
+
+    assert fields == {"lang": "text", "dpi": "integer", "deskew": "boolean"}
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +480,9 @@ def test_the_app_starts_and_lists_tools() -> None:
             assert len(items) == len(catalog.offered_tools())
             ids = {item.id for item in items}
             assert "tool-crop" in ids
-            assert "tool-ocr" not in ids
+            # `ocr` was the one name `UNIMPLEMENTED` ever held, and M8 shipped
+            # it. Every registered tool is now listed.
+            assert "tool-ocr" in ids
 
     asyncio.run(scenario())
 

@@ -34,6 +34,7 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0019](0019-picker-package-and-rendering.md) | Pickers are their own package below the interfaces, and render with the browser's own PDF viewer | Accepted |
 | [0020](0020-tui-entry-point.md) | The CLI launches the TUI; a bare `docmax` opens it only where there is someone to use it | Accepted |
 | [0021](0021-the-tui-is-generated-from-the-registry.md) | The TUI is generated from `ToolSpec` and names no tool | Accepted |
+| [0022](0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md) | OCR shells out to Tesseract directly, and leaves pages that already have text alone | Accepted |
 
 ## When to write one
 

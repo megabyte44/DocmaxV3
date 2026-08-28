@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-28 · **Branch:** `feat/m7-tui` · **Base:** `64ea3f4` (M6 complete)
+**Last updated:** 2026-08-28 · **Branch:** `feat/m8-ocr` · **Base:** `846eba5` (M7 complete)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,7 +10,7 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–9 are complete. Milestones M1 through M7 are done; the published
+**Phases 0–9 are complete. Milestones M1 through M8 are done; the published
 package is `DocmaxV3` 3.0.0a7, which predates them.**
 
 | Phase | | |
@@ -28,6 +28,7 @@ package is `DocmaxV3` 3.0.0a7, which predates them.**
 | M5 — conversion | **complete** | convert, to-images, from-images, `formats` — likewise no new phase |
 | M6 — cloud, JSON, benchmarks | **complete** | cloud `compress`/`convert`, `--json`, `docmax cloud`, benchmark harness |
 | 9 — TUI and visual pickers | **complete** | `docmax.tui`, `docmax.pickers`, the `crop` tool, M7 |
+| M8 — OCR | **complete** | `ocr` local and cloud, `tools/_deskew.py`, `tools/_dpi.py` — no phase of its own, as for M4/M5 |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -77,7 +78,7 @@ foundations.
 | `from-images` | done — img2pdf + Pillow; the second multi-input tool after `merge` |
 | `compress`, `convert` — cloud | done — M6; the only two with a cloud engine (ADR 0012) |
 | `crop` | done — M7's one new tool; the headless half of the box picker, per ADR 0005 |
-| `ocr` | **skeleton** — `run()` and both validators are `NotImplementedError`, M8 |
+| `ocr` | done — M8. The last skeleton; Tesseract + Poppler, both engines |
 
 Shared between them: `tools/_pagespec.py` parses page selections once,
 `tools/_pdf.py` opens and saves PDFs once, and `tools/_binaries.py` finds and
@@ -111,15 +112,20 @@ is complete: `RegistryRunner.start()` runs jobs in-process
 reports what the deployment can actually run rather than what its build knows
 about ([ADR 0018](../adr/0018-capabilities-mean-runnable.md)).
 
+M8 added the sixth shared vocabulary, `tools/_dpi.py` — one set of resolution
+bounds read by `ocr` and `to-images`, so `--dpi` cannot mean two things — and
+`tools/_deskew.py`, which is not a vocabulary but a pure function isolated so
+that v2's deskew defect could finally be tested.
+
 M7 added `tools/_box.py`, the fifth shared vocabulary: one rectangle syntax read
 by `crop`, by the box picker, and by the CLI before either. And one function to
 `tools/_pdf.py` — `page_geometry`, read-only — which is what lets a picker draw a
 page to scale without learning pypdf's spelling of a media box.
 
-The CLI exposes all eighteen working tools plus `doctor`, `formats`, `tui` and
-the `cloud` group — every registered tool except `ocr`, which is still a
-skeleton. Every command takes `--json`, including `tui`, which accepts it in
-order to refuse in the envelope.
+The CLI exposes **all nineteen tools** plus `doctor`, `formats`, `tui` and the
+`cloud` group. There is no longer any registered tool it does not expose. Every
+command takes `--json`, including `tui`, which accepts it in order to refuse in
+the envelope.
 
 ### Interfaces as they stand
 
@@ -151,10 +157,10 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **1693 passed, 2 skipped, 4 deselected** — 146s |
+| `pytest -m "not golden and not needs_binary"` | **1782 passed, 3 skipped, 5 deselected** — 203s |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 214 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 178 source files |
+| `ruff format --check .` | **passed** — 224 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 182 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
 Both skips are intentional — the self-exemptions inside the hygiene suite:
@@ -178,6 +184,22 @@ is **not exercised** — nothing between 1.0 and 8.2 has been run. The 0.60 floo
 was demonstrably wrong (`Select`'s "nothing chosen" sentinel has been renamed
 since, and `push_screen_wait` did not exist), and `tui/app.py` avoids the APIs
 known to have churned rather than pinning to one release.
+
+**No OCR binary is installed on this machine.** Neither Tesseract nor Poppler,
+as for Ghostscript and Pandoc. The whole OCR contract is therefore verified
+against *fake* binaries that are real subprocesses — success, mixed documents, a
+failed page, a lost page, a blank text layer, a timeout, a cancellation,
+atomicity — and the one real-recognition test is `needs_binary` and skipped
+here. OpenCV **is** installed locally, so the deskew regression genuinely runs.
+
+**Two `needs_binary` tests fail here rather than skipping, and they are not
+M8's.** `test_convert_really_converts_markdown_to_html` and
+`test_to_images_really_renders_a_page` carry `@needs_pandoc` / `@needs_poppler`
+but no `skipif`, unlike the `compress` tests M3 wrote — so on a machine without
+the binary they fail instead of skipping. Confirmed pre-existing by stashing
+every M8 change and re-running. Left alone deliberately: fixing an M5 test is
+not M8's work. The new OCR test follows M3's pattern, marker **and** `skipif`,
+so it skips cleanly.
 
 **Still unverified:** the CI matrix — Linux and macOS, and Python 3.11–3.13.
 Everything above is one platform and one interpreter, and 3.14 is not in the
@@ -243,11 +265,12 @@ checks arrived with the server, as the architecture said they must.
 | `implementation/core.md` | current — new in Phase 2 |
 | `implementation/config.md` | current — new in Phase 3 |
 | `implementation/tui.md` | current — new at M7 |
-| `adr/README.md` | current — indexes 0021 |
+| `implementation/ocr.md` | current — new at M8 |
+| `adr/README.md` | current — indexes 0022 |
 | `planning/*` | current. `reconciliation.md` is superseded by ADR 0009 and deletable |
 | `cloud-api.md` | design-stage; data-handling now points at the terms constant |
 | `README.md` | current |
-| `CHANGELOG.md` | current through M7 |
+| `CHANGELOG.md` | current through M8 |
 | `development/*` | **missing** — no setup, testing or contributing guide |
 | `api/*` | not needed until the HTTP layer exists |
 
@@ -321,13 +344,33 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M8 — OCR, done properly.** `tools/ocr/` is a skeleton with a full `ToolSpec`
-and a `run()` that raises. It is the operation v2 got most wrong, it has the
-heaviest dependencies, and it is the tool the roadmap deliberately left last.
-Shipping it also empties `tui/catalog.py`'s `UNIMPLEMENTED`, which a test will
-insist on.
+**M9 — pipelines, resumable batch, folder watch.** `backlog.md` records the
+open question each carries: batch needs the cancellation and progress contracts
+to survive crossing a process boundary, and folder-watch needs a rule about
+outputs written into a watched directory — the loop v2 fell into by writing
+`_preprocessed.png` beside its own input, which M8 has now made structurally
+impossible for OCR specifically.
 
 **Do not start it without direction.**
+
+### What M8 left behind
+
+**There is no `--force-ocr`.** A page that already carries text is copied
+through, and a user who genuinely wants it re-recognised has no flag for it.
+`ToolSpec` promises three parameters and M8 did not invent a fourth; ADR 0022
+records the reasoning, and the flag is additive if it is ever wanted.
+
+**A recognised page comes back as an image at `--dpi`.** That is inherent to
+Tesseract's PDF output and to OCR of a scan generally, but it means running
+`ocr` over a document that is mostly text and slightly scanned rasterises the
+scanned pages. The skip rule is what keeps it from touching the text pages.
+
+**`docmax setup` still does not exist.** M8 removed the dangling reference to
+`setup --ocr` from the OCR install hint, but the backlog item is untouched and
+OCR is the tool that would benefit most from it.
+
+**No benchmark numbers, still.** OCR is the most obvious candidate — it is by
+far the slowest operation — and this machine has no Tesseract.
 
 ### What M7 left behind
 
@@ -374,8 +417,16 @@ architecture's own answer to it.
 `convert`.** That describes the M6 cloud engine, which is what the table's
 column heading says. It is accurate about M6 and ahead of M5.
 
-**A fourth instance of the `ToolSpec` seam arrived at M7, and was reported
-rather than patched.** `ToolSpec` cannot say "declared but not implemented", so a
+**The fourth `ToolSpec` seam closed itself at M8, as predicted.** `ocr` shipped,
+`tui/catalog.py`'s `UNIMPLEMENTED` is empty, and a test asserts it stays empty.
+No Core change was needed — which is the outcome ADR 0021 argued for when it
+deferred the decision. **Three seams remain**, and they are the original three.
+
+**ADR 0018's named residual is closed.** That ADR recorded that on a machine
+with Tesseract installed, `ocr` would be advertised by `/v1/capabilities` and
+still fail, *"resolved when M8 implements the method"*. It is.
+
+**The M7 finding, for the record.** `ToolSpec` cannot say "declared but not implemented", so a
 registry-driven tool list offers `ocr` — whose `run()` raises — and choosing it
 would produce an `InternalError` wrapping a `NotImplementedError`. The TUI names
 that one exception in `tui/catalog.py`, with two tests holding it, and the clean
@@ -383,15 +434,15 @@ fix (an `implemented` flag on `ToolSpec`) is a Core change deliberately not made
 [phases.md](phases.md) says to treat exactly this as a finding, and it belongs
 with the other three below rather than being decided alone.
 
-**Four seams are now owed one ADR.** `ToolSpec` cannot say "this tool produces
+**Three seams are still owed one ADR.** `ToolSpec` cannot say "this tool produces
 no output" (`get-info`, a bare `metadata`, `permissions`), cannot say "my output
 extension depends on a parameter" (which is why `convert` requires `-o`), and
 cannot carry configuration to a strategy — so a cloud strategy resolves its own
 through `core.config.load()` rather than receiving the router's
 ([ADR 0013](../adr/0013-cloud-config-comes-from-the-resolved-config.md)) — and
-cannot say "declared but not implemented" (M7, above). All four are the same
-shape: a tool wanting something from `ToolSpec` that it does not carry. They
-should be decided together.
+— and the fourth, "declared but not implemented", is gone. All three are the
+same shape: a tool wanting something from `ToolSpec` that it does not carry.
+They should be decided together.
 
 The third has a named trigger: **adding an `--endpoint` or `--api-key` flag
 makes it wrong**, because a runtime override cannot reach a strategy.

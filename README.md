@@ -161,7 +161,7 @@ nothing is installed for you.
 | **M5** | `convert`, `to-images`, `from-images` | ✅ done |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ done |
 | **M7** | Textual TUI + visual pickers for crop and reorder | ✅ done |
-| **M8** | OCR, done properly | |
+| **M8** | OCR, done properly | ✅ done |
 | **M9** | Pipelines, resumable batch, folder watch | |
 | **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | |
 

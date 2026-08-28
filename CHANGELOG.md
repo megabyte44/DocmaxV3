@@ -36,6 +36,31 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **`ocr` — the last skeleton, and the operation v2 got most wrong.** Rasterise
+  with Poppler, straighten with OpenCV, recognise with Tesseract, reassemble
+  with pypdf. One process per page, so progress advances per page and
+  cancellation lands within one rather than at the end of a 500-page scan.
+  - **Pages that already carry text are copied through untouched.** Tesseract's
+    PDF output replaces a page with a picture of itself, so re-recognising real
+    text would discard it and leave two layers. A scanned contract behind a
+    generated cover page is the common case; the result names which pages were
+    skipped, recognised, failed and straightened. See
+    [ADR 0022](docs/adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md).
+  - **Both engines.** `--engine cloud` needs no local install at all — the case
+    the Cloud Engine's justification has named since M0, and the third tool to
+    have one. A cloud result passes the *same* validators as a local one, so a
+    server returning a blank text layer fails exactly where a local run would.
+  - `--lang eng+hin` works as it did in v2; a pack that is not installed is
+    refused **by name**, with the installed ones listed.
+  - **The `ocr` extra shrank.** `pytesseract` and `pdf2image` are gone: they are
+    thin wrappers around the two binaries, and using them would have put the
+    longest-running subprocess in the product outside `_binaries.run` — the one
+    place that guarantees a timeout and a kill switch. `docmax ocr --no-deskew`
+    now needs no Python extra whatsoever.
+  - The missing-dependency message no longer points at `docmax setup --ocr`, a
+    command that does not exist. It prints the platform's real install lines.
+- **`tools/_dpi.py`**, the fifth shared vocabulary: one set of resolution bounds
+  read by `ocr` and `to-images`, so `--dpi` cannot mean two things.
 - **A Textual TUI.** `docmax tui`, or a bare `docmax` at an interactive
   terminal. A second driver of the same core, not a second implementation:
   every run goes through `EngineRouter`, and there is no routing, consent rule,
@@ -279,7 +304,22 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Fixed
 
-Correctness bugs carried by v2, fixed by the rewrite rather than patched:
+Correctness bugs carried by v2, fixed by the rewrite rather than patched.
+
+**Two of them were OCR's, and M8 is where they were actually closed** — the
+entries below have been in this list since M0, describing code that did not yet
+exist. They now have tests behind them:
+
+- `deskew`'s transposed points and dead angle branch are fixed in
+  `tools/_deskew.py`, which is a pure function precisely so
+  `tests/unit/test_deskew.py` can rotate a page by a known angle, in both
+  directions, and assert it comes back. The convention half is *not* fixed by
+  hardcoding the other range: OpenCV used `(-90, 0]`, changed to `(0, 90]` at
+  4.5, and reports `(-90, 0]` again at 5.0, so the fold is a modulo that names
+  no range at all.
+- OCR's temp files now live in a `TemporaryDirectory` that is removed on every
+  exit path. Two tests assert the source directory is untouched, one of them
+  after a cancellation.
 
 - `extract_images` wrote decoded FlateDecode and CCITTFax streams with `.png`
   and `.tiff` extensions but no container headers, producing files nothing

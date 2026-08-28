@@ -54,6 +54,11 @@ if TYPE_CHECKING:
 ENDPOINT = "https://api.example.invalid"
 M6_CLOUD_TOOLS = ("compress", "convert")
 
+#: Every tool with a working cloud engine. `ocr` joined at M8 — the milestone
+#: ADR 0012 named when it deliberately held OCR back, so this is that ADR being
+#: executed rather than overturned.
+CLOUD_TOOLS = (*M6_CLOUD_TOOLS, "ocr")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -71,6 +76,14 @@ def write_pdf(path: Path, pages: int = 3) -> Path:
     return path
 
 
+def write_searchable_pdf(path: Path, pages: int = 3) -> Path:
+    """A PDF whose pages carry real extractable text, standing in for OCR output."""
+    from tests.unit.test_ocr import REAL_TEXT
+    from tests.unit.test_ocr import write_pdf as write_with_text
+
+    return write_with_text(path, pages, text=REAL_TEXT)
+
+
 @pytest.fixture
 def source(tmp_path: Path) -> Path:
     return write_pdf(tmp_path / "doc.pdf", 3)
@@ -86,7 +99,7 @@ def notes(tmp_path: Path) -> Path:
 @pytest.fixture
 def consented(tmp_path: Path) -> ConsentStore:
     store = ConsentStore(tmp_path / "consent.json", endpoint=ENDPOINT)
-    for tool in M6_CLOUD_TOOLS:
+    for tool in CLOUD_TOOLS:
         store.record(tool)
     return store
 
@@ -156,7 +169,7 @@ class ExplodingTransport(httpx.BaseTransport):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", M6_CLOUD_TOOLS)
+@pytest.mark.parametrize("name", CLOUD_TOOLS)
 def test_the_m6_tools_declare_both_engines(name: str) -> None:
     spec = get_tool(name)
 
@@ -165,21 +178,26 @@ def test_the_m6_tools_declare_both_engines(name: str) -> None:
 
 
 def test_only_the_intended_tools_have_a_working_cloud_engine() -> None:
-    """`ocr` keeps its declaration for M8 but its `run()` still raises.
+    """Exactly three tools have a cloud engine, and every one of them works.
 
-    Asserted so that implementing OCR's cloud engine early — which would ship
-    M8's headline feature through the back door — fails here rather than
-    passing quietly.
+    This test used to detect `ocr` by the hand-rolled `OcrCloud` class it kept
+    while ADR 0012 held OCR back to M8, and its job was to fail if that class
+    ever started working. M8 is that milestone: `OcrCloud` is gone, `ocr` runs
+    through the shared `CloudEngine` like the other two, and the assertion
+    inverts — every declared cloud engine must now be a real one.
+
+    It still fails loudly if a fourth appears, which is the half that was
+    always the point.
     """
-    from docmax.tools.ocr.cloud import OcrCloud
+    from docmax.core.registry import iter_tools
+    from docmax.tools._cloud import CloudEngine
 
-    working = {
-        spec.name
-        for spec in (get_tool(name) for name in ("compress", "convert", "ocr"))
-        if not isinstance(spec.load_strategy(Engine.CLOUD), OcrCloud)
-    }
+    declared = {spec.name for spec in iter_tools(engine=Engine.CLOUD)}
+    assert declared == set(CLOUD_TOOLS)
 
-    assert working == set(M6_CLOUD_TOOLS)
+    for name in CLOUD_TOOLS:
+        strategy = get_tool(name).load_strategy(Engine.CLOUD)
+        assert isinstance(strategy, CloudEngine), f"{name} does not use the shared flow"
 
 
 def test_the_tools_the_docs_mention_but_do_not_exist_still_do_not() -> None:
@@ -202,7 +220,7 @@ def test_a_pure_python_tool_has_no_cloud_engine(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", M6_CLOUD_TOOLS)
+@pytest.mark.parametrize("name", CLOUD_TOOLS)
 def test_no_request_reaches_the_network_without_consent(
     name: str, empty_consent: ConsentStore, source: Path, tmp_path: Path
 ) -> None:
@@ -293,7 +311,7 @@ def test_consent_for_one_endpoint_does_not_carry_to_another(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", M6_CLOUD_TOOLS)
+@pytest.mark.parametrize("name", CLOUD_TOOLS)
 def test_offline_defeats_an_explicit_cloud_request(
     name: str, consented: ConsentStore, source: Path, tmp_path: Path
 ) -> None:
@@ -383,6 +401,88 @@ def test_convert_runs_in_the_cloud_end_to_end(notes: Path, tmp_path: Path) -> No
 
     assert result.engine_used is Engine.CLOUD
     assert "converted" in out.read_text(encoding="utf-8") or out.read_text(encoding="utf-8")
+
+
+@respx.mock
+def test_ocr_runs_in_the_cloud_end_to_end(source: Path, tmp_path: Path) -> None:
+    """M8. The tool the Cloud Engine's whole justification names.
+
+    `architecture/overview.md` has said since M0 that cloud exists so a user can
+    skip installing Tesseract; this is the first test in which that is true.
+    """
+    from docmax.tools.ocr.cloud import build
+
+    searchable = write_searchable_pdf(tmp_path / "searchable.pdf", 3).read_bytes()
+    respx.post(f"{ENDPOINT}/v1/tools/ocr").mock(
+        return_value=httpx.Response(200, json=succeeded(engine_version="tesseract/5.3.4"))
+    )
+    respx.get(f"{ENDPOINT}/v1/outputs/f_1").mock(
+        return_value=httpx.Response(200, content=searchable)
+    )
+    out = tmp_path / "out.pdf"
+
+    result = build(client_for()).run(
+        [DocumentRef.from_path(source)],
+        OutputTarget(destination=out, force=True),
+        progress=NULL_PROGRESS,
+        cancellation=NEVER_CANCELLED,
+        lang="eng",
+        dpi=300,
+    )
+
+    assert result.engine_used is Engine.CLOUD
+    assert result.engine_version == "tesseract/5.3.4"
+    assert out.read_bytes() == searchable
+    assert result.details["lang"] == "eng"
+
+
+@respx.mock
+def test_a_cloud_ocr_with_no_text_layer_fails_the_same_check_a_local_one_would(
+    source: Path, tmp_path: Path
+) -> None:
+    """The dual-engine promise: one set of guarantees, two places to run.
+
+    A server that returned a perfectly valid PDF with an empty text layer is
+    the characteristic OCR failure, and it must fail here exactly as it fails
+    locally — with the destination untouched.
+    """
+    from docmax.tools.ocr.cloud import build
+
+    blank = write_pdf(tmp_path / "blank.pdf", 3).read_bytes()
+    respx.post(f"{ENDPOINT}/v1/tools/ocr").mock(return_value=httpx.Response(200, json=succeeded()))
+    respx.get(f"{ENDPOINT}/v1/outputs/f_1").mock(return_value=httpx.Response(200, content=blank))
+    out = tmp_path / "out.pdf"
+
+    with pytest.raises(OutputValidationError):
+        build(client_for()).run(
+            [DocumentRef.from_path(source)],
+            OutputTarget(destination=out, force=True),
+            progress=NULL_PROGRESS,
+            cancellation=NEVER_CANCELLED,
+            lang="eng",
+        )
+
+    assert not out.exists()
+
+
+@respx.mock
+def test_a_cloud_ocr_that_loses_a_page_is_refused(source: Path, tmp_path: Path) -> None:
+    from docmax.tools.ocr.cloud import build
+
+    short = write_searchable_pdf(tmp_path / "short.pdf", 2).read_bytes()
+    respx.post(f"{ENDPOINT}/v1/tools/ocr").mock(return_value=httpx.Response(200, json=succeeded()))
+    respx.get(f"{ENDPOINT}/v1/outputs/f_1").mock(return_value=httpx.Response(200, content=short))
+    out = tmp_path / "out.pdf"
+
+    with pytest.raises(OutputValidationError, match="page count"):
+        build(client_for()).run(
+            [DocumentRef.from_path(source)],
+            OutputTarget(destination=out, force=True),
+            progress=NULL_PROGRESS,
+            cancellation=NEVER_CANCELLED,
+        )
+
+    assert not out.exists()
 
 
 @respx.mock

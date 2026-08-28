@@ -104,8 +104,8 @@ and the standard library.
 
 ## Application — `tools`
 
-**Status:** implemented — nineteen tools, of which eighteen run. `ocr` remains a
-reference layout with a `run()` that raises until M8.
+**Status:** implemented — **nineteen tools, and all nineteen run.** `ocr` was
+the last skeleton and shipped at M8.
 
 One subpackage per operation, each self-registering. Adding tool #51 must not
 require editing a central file, and *listing* tools must not import their
@@ -137,9 +137,10 @@ cannot be driven by an HTTP server.
 
 Only a handful of tools have a cloud engine, because cloud exists to eliminate
 install pain and nothing else. Two do today — `compress` and `convert`, since
-M6. `ocr` is declared and unimplemented until M8; `pdfa` and `remove-bg` are
-named in [overview.md](overview.md#the-dual-engine-model)'s end-state table and
-do not exist.
+M6, and `ocr` joined them at M8 — the tool the Cloud Engine's whole
+justification names. `pdfa` and `remove-bg` are named in
+[overview.md](overview.md#the-dual-engine-model)'s end-state table and do not
+exist.
 
 Everything pypdf-only sets `cloud = None`: uploading a document to perform a
 millisecond-long pure-Python operation is slower, less private, and needs a

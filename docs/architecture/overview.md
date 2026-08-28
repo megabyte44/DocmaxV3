@@ -95,13 +95,15 @@ eliminate install pain and nothing else:
 |---|---|---|
 | `compress` | Ghostscript | ✅ M6 |
 | `convert` | Pandoc | ✅ M6 |
-| `ocr` | Tesseract + language packs + OpenCV | M8 |
+| `ocr` | Tesseract + language packs + Poppler | ✅ M8 |
 | `pdfa` | Ghostscript | not built |
 | `remove-bg` | an ONNX model download | not built |
 
-**The last three rows describe an end state, not the present.** `ocr` is a
-skeleton whose `run()` raises and is M8's work; `pdfa` and `remove-bg` do not
-exist as tools at all and are on no roadmap row.
+**The last two rows describe an end state, not the present.** `pdfa` and
+`remove-bg` do not exist as tools at all and are on no roadmap row. `ocr`
+joined the working set at M8 — OpenCV is no longer among its requirements
+except for `--deskew`, see
+[ADR 0022](../adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md).
 [ADR 0012](../adr/0012-cloud-engines-are-compress-and-convert.md) records why M6
 shipped two rather than five — a cloud engine for a tool with no local engine is
 exactly what the roadmap's ordering forbids.
@@ -183,3 +185,4 @@ See [`core/errors.py`](../../src/docmax/core/errors.py).
 - [ADR 0019 — Where pickers live, and how they render](../adr/0019-picker-package-and-rendering.md)
 - [ADR 0020 — The TUI entry point](../adr/0020-tui-entry-point.md)
 - [ADR 0021 — The TUI is generated from `ToolSpec`](../adr/0021-the-tui-is-generated-from-the-registry.md)
+- [ADR 0022 — OCR runs Tesseract directly](../adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md)

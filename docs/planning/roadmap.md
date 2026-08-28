@@ -16,7 +16,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M5** | `convert`, `to-images`, `from-images` | ✅ complete |
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ complete |
 | **M7** | Textual TUI + visual pickers for crop and reorder | ✅ complete |
-| **M8** | OCR, done properly | planned |
+| **M8** | OCR, done properly | ✅ complete |
 | **M9** | Pipelines, resumable batch, folder watch | planned |
 | **M10** | Local MCP server — drive DocMax from an AI agent | planned |
 
@@ -47,6 +47,14 @@ built.
 **OCR is M8, deliberately late.** It is the operation v2 got most wrong, it has
 the heaviest dependencies, and it benefits most from a mature router and a proven
 validator mechanism. Doing it early would mean doing it twice.
+
+That ordering paid. `ocr` needed no new infrastructure at M8: it reuses the
+router, the binary runner with its timeout and kill switch, the atomic writer,
+the validator mechanism, the shared cloud flow, and the registry-generated TUI
+form — none of which existed when the skeleton was written. What it did need was
+a decision about pages that already carry text, and
+[ADR 0022](../adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md)
+records it.
 
 ## What is not on the roadmap
 

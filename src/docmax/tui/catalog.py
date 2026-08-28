@@ -39,8 +39,13 @@ if TYPE_CHECKING:
     from docmax.core.registry import ToolSpec
 
 #: Registered, described, routable — and not yet implemented. See the module
-#: docstring. This is expected to be empty again at M8.
-UNIMPLEMENTED = frozenset({"ocr"})
+#: docstring.
+#:
+#: **Empty since M8**, which implemented ``ocr`` — the one entry it ever held.
+#: The mechanism is kept rather than deleted: it is three lines, ADR 0021
+#: documents it, and the next tool to land as a skeleton needs it. A test
+#: asserts it is empty, so it cannot quietly refill.
+UNIMPLEMENTED: frozenset[str] = frozenset()
 
 
 def offered_tools() -> list[ToolSpec]:

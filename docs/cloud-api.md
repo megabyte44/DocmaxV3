@@ -23,8 +23,9 @@ Cloud is not a paid tier and not a capability gate. Every cloud-backed tool has
 a fully functional local engine. Cloud exists so a user can compress a PDF
 without installing Ghostscript, or convert a document without installing Pandoc.
 
-Two tools have it today. OCR — the case this section used to lead with — is M8,
-and `convert` still does not produce PDF on either engine
+Three tools have it since M8: `compress`, `convert` and `ocr` — the case this
+section always led with, and the one whose local install is genuinely painful.
+`convert` still does not produce PDF on either engine
 ([ADR 0011](adr/0011-convert-is-pandoc-only.md)).
 
 ## Endpoint configuration

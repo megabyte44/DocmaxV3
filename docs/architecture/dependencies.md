@@ -105,7 +105,7 @@ non-negotiable #3.
 | Extra | Contains | For |
 |---|---|---|
 | *(base)* | `typer`, `rich`, `pypdf`, `platformdirs`, `httpx` | the shell and the cloud client |
-| `ocr` | Tesseract bindings, OpenCV, numpy | local OCR |
+| `ocr` | OpenCV, numpy | straightening pages during local OCR (ADR 0022) |
 | `tables` | pdfplumber, pandas, openpyxl | local table extraction |
 | `images` | Pillow, img2pdf | local image conversion |
 | `tui` | textual | the TUI and its generated forms (M7) |

@@ -72,10 +72,12 @@ default — `rotate` would turn pages by 0 degrees instead of 90.
 
 ### Which tools appear
 
-Every registered tool except those in `tui/catalog.py`'s `UNIMPLEMENTED`, which
-today holds `ocr` alone: it has a full `ToolSpec` and a `run()` that raises until
-M8. ADR 0021 explains why that one name is written down, and why the fix is a
-Core change deferred rather than made in passing.
+Every registered tool. `tui/catalog.py`'s `UNIMPLEMENTED` held exactly one name
+— `ocr`, which had a full `ToolSpec` and a `run()` that raised — and M8 emptied
+it. The mechanism is kept for the next tool that lands as a skeleton, and a test
+asserts it is empty so it cannot quietly refill. ADR 0021 explains why the name
+was written down at all, and why the Core fix was deferred rather than made in
+passing.
 
 ### Running
 

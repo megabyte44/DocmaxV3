@@ -414,6 +414,73 @@ def _resolve_box(source: Path, *, box: str | None, interactive: bool) -> str:
 
 
 @app_commands.command()
+def ocr(
+    source: Annotated[
+        Path, typer.Argument(help="The scanned PDF to recognise.", show_default=False)
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    lang: Annotated[
+        str,
+        typer.Option("--lang", help="Language code, e.g. eng or deu. Combine with +."),
+    ] = "eng",
+    dpi: Annotated[
+        int,
+        typer.Option(
+            "--dpi", help="Rasterisation resolution. Higher is slower and usually better."
+        ),
+    ] = 300,
+    deskew: Annotated[
+        bool,
+        typer.Option("--deskew/--no-deskew", help="Straighten pages before recognition."),
+    ] = True,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
+) -> None:
+    """Add a searchable text layer to a scanned document.
+
+    The output has the same pages in the same order, with invisible text over
+    the ones that needed recognising.
+
+    **Pages that already carry real text are copied through untouched.** A
+    scanned contract behind a generated cover page is the common case, and
+    re-recognising the cover would replace its real text with a picture of it.
+    The result reports which pages were skipped and why.
+
+    A page that *is* recognised comes back as an image at `--dpi` plus its text
+    layer — that is what OCR of a scan means, since the page was already an
+    image.
+
+    `--lang` takes Tesseract's codes and its `+` syntax: `--lang eng+hin`. A
+    pack that is not installed is refused by name, with the installed ones
+    listed.
+
+    Needs Tesseract and Poppler locally; `--engine cloud` needs neither.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    json_output.note(json_out)
+
+    result = execute(
+        "ocr",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        lang=lang,
+        dpi=dpi,
+        deskew=deskew,
+    )
+    render_result(result, dry_run=dry_run, tool="ocr")
+
+
+@app_commands.command()
 def sanitize(
     source: Annotated[Path, typer.Argument(help="The PDF to clean.", show_default=False)],
     output: Annotated[

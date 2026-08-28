@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from docmax.core.errors import InvalidParameterError
 from docmax.core.models import Engine, ToolResult
-from docmax.tools import _binaries, _formats, _pagespec
+from docmax.tools import _binaries, _dpi, _formats, _pagespec
 from docmax.tools._pdf import open_pdf, page_count
 from docmax.tools.to_images.validators import renders_images
 
@@ -62,11 +62,11 @@ BINARY = "pdftoppm"
 #: them differently.
 _MIN_DIGITS = 4
 
-#: Resolutions outside this are refused. The floor is where text stops being
-#: legible at all; the ceiling is where a single page becomes hundreds of
-#: megabytes and the run looks like a hang.
-_MIN_DPI = 12
-_MAX_DPI = 1200
+#: What this tool renders at when nothing is asked for. The *bounds* live in
+#: ``tools/_dpi.py``, shared with ``ocr``: a user who learns what ``--dpi``
+#: accepts here must not find that the other tool spells it differently. The
+#: default is not shared — this renders for viewing, ``ocr`` feeds a recogniser.
+_DEFAULT_DPI = 150
 
 
 class ToImagesLocal:
@@ -109,7 +109,7 @@ class ToImagesLocal:
             )
 
         image_format = _image_format(params)
-        dpi = _dpi(params)
+        dpi = _dpi.parse(params.get("dpi"), default=_DEFAULT_DPI)
 
         document = docs[0]
 
@@ -204,31 +204,6 @@ def _image_format(params: dict[str, Any]) -> ImageFormat:
             context={"parameter": "format", "format": chosen.name},
         )
     return chosen
-
-
-def _dpi(params: dict[str, Any]) -> int:
-    """Resolution, bounded at both ends.
-
-    An upper bound because ``--dpi 40000`` is a request that will exhaust memory
-    or run for hours, and a user who typed an extra zero is better served by a
-    refusal than by a machine that stops responding.
-    """
-    value = params.get("dpi", 150)
-    if value is None:
-        return 150
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise InvalidParameterError(
-            f"dpi must be a whole number, not {value!r}.",
-            remedy="Try --dpi 150 for screen, or 300 for print.",
-            context={"parameter": "dpi"},
-        )
-    if not _MIN_DPI <= value <= _MAX_DPI:
-        raise InvalidParameterError(
-            f"dpi must be between {_MIN_DPI} and {_MAX_DPI}, not {value}.",
-            remedy="Try --dpi 150 for screen, or 300 for print.",
-            context={"parameter": "dpi"},
-        )
-    return value
 
 
 def _version(binary: str, cancellation: CancellationToken) -> str:
