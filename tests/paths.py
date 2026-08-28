@@ -17,7 +17,13 @@ SRC = REPO_ROOT / "src" / "docmax"
 #: [ADR 0005](../docs/adr/0005-gui-pickers.md): a parameter picker "never opens
 #: a document for writing, never touches the filesystem". Listing it here makes
 #: a write outside ``core/atomic.py`` fail the build rather than fail review.
-LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server", "pickers")
+#:
+#: ``runners`` (M9) is here for the sharper of the two reasons. v2's batch runner
+#: was killed by a ``sys.exit`` inside an operation — ``SystemExit`` is not an
+#: ``Exception``, so every ``except Exception`` in the loop missed it and one
+#: missing dependency ended a 200-file run. The replacement loop is now itself
+#: covered by ``test_no_sys_exit.py``. See ADR 0023.
+LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server", "pickers", "runners")
 
 
 def library_sources() -> list[Path]:

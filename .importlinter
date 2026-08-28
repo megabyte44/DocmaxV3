@@ -19,6 +19,7 @@ layers =
     docmax.tui
     docmax.server
     docmax.pickers
+    docmax.runners
     docmax.tools
     docmax.cloud_client
     docmax.core
@@ -32,6 +33,15 @@ layers =
 ; LIBRARY_PACKAGES and covered by the no-direct-writes and no-sys-exit hygiene
 ; tests. That is what makes ADR 0005's "a picker never touches the filesystem"
 ; a property rather than a promise. See ADR 0019.
+;
+; docmax.runners (M9) is placed for the same reason and answers the same
+; question: pipelines, batch and folder watch are wanted by more than one
+; interface, and `interfaces-are-independent` forbids the TUI from reaching into
+; the CLI to get them. It is library code on the same terms as pickers -- it
+; never prints and never exits -- and it imports docmax.core only. It sits above
+; docmax.tools purely because this contract is a total order and something has
+; to go first; a runner names a tool by string and lets the registry resolve it,
+; which `test_m9_runners.py` asserts. See ADR 0023.
 ;
 ; The server sits above tools because it is an interface, exactly like the CLI:
 ; it drives the same registry and the same engines over HTTP instead of argv.
@@ -105,10 +115,15 @@ forbidden_modules =
     docmax.cli
     docmax.tui
     docmax.pickers
+    docmax.runners
     docmax.cloud_client
     docmax.server
 ; The registry resolves tools by lazy metadata, never by importing them. This
 ; is what keeps `import docmax` free of OpenCV.
+;
+; docmax.runners joined at M9. ADR 0023's load-bearing claim is that M9 needed
+; no Core change; listing the package here is what makes "core does not know the
+; runners exist" a checked fact rather than a sentence in an ADR.
 
 [importlinter:contract:server-is-not-a-client]
 name = the server never uses the cloud client
