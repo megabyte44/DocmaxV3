@@ -117,6 +117,55 @@ use `to-images`. See
 docmax doctor      # what's installed, what's missing, and the command to fix it
 ```
 
+## Many documents, several steps, or a folder that fills up
+
+```bash
+docmax batch scans/*.pdf --output-dir out --tool ocr
+docmax pipeline scan.pdf --pipeline clean.toml -o clean.pdf
+docmax watch inbox --output-dir done --tool ocr
+```
+
+A **pipeline** chains operations over one document. The stages live in a TOML
+file, so a workflow is something you save and re-run rather than retype:
+
+```toml
+name = "scan-cleanup"
+
+[[stage]]
+tool = "ocr"
+params = { lang = "eng", dpi = 300 }
+
+[[stage]]
+tool = "compress"
+params = { preset = "ebook" }
+```
+
+**Only the last stage writes your file.** The intermediate documents live in one
+temporary directory and are gone whether the run succeeded, failed or was
+interrupted — so a failure at stage three leaves your destination exactly as it
+was, and nothing is ever left lying beside your documents.
+
+A **batch** runs one operation over many documents, naming each output after its
+input. One corrupt file does not cost you the other hundred and ninety-nine: it
+is reported and the rest carry on. Two things are refused before any work
+starts, because neither can be undone afterwards — two inputs whose names would
+collide in the output directory, and any output that would land on an input.
+
+A **watch** processes documents as they arrive in a folder. A file is picked up
+only once it has stopped changing, so a document still being copied in is left
+alone until it is whole, and each one is handled exactly once.
+
+**`--output-dir` may not be inside the folder you are watching.** v2's watcher
+wrote its output beside its input, saw that output as new input, and fed on
+itself. That is now refused rather than survived. See
+[ADR 0026](docs/adr/0026-the-watcher-polls-and-never-watches-its-own-output.md).
+
+**There is no `--resume` yet.** The roadmap says "resumable batch"; a resume
+journal is a persistent file format that deserves deciding on its own, so it was
+deferred rather than improvised. Re-running an interrupted batch repeats what
+already succeeded, safely — the outputs exist, and DocMax refuses to overwrite
+them without `--force`.
+
 ## An interface for when you are not scripting
 
 ```bash
@@ -162,7 +211,7 @@ nothing is installed for you.
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ done |
 | **M7** | Textual TUI + visual pickers for crop and reorder | ✅ done |
 | **M8** | OCR, done properly | ✅ done |
-| **M9** | Pipelines, resumable batch, folder watch | |
+| **M9** | Pipelines, resumable batch, folder watch | ✅ |
 | **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | |
 
 Benchmarks live in [`benchmarks/`](benchmarks/METHODOLOGY.md) with the method

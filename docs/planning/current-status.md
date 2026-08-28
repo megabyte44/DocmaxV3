@@ -1,6 +1,6 @@
 # Current status
 
-**Last updated:** 2026-08-28 · **Branch:** `feat/m8-ocr` · **Base:** `846eba5` (M7 complete)
+**Last updated:** 2026-08-28 · **Branch:** `feat/m9-pipelines-batch-watch` · **Base:** `d050467` (M8 complete)
 
 This document describes what is true right now, not what is intended. If it
 disagrees with the repository, the repository is right and this file is stale —
@@ -10,8 +10,9 @@ fix it.
 
 ## Where the project is
 
-**Phases 0–9 are complete. Milestones M1 through M8 are done; the published
-package is `DocmaxV3` 3.0.0a7, which predates them.**
+**Phases 0–9 are complete. Milestones M1 through M9 are done — with one row of
+M9 deliberately not delivered, below; the published package is `DocmaxV3`
+3.0.0a7, which predates all of them.**
 
 | Phase | | |
 |---|---|---|
@@ -29,6 +30,7 @@ package is `DocmaxV3` 3.0.0a7, which predates them.**
 | M6 — cloud, JSON, benchmarks | **complete** | cloud `compress`/`convert`, `--json`, `docmax cloud`, benchmark harness |
 | 9 — TUI and visual pickers | **complete** | `docmax.tui`, `docmax.pickers`, the `crop` tool, M7 |
 | M8 — OCR | **complete** | `ocr` local and cloud, `tools/_deskew.py`, `tools/_dpi.py` — no phase of its own, as for M4/M5 |
+| M9 — pipelines, batch, watch | **complete** | `docmax.runners`, three new commands, ADRs 0023–0026 — likewise no phase of its own. `--resume` deferred |
 
 Phases 4 and much of 7/8 arrived by a route the phase plan did not anticipate:
 `m1-foundations` was merged into `main` and released before the phase line
@@ -122,10 +124,20 @@ by `crop`, by the box picker, and by the CLI before either. And one function to
 `tools/_pdf.py` — `page_geometry`, read-only — which is what lets a picker draw a
 page to scale without learning pypdf's spelling of a media box.
 
-The CLI exposes **all nineteen tools** plus `doctor`, `formats`, `tui` and the
-`cloud` group. There is no longer any registered tool it does not expose. Every
-command takes `--json`, including `tui`, which accepts it in order to refuse in
-the envelope.
+The CLI exposes **all nineteen tools** plus `doctor`, `formats`, `tui`, the
+`cloud` group, and M9's `pipeline`, `batch` and `watch`. There is no longer any
+registered tool it does not expose. Every command takes `--json`, including
+`tui`, which accepts it in order to refuse in the envelope — and the check that
+says so is parametrised over the registered commands, so the three new ones
+inherited it rather than being added to a list.
+
+M9 added no shared tool vocabulary, because it added no tool. What it added is
+`docmax.runners`: `pipeline.py` (the TOML format, validation and the staged
+chain), `batch.py` (naming, the two contamination checks, per-item isolation)
+and `watch.py` (polling, settling, the digest key and the containment rule).
+`_progress.py` is the one piece of glue — a sink that prefixes an item label
+onto whatever description the tool sets, so "which document" and "which stage"
+are reportable without changing `ProgressSink`.
 
 ### Interfaces as they stand
 
@@ -134,6 +146,7 @@ the envelope.
 | `cli` | complete — eighteen tools, four other commands, global `--json` |
 | `tui` | done — M7. Generated from the registry; no per-tool code (ADR 0021) |
 | `pickers` | done — M7. `crop` and `reorder`; parameters only (ADR 0005, 0019) |
+| `runners` | done — M9. `pipeline`, `batch`, `watch`; library code, imports only `core` (ADR 0023) |
 | `server` | complete — routes, jobs, storage, auth, live tool execution |
 | `mcp` | not built — M10 |
 
@@ -141,6 +154,16 @@ the envelope.
 test of the core contracts. `ProgressSink` took a Textual widget unmodified,
 `CancellationToken` took a keypress, and `ToolSpec`/`Param` generated eighteen
 forms. `core/`, `registry.py` and `router.py` are untouched by this milestone.
+
+**M9 needed no change either, and it had more reason to want one.** `core/`,
+`registry.py` and `router.py` are untouched by this milestone too. `EngineRouter.run`
+took a composed caller unmodified; `OutputTarget.resolve` guarded every staged
+intermediate as well as every final destination; `CancellationToken` stopped a
+batch between documents and a watch between ticks with no new mechanism; and the
+atomic writers made "a failed three-stage pipeline leaves nothing behind" fall
+out rather than need building. `core-is-standalone` now lists `docmax.runners`
+among the modules `core` may not import, so that claim is checked rather than
+asserted.
 
 `docmax.tui` and `docmax.pickers` arrived with their import-linter contracts in
 the same change. `pickers` is deliberately *not* an interface — it never prints
@@ -157,11 +180,27 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **1782 passed, 3 skipped, 5 deselected** — 203s |
+| `pytest -m "not golden and not needs_binary"` | **1940 passed, 3 skipped, 5 deselected** — 218s |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 224 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 182 source files |
+| `ruff format --check .` | **passed** — 241 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 194 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
+
+M9 added **158** of those: 130 in the five `test_m9_*.py` files (43 pipeline, 27
+batch, 29 watch, 17 CLI/JSON, 14 architectural) and 28 inherited without being
+written, because the hygiene suites are parametrised over `LIBRARY_PACKAGES` —
+which now includes `runners` — and `test_cli_json.py` is parametrised over the
+registered commands, so `pipeline`, `batch` and `watch` were covered by the
+`--json` contract the moment they were registered.
+
+**Two existing tests failed during M9 and both were right to.**
+`test_brand_literals_only_in_branding` caught a hardcoded `"docmax-pipeline-"`
+temp prefix in `runners/pipeline.py`; it now derives from `CLI_NAME`, as
+`core/atomic.py` already did. `test_the_tui_offers_exactly_what_the_cli_exposes`
+caught the three new commands as CLI surface the TUI does not offer — correct,
+since none of them is a registered tool, so the allowed non-tool set grew from
+three names to six. Neither test was weakened: `offered <= exposed` still holds
+strictly, and the brand rule was obeyed rather than exempted.
 
 Both skips are intentional — the self-exemptions inside the hygiene suite:
 `branding.py` may contain brand literals, and `atomic.py` may write directly.
@@ -266,11 +305,12 @@ checks arrived with the server, as the architecture said they must.
 | `implementation/config.md` | current — new in Phase 3 |
 | `implementation/tui.md` | current — new at M7 |
 | `implementation/ocr.md` | current — new at M8 |
-| `adr/README.md` | current — indexes 0022 |
+| `implementation/runners.md` | current — new at M9 |
+| `adr/README.md` | current — indexes 0026 |
 | `planning/*` | current. `reconciliation.md` is superseded by ADR 0009 and deletable |
 | `cloud-api.md` | design-stage; data-handling now points at the terms constant |
 | `README.md` | current |
-| `CHANGELOG.md` | current through M8 |
+| `CHANGELOG.md` | current through M9 |
 | `development/*` | **missing** — no setup, testing or contributing guide |
 | `api/*` | not needed until the HTTP layer exists |
 
@@ -344,14 +384,57 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M9 — pipelines, resumable batch, folder watch.** `backlog.md` records the
-open question each carries: batch needs the cancellation and progress contracts
-to survive crossing a process boundary, and folder-watch needs a rule about
-outputs written into a watched directory — the loop v2 fell into by writing
-`_preprocessed.png` beside its own input, which M8 has now made structurally
-impossible for OCR specifically.
+**M10 — the local MCP server.** Another driver of the same core, and
+[phases.md](phases.md) is explicit about the test it constitutes: it may not
+import another interface, and if it requires a change below the interface layer
+that is a finding about the core contracts rather than a workaround. M7 and M9
+have now both passed that test without a Core change.
 
 **Do not start it without direction.**
+
+### What M9 left behind
+
+**`--resume` does not exist**, and the roadmap row says "resumable batch". It
+was deferred rather than invented: a journal is a persistent, app-owned file
+format that deserves ADR 0008's treatment — a decided location, a schema
+version, and defined behaviour on a corrupt record — rather than a shape
+improvised alongside three other features. `core/errors.py`'s `CancelledError`
+docstring promises it and is currently ahead of the code, which is the one place
+in the repository where that is true on purpose. The watcher's processed-file
+set is in memory for the same reason and does not survive a restart. See
+[roadmap.md](roadmap.md#what-m9-did-not-deliver).
+
+**Batch is serial**, and a 200-file OCR batch is therefore 200 sequential OCR
+runs. That is the honest cost of not building concurrency, and
+[ADR 0025](../adr/0025-batch-mirrors-names-into-an-output-directory.md) names
+the three contracts that would have to change first — the process-boundary work
+the backlog has recorded since M6. The open question that entry carried turned
+out not to need answering: serial execution keeps `CancellationToken`,
+`ProgressSink` and `ConsoleProgress` true exactly as written.
+
+**The watcher polls, and watches one directory.** No `watchdog`, no recursion.
+Latency is up to one interval plus one settle tick — about two seconds at the
+default — which is the price of not taking a dependency whose event semantics
+differ on all three platforms this project has never verified on any of them.
+
+**Watching `inbox/` and writing to `inbox/done/` is refused**, which is a real
+workflow the containment rule blocks. Accepted deliberately: excluding a subtree
+from the scan is the same feature as recursive watching, and reintroduces the
+loop the rule exists to prevent.
+
+**A `ConsentRequiredError` inside a pipeline or batch is not a prompt.** The
+single-document path in `cli/execution.py` asks; a composed run reports the
+error and its remedy instead. Stopping to ask inside a batch of two hundred is
+the interaction ADR 0008 warns about, but it does mean the two paths differ.
+
+**The two frozensets in `runners/pipeline.py` are the `ToolSpec` seam again.**
+`NOT_A_MIDDLE_STAGE` is its fifth appearance and `SUFFIX_FROM_PARAMS` is
+literally the third of the three seams named below — the one about an output
+extension that depends on a parameter. Neither can be derived from the registry,
+so both are hand-maintained lists held by tests, exactly as `tui/catalog.py` was
+at M7. **A new tool that produces a directory will not be added to the set by
+any test**, and will fail at run time on the next stage instead. This is now the
+strongest argument yet that the three seams should be decided together.
 
 ### What M8 left behind
 

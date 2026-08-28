@@ -102,6 +102,34 @@ and the standard library.
 
 ---
 
+## Support — `runners`
+
+**Status:** implemented (M9) — `pipeline`, `batch`, `watch`.
+
+The other non-interface support package, placed for the same reason as
+`pickers`: composition over the tools is wanted by more than one front-end, and
+no interface may import another. It never prints — a caller passes a
+`ProgressSink` and an `on_outcome` callback — and never exits, so it is in
+`LIBRARY_PACKAGES` and covered by the same two hygiene tests.
+
+**One execution path.** A batch runs a pipeline over many inputs; a watch runs
+that same shape until it is cancelled. A bare `--tool` is a one-stage pipeline
+rather than a second route, so there is exactly one place that calls the router.
+
+**It reaches a tool only through the registry.** Unlike `pickers`, which reads
+`tools/_pdf.py` for page geometry, a runner names a tool by string and lets
+`EngineRouter` resolve it — so nothing here imports a tool, and adding tool #51
+costs the runners nothing.
+
+**May import** — `core`, and the standard library.
+
+**May not import** — `tools`, `cloud_client`, any interface, or any UI
+framework. The first of those is stricter than the layers contract and is
+enforced by a separate test; see
+[ADR 0023](../adr/0023-runners-are-a-package-below-the-interfaces.md).
+
+---
+
 ## Application — `tools`
 
 **Status:** implemented — **nineteen tools, and all nineteen run.** `ocr` was

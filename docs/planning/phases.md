@@ -355,6 +355,51 @@ import that lets the CLI start the TUI, and the three guards on a bare `docmax`.
 
 ---
 
+## M9 — pipelines, batch and folder watch
+
+**Status** `complete` — 2026-08-28. Milestone M9. No phase number of its own, as
+for M4, M5 and M8.
+
+**Delivered** `docmax.runners` (`pipeline`, `batch`, `watch`) · the `pipeline`,
+`batch` and `watch` commands · a sixth import-linter layer · ADRs 0023–0026.
+
+**It required no change below the interface layer, and none inside it either.**
+`core/`, `registry.py` and `router.py` are untouched by this milestone — the same
+claim M7 made and the second time the core contracts have been tested by a
+feature that had every reason to bend them. `EngineRouter.run` took a composed
+caller unmodified, `OutputTarget.resolve` guarded every intermediate destination
+as well as every final one, and `CancellationToken` stopped a batch between items
+and a watch between ticks with no new mechanism.
+
+**Two contracts wanted something `ToolSpec` cannot say**, and both were answered
+the way [ADR 0021](../adr/0021-the-tui-is-generated-from-the-registry.md)
+answered the same seam at M7: a frozenset in the consumer, held by a test, and no
+Core change. `NOT_A_MIDDLE_STAGE` is the fifth appearance of that seam and
+`SUFFIX_FROM_PARAMS` is the third of the three
+[current-status.md](current-status.md) already says should be decided together.
+This is now the strongest argument yet for deciding them.
+
+**One row of the milestone was not delivered.** The roadmap says "resumable
+batch"; `--resume` does not exist, and was deferred rather than invented — a
+journal is a persistent app-owned format and deserves ADR 0008's treatment.
+See [roadmap.md](roadmap.md#what-m9-did-not-deliver).
+
+**Definition of done**
+- [x] a pipeline composes tools without duplicating any tool's implementation
+- [x] every stage goes through `EngineRouter`; no runner imports a tool
+- [x] only the final stage writes a destination, and it goes through
+      `core/atomic.py`; a failed or cancelled run leaves it untouched
+- [x] batch refuses a plan that could write over an input, before any work
+- [x] one failed document does not end a batch, and the typed error survives
+- [x] the watcher cannot write into the folder it watches, in either direction
+- [x] polling and settling use the standard library; no new dependency
+- [x] `--json` remains one object on stdout, for all three commands
+- [x] `.importlinter` carries the new layer; 5 contracts kept
+- [ ] **CI matrix** — Windows / CPython 3.14 locally only, as for every phase
+      since Phase 2
+
+---
+
 ## Phase 10 — MCP server (M10)
 
 **Status** `not started`.

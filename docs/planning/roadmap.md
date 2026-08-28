@@ -17,7 +17,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ complete |
 | **M7** | Textual TUI + visual pickers for crop and reorder | ✅ complete |
 | **M8** | OCR, done properly | ✅ complete |
-| **M9** | Pipelines, resumable batch, folder watch | planned |
+| **M9** | Pipelines, resumable batch, folder watch | ✅ complete — except `--resume`, [deferred](#what-m9-did-not-deliver) |
 | **M10** | Local MCP server — drive DocMax from an AI agent | planned |
 
 ## What the ordering is for
@@ -55,6 +55,31 @@ form — none of which existed when the skeleton was written. What it did need w
 a decision about pages that already carry text, and
 [ADR 0022](../adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md)
 records it.
+
+**M9 composes rather than adds.** Pipelines, batch and folder watch perform no
+operation of their own: each stage goes through the same registry, the same
+`EngineRouter` and the same validators as the equivalent single command, and a
+bare `--tool` is a one-stage pipeline so there is one execution path rather than
+three. That is why the milestone needed **no change to `core/`, the registry or
+the router** — the same test M7 applied to the core contracts, applied again and
+passed again. See [ADR 0023](../adr/0023-runners-are-a-package-below-the-interfaces.md).
+
+## What M9 did not deliver
+
+**`--resume` does not exist**, and the row above says "resumable batch". A
+resume key needs a journal: a persistent, app-owned file with a location, a
+schema version, and a defined behaviour when it is corrupt or from a future
+version. [ADR 0008](../adr/0008-consent-record.md) settled exactly that shape for
+the consent record *before* the code that used it, and a journal deserves the
+same treatment rather than a format improvised alongside three other features.
+
+It was deferred rather than invented, which leaves one visible cost: re-running
+an interrupted batch repeats the documents that already succeeded. That is safe
+— their destinations exist, and `OutputTarget` refuses them without `--force` —
+but it is not what the word "resumable" promises.
+
+The same deferral applies to the watcher, whose processed-file set lives in
+memory and does not survive a restart.
 
 ## What is not on the roadmap
 

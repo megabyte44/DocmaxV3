@@ -9,7 +9,7 @@ When they disagree, one of them is a bug — see [Keeping this honest](#keeping-
 ┌─────────────────────────────────────────────────┐
 │  Interfaces      cli · tui · server · mcp       │  may import everything below
 ├─────────────────────────────────────────────────┤
-│  Support         pickers                        │  may import tools, core
+│  Support         pickers · runners              │  may import tools, core
 ├─────────────────────────────────────────────────┤
 │  Application     tools                          │  may import cloud_client, core
 ├─────────────────────────────────────────────────┤
@@ -34,10 +34,10 @@ fails the pull request.
 
 | Contract | Rule |
 |---|---|
-| `layers` | `cli` → `tui` → `server` → `pickers` → `tools` → `cloud_client` → `core`, downward only |
+| `layers` | `cli` → `tui` → `server` → `pickers` → `runners` → `tools` → `cloud_client` → `core`, downward only |
 | `core-is-ui-free` | `core` may not import `rich`, `textual`, `typer`, `fastapi`, `mcp` |
 | `interfaces-are-independent` | `cli`, `tui` and `server` may not import each other |
-| `core-is-standalone` | `core` may not import `tools`, `cli`, `tui`, `pickers`, `cloud_client`, `server` |
+| `core-is-standalone` | `core` may not import `tools`, `cli`, `tui`, `pickers`, `runners`, `cloud_client`, `server` |
 | `server-is-not-a-client` | `server` may not import `cloud_client`, `cli` or `tui` |
 
 `cli`, `tui` and `server` appear on separate lines in `layers` only because a
@@ -50,6 +50,21 @@ kept unable to print or exit so that it can be covered by the library-code
 hygiene tests — which is what makes ADR 0005's "a picker never touches the
 filesystem" a build failure rather than a promise. See
 [ADR 0019](../adr/0019-picker-package-and-rendering.md).
+
+**`runners` is not an interface either**, and is there for the same reason. M9's
+pipelines, batch and folder watch are wanted by more than one front-end, and
+`interfaces-are-independent` forbids the TUI from reaching into the CLI to get
+them. Like `pickers` it never prints and never exits, so it is in
+`LIBRARY_PACKAGES` and the hygiene tests cover it — which matters more here than
+anywhere else, because v2's batch runner died of a `sys.exit` raised beneath it.
+See [ADR 0023](../adr/0023-runners-are-a-package-below-the-interfaces.md).
+
+**The layers contract is weaker than ADR 0023 for `runners`.** A layers contract
+permits every layer below, so it allows `runners -> tools`; the ADR forbids it,
+because a runner names a tool by string and lets the registry resolve it.
+`tests/unit/test_m9_runners.py::test_runners_import_only_core` closes that gap by
+reading the imports — an instance of the general rule below that a contract
+lint cannot express.
 
 **One import is ignored**, narrowly: `docmax.cli.main -> docmax.tui`. Something
 has to start the TUI and turning argv into a call is the CLI's job; the ignored
@@ -64,8 +79,8 @@ Plus two AST-based hygiene tests that enforce related boundaries:
 | Test | Rule |
 |---|---|
 | `test_no_heavy_imports.py` | `docmax` and each `docmax.core` submodule pull in no heavy dependency, no interface framework and no cloud SDK (runs in a subprocess, one probe per module) |
-| `test_no_sys_exit.py` | library packages — including `server` and `pickers` — never terminate the process |
-| `test_no_direct_writes.py` | library packages — including `pickers` — never write outside `core/atomic.py` |
+| `test_no_sys_exit.py` | library packages — including `server`, `pickers` and `runners` — never terminate the process |
+| `test_no_direct_writes.py` | library packages — including `pickers` and `runners` — never write outside `core/atomic.py` |
 | `test_wheel_excludes_server.py` | `docmax.server` does not ship in the wheel |
 | `test_tui.py` | the TUI names no tool, imports no other interface, and the CLI reaches only its entry point |
 

@@ -36,6 +36,63 @@ These are behaviour changes a v2 user can actually hit. See
 
 ### Added
 
+- **`pipeline`, `batch` and `watch` — composition, without a second execution
+  path.** All three go through the same registry, the same `EngineRouter` and
+  the same validators as the equivalent single command. A bare `--tool` is a
+  one-stage pipeline, so there is exactly one place that runs anything.
+  - **`docmax pipeline in.pdf --pipeline chain.toml -o out.pdf`** runs several
+    operations over one document. The stages are a TOML file — `tomllib`, no new
+    dependency — with `tool`, an optional `params` table and an optional
+    `engine` per stage. An unknown key is refused at load, naming it, as
+    `config.toml` already does.
+  - **Only the last stage writes your destination.** Intermediates live in one
+    `TemporaryDirectory` that is removed on every path out, so a failure or a
+    Ctrl-C at stage three leaves the destination exactly as it was and nothing
+    is left beside your documents. See
+    [ADR 0024](docs/adr/0024-a-pipeline-is-a-toml-file.md).
+  - **`docmax batch scans/*.pdf --output-dir out --tool ocr`** mirrors each
+    input's name into the output directory. One failed document is reported and
+    the rest carry on — v2 lost a 200-file run to one missing dependency — and
+    the typed error is kept whole rather than flattened to a string, available
+    together as an `ExceptionGroup`.
+  - **Two batch plans are refused before any work starts**: two inputs whose
+    names would collide in the output directory, and any output that would land
+    on an input. `OutputTarget` cannot catch the second, because it compares
+    against the inputs of its own call and cannot see item seven's source.
+    [ADR 0025](docs/adr/0025-batch-mirrors-names-into-an-output-directory.md).
+  - **`docmax watch inbox --output-dir done --tool ocr`** processes documents as
+    they arrive. A file is picked up only once its size and mtime are unchanged
+    across two listings, so a document still being copied in is left alone, and
+    each is keyed by content digest so nothing is handled twice.
+  - **The watcher may not write into the folder it watches**, in either
+    direction of containment. This is the defect v2 was best known for: it wrote
+    `_preprocessed.png` beside its input, saw it as new input, and fed on
+    itself. Now refused before the loop starts.
+    [ADR 0026](docs/adr/0026-the-watcher-polls-and-never-watches-its-own-output.md).
+  - **Polling, from the standard library.** No `watchdog` and no new dependency.
+    The settle check would be needed with an event library anyway — neither
+    `inotify` nor `ReadDirectoryChangesW` tells you a write has finished.
+  - `--json` still puts exactly one object on stdout for all three. `batch` and
+    `watch` report per-document results with the same error envelope a single
+    command produces, and `watch` writes its object when the watch ends rather
+    than streaming one per file.
+  - **`docmax.runners` is a new package on its own layer**, below the
+    interfaces and above the tools, because more than one front-end will want
+    this and no interface may import another. It never prints and never exits,
+    so the library-code hygiene tests cover it — which matters here more than
+    anywhere, since v2's batch runner died of a `sys.exit` raised beneath it.
+    [ADR 0023](docs/adr/0023-runners-are-a-package-below-the-interfaces.md).
+  - **M9 changed no core contract.** `core/`, `registry.py` and `router.py` are
+    untouched by this milestone, as they were by M7.
+  - **There is no `--resume`.** The roadmap row says "resumable batch"; a resume
+    journal is a persistent, app-owned file format and was deferred rather than
+    improvised alongside three other features. `CancelledError`'s docstring
+    promises it and is currently ahead of the code. Re-running an interrupted
+    batch repeats what already succeeded — safely, since those outputs exist and
+    are refused without `--force`. The watcher's processed-set is in memory for
+    the same reason. See
+    [roadmap.md](docs/planning/roadmap.md#what-m9-did-not-deliver).
+
 - **`ocr` — the last skeleton, and the operation v2 got most wrong.** Rasterise
   with Poppler, straighten with OpenCV, recognise with Tesseract, reassemble
   with pypdf. One process per page, so progress advances per page and

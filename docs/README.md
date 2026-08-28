@@ -30,6 +30,7 @@ Start here.
 | [implementation/json.md](implementation/json.md) | What `--json` produces, and which fields are stable |
 | [implementation/tui.md](implementation/tui.md) | The TUI and the two visual pickers, and the rules they obey |
 | [implementation/ocr.md](implementation/ocr.md) | What `docmax ocr` produces, and how it handles a page that already has text |
+| [implementation/runners.md](implementation/runners.md) | Pipelines, batch and folder watch — the file format, the naming rules, and what is deferred |
 | [cloud-api.md](cloud-api.md) | The Cloud Engine wire contract *(implemented, for `compress` and `convert`)* |
 | [../benchmarks/METHODOLOGY.md](../benchmarks/METHODOLOGY.md) | How performance is measured, and what is not measured |
 | [migrating-from-v2.md](migrating-from-v2.md) | What changed, and what will break |

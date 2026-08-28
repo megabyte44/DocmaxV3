@@ -79,6 +79,15 @@ Worth doing, not blocking anything.
       `phase-2/core-contracts` and `docs/architecture-and-planning` are all
       superseded by this reconciliation. Deleting them is a separate
       decision; none has been touched.
+- [ ] **Concurrency for batch.** Deliberately not built at M9 —
+      [ADR 0025](../adr/0025-batch-mirrors-names-into-an-output-directory.md)
+      records why, and names the three contracts that would have to change:
+      `CancellationToken` across a process boundary, `ProgressSink` describing N
+      simultaneous items, and `ConsoleProgress`'s single live region. Worth doing
+      only against a measured need; a 200-file OCR batch is the obvious one.
+- [ ] **Recursive folder watch.** M9 watches one directory, non-recursively. A
+      recursive watch turns ADR 0026's containment rule into a subtree question
+      and should be decided with that in mind rather than added.
 - [ ] **Python 3.14 in the CI matrix.** The development machine runs 3.14; CI
       tests 3.11–3.13. The gap means local runs exercise a version CI does not.
 - [ ] **A `conftest.py` with shared fixtures.** Currently every test builds its
@@ -97,10 +106,22 @@ Worth doing, not blocking anything.
 Decided in principle, not scheduled. Mostly already on the
 [roadmap](roadmap.md) — listed here where they carry an open question.
 
-- [ ] **Pipelines and resumable batch** (M9). Needs the cancellation and progress
-      contracts to survive crossing a process boundary.
-- [ ] **Folder watch** (M9). v2's version fed on its own output; the replacement
-      needs a rule about outputs written into a watched directory.
+- [x] ~~**Pipelines and batch** (M9).~~ Delivered 2026-08-28. The open question
+      resolved itself: batch is **serial**, so the cancellation and progress
+      contracts never cross a process boundary and needed no change. See
+      [ADR 0025](../adr/0025-batch-mirrors-names-into-an-output-directory.md),
+      which also records what revisiting that would cost.
+- [x] ~~**Folder watch** (M9).~~ Delivered 2026-08-28. The rule the backlog
+      asked for is containment in both directions — the output directory may not
+      be inside the watched tree, nor the watched tree inside it.
+      [ADR 0026](../adr/0026-the-watcher-polls-and-never-watches-its-own-output.md).
+- [ ] **A resume journal, and `--resume`** (deferred from M9). The roadmap row
+      says "resumable batch" and no journal exists. It needs a decided location,
+      a schema version, and a defined behaviour on a corrupt or future-version
+      record — the treatment [ADR 0008](../adr/0008-consent-record.md) gave the
+      consent record. `core/errors.py`'s `CancelledError` docstring promises it,
+      and is currently ahead of the code. The watcher's in-memory processed-set
+      is the same gap seen from the other side.
 - [ ] **Third-party tool plugins.** The entry-point group exists in
       `branding.py`; the trust model for third-party code does not.
 - [x] ~~**`--json` everywhere**~~ — delivered at M6.
