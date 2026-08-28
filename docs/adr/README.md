@@ -35,6 +35,10 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0020](0020-tui-entry-point.md) | The CLI launches the TUI; a bare `docmax` opens it only where there is someone to use it | Accepted |
 | [0021](0021-the-tui-is-generated-from-the-registry.md) | The TUI is generated from `ToolSpec` and names no tool | Accepted |
 | [0022](0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md) | OCR shells out to Tesseract directly, and leaves pages that already have text alone | Accepted |
+| [0023](0023-runners-are-a-package-below-the-interfaces.md) | Pipelines, batch and watch live in one package below the interfaces | Accepted |
+| [0024](0024-a-pipeline-is-a-toml-file.md) | A pipeline is a TOML file, and only its last stage writes a destination | Accepted |
+| [0025](0025-batch-mirrors-names-into-an-output-directory.md) | Batch mirrors input names into an output directory it may not share with its inputs | Accepted |
+| [0026](0026-the-watcher-polls-and-never-watches-its-own-output.md) | The watcher polls, waits for a file to settle, and may not write where it watches | Accepted |
 
 ## When to write one
 
