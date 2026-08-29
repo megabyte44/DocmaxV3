@@ -32,11 +32,17 @@ SPEC = register(
                 name="box",
                 description=(
                     "The rectangle to keep, as x,y,width,height in points, "
-                    "measured from the bottom-left of the page."
+                    "measured from the bottom-left of the page — for example "
+                    "10,10,500,700."
                 ),
                 type_="str",
                 default=None,
                 required=True,
+                # Four numbers with four different meanings, blind in one
+                # field. The TUI renders one labelled input per label; the
+                # CLI's `--box x,y,width,height` and `tools/_box.py`'s parser
+                # are unchanged. See ADR 0032.
+                component_labels=("x", "y", "width", "height"),
             ),
         ),
     )

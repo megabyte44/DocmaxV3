@@ -22,10 +22,12 @@ SPEC = register(
         # is -- so uploading a document to rasterise it would buy nothing.
         supported_engines=frozenset({Engine.LOCAL}),
         accepts_multiple_inputs=False,
-        # Unused in practice: the output is a *directory*, and the CLI requires
-        # `-o`. `split` has the same shape. See ADR 0011 on why this stays as
-        # it is rather than ToolSpec growing a way to say so.
+        # `default_suffix` is otherwise unused: the CLI requires `-o`, so a
+        # destination is never derived. `-o` itself names a directory the
+        # images are written into, not a file — `split` has the same shape.
+        # ToolSpec now has a way to say so; see ADR 0031.
         default_suffix=".pdf",
+        produces_directory=True,
         params=(
             Param(
                 name="format",

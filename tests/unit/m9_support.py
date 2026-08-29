@@ -98,6 +98,7 @@ class FakeSpec:
     params: tuple[Param, ...] = ()
     default_suffix: str = ".pdf"
     accepts_multiple_inputs: bool = False
+    produces_directory: bool = False
 
     @property
     def supported_engines(self) -> frozenset[Engine]:

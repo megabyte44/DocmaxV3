@@ -20,6 +20,9 @@ SPEC = register(
         # operation would be slower, less private, and would need a network.
         supported_engines=frozenset({Engine.LOCAL}),
         accepts_multiple_inputs=False,
+        # `-o` names a directory the parts are written into, not a file — see
+        # ADR 0003's `atomic_dir` and ADR 0031.
+        produces_directory=True,
         params=(
             Param(
                 name="every",

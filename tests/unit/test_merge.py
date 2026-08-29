@@ -532,6 +532,27 @@ def test_the_router_runs_merge_end_to_end(two_pdfs: tuple[Path, Path], tmp_path:
     assert result.details["pages"] == 5
 
 
+def test_an_extensionless_output_still_produces_a_real_pdf(
+    two_pdfs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The exact reported bug: `-o merged` (no extension) wrote valid PDF
+    bytes to a file named `merged`, which Windows then opened in Notepad
+    because nothing said it was a PDF. `merge`'s inputs and output are both
+    `.pdf`, so this is the tool where the gap was most visible, but the fix
+    lives in `OutputTarget.resolve` and applies before merge ever runs."""
+    a, b = two_pdfs
+    router = EngineRouter(config=Config())
+    sources = docs(a, b)
+    target = router.target_for("merge", sources, requested=str(tmp_path / "merged"))
+
+    assert target.destination == tmp_path / "merged.pdf"
+
+    router.run("merge", sources, target)
+
+    assert target.destination.is_file()
+    assert page_count(target.destination) == 5
+
+
 def test_merge_cannot_derive_a_destination_and_says_so(
     two_pdfs: tuple[Path, Path],
 ) -> None:

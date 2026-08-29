@@ -255,6 +255,24 @@ def test_convert_refuses_to_write_over_its_own_input(real_router: None, notes: P
     assert notes.read_text(encoding="utf-8").startswith("# Title")
 
 
+def test_to_images_extensionless_output_names_a_directory_not_pdf_pdf(tmp_path: Path) -> None:
+    """Requirement 5, ADR 0031. Resolved directly through a real router
+    rather than run end to end, since `to-images` needs Poppler — this file's
+    own docstring says exactly that binary-backed commands here are exercised
+    for argument handling, not execution."""
+    from docmax.core.models import DocumentRef
+
+    source = write_pdf(tmp_path / "doc.pdf", 2)
+    router = EngineRouter(config=Config())
+
+    target = router.target_for(
+        "to-images", [DocumentRef.from_path(source)], requested=str(tmp_path / "pages")
+    )
+
+    assert target.destination == tmp_path / "pages"
+    assert target.destination.suffix == ""
+
+
 def test_to_images_refuses_an_existing_output_without_force(
     real_router: None, tmp_path: Path
 ) -> None:
