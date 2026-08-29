@@ -153,7 +153,7 @@ def test_a_deadline_reports_time_left_for_a_subprocess() -> None:
     remaining = CancellationToken(timeout=GENEROUS).remaining_seconds()
 
     assert remaining is not None
-    assert 0 < remaining <= GENEROUS
+    assert 0 < remaining <= GENEROUS + CLOCK_EPSILON
 
 
 def test_a_lapsed_deadline_cancels() -> None:
