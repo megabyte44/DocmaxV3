@@ -194,7 +194,7 @@ Weighted toward the part that is not a terminal.
 | pure logic | box parsing, `Param` → field, form → `**params`, payload validation, catalog membership |
 | against a fake router | that the right tool is called with the right parameters, that progress and cancellation arrive, that a typed error stays typed |
 | real loopback socket | the picker server starts, serves, answers, cancels, times out and shuts down |
-| Textual `Pilot` | the app starts, all eighteen tools compose a form, `ctrl+c` cancels, the modals answer |
+| Textual `Pilot` | the app starts, all nineteen tools compose a form, `ctrl+c` cancels, the modals answer |
 
 **No snapshot tests.** ADR 0005's restraint about the pickers applies to the TUI
 too: a golden image of a terminal is fragile in the size of the terminal, the

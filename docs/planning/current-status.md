@@ -125,11 +125,12 @@ by `crop`, by the box picker, and by the CLI before either. And one function to
 `tools/_pdf.py` — `page_geometry`, read-only — which is what lets a picker draw a
 page to scale without learning pypdf's spelling of a media box.
 
-The CLI exposes **all nineteen tools** plus `doctor`, `formats`, `tui`, the
-`cloud` group, and M9's `pipeline`, `batch` and `watch`. There is no longer any
-registered tool it does not expose. Every command takes `--json`, including
-`tui`, which accepts it in order to refuse in the envelope — and the check that
-says so is parametrised over the registered commands, so the three new ones
+The CLI exposes **all nineteen tools** plus seven other commands — `doctor`,
+`formats`, `tui`, M9's `pipeline`, `batch` and `watch`, and M10's `mcp` — and
+the `cloud` group. There is no longer any registered tool it does not expose.
+Every command takes `--json`, including `tui` and `mcp`, which accept it in
+order to refuse in the envelope: both own stdout for something else. The check
+that says so is parametrised over the registered commands, so each new command
 inherited it rather than being added to a list.
 
 M9 added no shared tool vocabulary, because it added no tool. What it added is
@@ -144,7 +145,7 @@ are reportable without changing `ProgressSink`.
 
 | Interface | State |
 |---|---|
-| `cli` | complete — eighteen tools, four other commands, global `--json` |
+| `cli` | complete — nineteen tools, seven other commands, the `cloud` group, global `--json` |
 | `tui` | done — M7. Generated from the registry; no per-tool code (ADR 0021) |
 | `pickers` | done — M7. `crop` and `reorder`; parameters only (ADR 0005, 0019) |
 | `runners` | done — M9. `pipeline`, `batch`, `watch`; library code, imports only `core` (ADR 0023) |
@@ -181,18 +182,24 @@ locally**. Every check the project defines passes:
 
 | Check | Result |
 |---|---|
-| `pytest -m "not golden and not needs_binary"` | **1940 passed, 3 skipped, 5 deselected** — 218s |
+| `pytest -m "not golden and not needs_binary"` | **2143 passed, 4 skipped, 5 deselected** — 220s |
 | `ruff check .` | **passed** |
-| `ruff format --check .` | **passed** — 241 files already formatted |
-| `mypy` (strict) | **passed** — no issues in 194 source files |
+| `ruff format --check .` | **passed** — 255 files already formatted |
+| `mypy` (strict) | **passed** — no issues in 203 source files |
 | `lint-imports` | **passed** — 5 contracts kept, 0 broken |
 
-M9 added **158** of those: 130 in the five `test_m9_*.py` files (43 pipeline, 27
-batch, 29 watch, 17 CLI/JSON, 14 architectural) and 28 inherited without being
-written, because the hygiene suites are parametrised over `LIBRARY_PACKAGES` —
-which now includes `runners` — and `test_cli_json.py` is parametrised over the
-registered commands, so `pipeline`, `batch` and `watch` were covered by the
-`--json` contract the moment they were registered.
+The fourth skip is M10's, and it is environmental rather than intentional: the
+MCP symlink-escape test needs a privilege Windows does not grant by default, so
+it has never run on this machine and runs for the first time in CI.
+
+**M9 added 158 of those and M10 added 203.** M9's were 130 in the five
+`test_m9_*.py` files (43 pipeline, 27 batch, 29 watch, 17 CLI/JSON, 14
+architectural) plus 28 inherited; M10's were 186 in the five `test_m10_*.py`
+files (34 protocol, 110 schema, 22 policy, 9 cancellation, 11 packaging) plus 17
+inherited. Nothing inherited had to be written: the hygiene suites are
+parametrised over `LIBRARY_PACKAGES` — which now includes `runners` and `mcp` —
+and `test_cli_json.py` is parametrised over the registered commands, so each new
+command was covered by the `--json` contract the moment it was registered.
 
 **Two existing tests failed during M9 and both were right to.**
 `test_brand_literals_only_in_branding` caught a hardcoded `"docmax-pipeline-"`

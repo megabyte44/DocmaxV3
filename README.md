@@ -250,7 +250,7 @@ nothing is installed for you.
 | **M6** | Cloud engines, `--json` everywhere, published benchmarks | ✅ done |
 | **M7** | Textual TUI + visual pickers for crop and reorder | ✅ done |
 | **M8** | OCR, done properly | ✅ done |
-| **M9** | Pipelines, resumable batch, folder watch | ✅ |
+| **M9** | Pipelines, batch, folder watch — `--resume` [deferred](#many-documents-several-steps-or-a-folder-that-fills-up) | ✅ |
 | **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | ✅ |
 
 Benchmarks live in [`benchmarks/`](benchmarks/METHODOLOGY.md) with the method
