@@ -29,8 +29,11 @@ from benchmarks import harness
 from docmax.tools import _binaries
 
 
+#: The image-heavy fixture needs img2pdf and Pillow — the optional `images`
+#: extra, not a base dependency.
 @pytest.fixture
 def fixtures(tmp_path: Path) -> list[harness.Fixture]:
+    pytest.importorskip("img2pdf", reason="the images extra is not installed")
     return harness.build_fixtures(tmp_path / "fixtures")
 
 
@@ -76,6 +79,7 @@ def test_the_image_heavy_fixture_is_actually_heavy(
 
 def test_fixtures_are_regenerated_rather_than_reused(tmp_path: Path) -> None:
     """Two runs into the same directory must not accumulate or diverge."""
+    pytest.importorskip("img2pdf", reason="the images extra is not installed")
     first = harness.build_fixtures(tmp_path / "f")
     second = harness.build_fixtures(tmp_path / "f")
 
@@ -202,6 +206,7 @@ def test_the_local_runner_measures_a_real_tool(
     """End to end through the real router, with a fake Pandoc as the binary."""
     from benchmarks.__main__ import _local
 
+    pytest.importorskip("img2pdf", reason="the images extra is not installed")
     install_fake(monkeypatch, tmp_path, FAKE_PANDOC)
     fixtures = [item for item in harness.build_fixtures(tmp_path / "f") if item.kind == "markdown"]
 
@@ -221,6 +226,7 @@ def test_a_missing_binary_produces_a_row_that_says_so(
     """A gap that explains itself beats a missing row."""
     from benchmarks.__main__ import _local
 
+    pytest.importorskip("img2pdf", reason="the images extra is not installed")
     monkeypatch.setattr(_binaries, "find", lambda name: None)
     fixtures = [item for item in harness.build_fixtures(tmp_path / "f") if item.kind == "markdown"]
 

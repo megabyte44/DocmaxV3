@@ -23,6 +23,7 @@ formats output by hand would not — ADR 0014 names that as the gap.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -41,6 +42,14 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 #: A key nobody would type, so finding it anywhere is unambiguous.
 SENTINEL_KEY = "dmx_sentinel_MUST_NEVER_APPEAR_9f3a"
+
+#: `from-images` is pure Python (no binary), but Pillow and img2pdf are still
+#: the optional `images` extra, not base dependencies. Matches the `crypto`
+#: extra's pattern in test_m4_tools.py.
+needs_images = pytest.mark.skipif(
+    importlib.util.find_spec("PIL") is None or importlib.util.find_spec("img2pdf") is None,
+    reason="the images extra is not installed",
+)
 
 EXIT_FAILURE = 1
 EXIT_USAGE = 2
@@ -143,6 +152,7 @@ def test_json_is_accepted_before_the_command_too() -> None:
 # ---------------------------------------------------------------------------
 
 
+@needs_images
 def test_a_successful_run_emits_one_object(real_router: None, tmp_path: Path) -> None:
     image = write_image(tmp_path / "a.png")
     out = tmp_path / "out.pdf"
@@ -157,6 +167,7 @@ def test_a_successful_run_emits_one_object(real_router: None, tmp_path: Path) ->
     assert body["result"]["outputs"] == [str(out)]
 
 
+@needs_images
 def test_stdout_holds_exactly_one_json_document(real_router: None, tmp_path: Path) -> None:
     """One object per command. Two would break `| jq` for everyone."""
     image = write_image(tmp_path / "a.png")
@@ -177,6 +188,7 @@ def test_a_read_only_tool_reports_an_empty_outputs_list(real_router: None, sourc
     assert "pages" in parsed(result)["result"]
 
 
+@needs_images
 def test_a_dry_run_reports_that_nothing_was_written(real_router: None, tmp_path: Path) -> None:
     image = write_image(tmp_path / "a.png")
     out = tmp_path / "never.pdf"
@@ -188,6 +200,7 @@ def test_a_dry_run_reports_that_nothing_was_written(real_router: None, tmp_path:
     assert not out.exists()
 
 
+@needs_images
 def test_stdout_carries_no_ansi_escapes(real_router: None, tmp_path: Path) -> None:
     """Rich must not colour a stream a parser is reading."""
     image = write_image(tmp_path / "a.png")
@@ -199,6 +212,7 @@ def test_stdout_carries_no_ansi_escapes(real_router: None, tmp_path: Path) -> No
     assert "\x1b[" not in result.stdout
 
 
+@needs_images
 def test_progress_produces_no_stdout(real_router: None, tmp_path: Path) -> None:
     """A live region on stdout would corrupt the document being parsed."""
     images = [write_image(tmp_path / f"{n}.png") for n in range(4)]
@@ -215,6 +229,7 @@ def test_progress_produces_no_stdout(real_router: None, tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@needs_images
 def test_a_failure_emits_the_error_envelope(real_router: None, tmp_path: Path) -> None:
     notes = tmp_path / "notes.txt"
     notes.write_text("not an image", encoding="utf-8")
@@ -242,6 +257,7 @@ def test_the_error_envelope_matches_the_wire_contract(real_router: None, tmp_pat
     assert set(body["error"]) >= {"code", "message", "remedy", "retryable"}
 
 
+@needs_images
 def test_exit_codes_are_unchanged_under_json(real_router: None, tmp_path: Path) -> None:
     """`--json` changes what is printed, never what is returned."""
     image = write_image(tmp_path / "a.png")
@@ -331,6 +347,7 @@ def test_cloud_status_still_confirms_a_key_is_set(sentinel_key: str) -> None:
     )
 
 
+@needs_images
 def test_no_command_leaks_the_key_on_success(
     sentinel_key: str, real_router: None, tmp_path: Path
 ) -> None:
