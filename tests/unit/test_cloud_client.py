@@ -382,6 +382,11 @@ def test_a_cancel_during_polling_is_noticed_promptly(
             202, json={"ok": True, "job_id": "j", "status": "running", "poll_after_ms": 30_000}
         )
     )
+    respx.get(f"{ENDPOINT}/v1/jobs/j").mock(
+        return_value=httpx.Response(
+            200, json={"ok": True, "job_id": "j", "status": "running", "poll_after_ms": 30_000}
+        )
+    )
     token = CancellationToken()
 
     def cancel_soon() -> None:

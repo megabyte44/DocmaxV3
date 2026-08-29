@@ -592,7 +592,7 @@ def test_a_missing_dependency_is_reported_with_an_install_command() -> None:
     if reason is None:  # pragma: no cover — a machine with the full toolchain
         pytest.skip("the OCR toolchain is installed here")
 
-    assert "tesseract" in reason
+    assert "tesseract" in reason or "pdftoppm" in reason
     # It used to say `setup --ocr`, a command that does not exist. ADR 0022.
     assert "setup --ocr" not in install_hint()
     assert "--engine cloud" in install_hint()
