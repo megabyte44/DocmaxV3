@@ -190,6 +190,7 @@ def run_picker(
 
     thread = threading.Thread(target=server.serve_forever, name=_THREAD_NAME, daemon=True)
     thread.start()
+    _wait_until_serving(port, token)
     try:
         opened = webbrowser.open(url) if open_browser else False
         if announce is not None:
@@ -206,6 +207,44 @@ def run_picker(
         raise PickerCancelledError
 
     return Choice(payload=dict(result))
+
+
+#: How long `_wait_until_serving` gives the thread to actually start accepting,
+#: before giving up and proceeding anyway. Generous relative to how long this
+#: normally takes (microseconds — the socket is already listening by the time
+#: the thread is started; only the OS scheduling the thread is in question), but
+#: still short next to `DEFAULT_TIMEOUT_SECONDS`.
+_SERVING_TIMEOUT_SECONDS = 5.0
+
+
+def _wait_until_serving(port: int, token: str) -> None:
+    """Block until the server thread is actually handling requests.
+
+    `ThreadingHTTPServer.__init__` binds and listens *before* `serve_forever` is
+    ever called, on the main thread, so a TCP connection to the port succeeds —
+    queued by the kernel — the instant the thread starts. But the request itself
+    still waits for that thread to be scheduled and reach `accept()`, and
+    `announce` (a real browser, or in tests an inline caller) makes its first
+    request immediately after this function returns. On a loaded machine — a CI
+    runner running the rest of the suite alongside it — that scheduling delay is
+    exactly what a caller's own request timeout would otherwise have to absorb.
+    A cheap self-request here absorbs it instead, so an ordinary Ctrl-C or a
+    slow-to-schedule thread cannot masquerade as an unreachable server.
+
+    Best-effort: if the server never answers within the budget, this returns
+    anyway rather than raising, leaving today's behaviour as the fallback.
+    """
+    import contextlib
+    import time
+    import urllib.request
+
+    probe = f"http://127.0.0.1:{port}/{token}"
+    deadline = time.monotonic() + _SERVING_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        with contextlib.suppress(OSError):
+            urllib.request.urlopen(probe, timeout=0.5).close()
+            return
+        time.sleep(0.02)
 
 
 def _wait(answered: threading.Event, *, timeout: float) -> None:
