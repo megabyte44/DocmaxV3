@@ -11,8 +11,10 @@ See [current-status.md](../planning/current-status.md) for the live picture.
 
 ## Interfaces — `cli`, `tui`, `server`, `mcp`
 
-**Status:** `cli` partial · **`server` implemented** (routes, jobs, storage, auth;
-its tool-execution bridge is stubbed pending real tools) · `tui` M7 · `mcp` M10
+**Status:** `cli` complete · **`tui` implemented** (M7) · **`server` implemented**
+(routes, jobs, storage, auth, and a live tool-execution bridge) · **`mcp`
+implemented** (M10 — stdio JSON-RPC, generated from the registry, inside a
+filesystem-root policy boundary)
 
 The entry points. Each turns some external protocol — argv, keystrokes, HTTP,
 JSON-RPC — into a call on the layers below, and turns the result back into
@@ -36,9 +38,24 @@ many pages a PDF has, that knowledge is in the wrong layer.
 **Contracts it provides**
 
 `ProgressSink` is the notable one: each interface implements it differently — a
-Rich progress bar, a Textual widget, a job-progress row — and nothing below
+Rich progress bar in `cli/progress.py`, a Textual widget behind
+`tui/runner.py`'s `CallbackProgress`, a job-progress row — and nothing below
 knows which. This is the boundary that lets `core` be forbidden from importing
-`rich`.
+`rich`, and M7 is the milestone that proved it: the TUI needed no change below
+the interface layer at all.
+
+**What the TUI does not contain**
+
+No routing, no engine resolution, no consent rule, no validation, no atomic
+write, and no document knowledge of any kind — not even a page count. One
+`RunScreen` serves every tool, generated from `ToolSpec` and `Param`, so tool
+nineteen appears with no edit. See
+[ADR 0021](../adr/0021-the-tui-is-generated-from-the-registry.md), which is
+enforced by an AST scan asserting the TUI names no tool.
+
+The four lines of `EngineRouter` *construction* that `cli/execution.py` and
+`tui/runner.py` share are duplicated rather than imported: they are peers, and
+that is assembling the object which does the routing, not routing.
 
 **Privileges nothing else has**
 
@@ -63,10 +80,62 @@ of `compress`, and the only question is whose machine it runs on.
 
 ---
 
+## Support — `pickers`
+
+**Status:** implemented (M7) — the two ADR 0005 parameter pickers.
+
+Not an interface, and placed below all of them deliberately: both the CLI and the
+TUI reach for it, and neither may import the other. It never prints (a caller
+passes an `announce` callback) and never exits, which is what lets it be listed
+in `tests/paths.py`'s `LIBRARY_PACKAGES` and covered by the no-direct-writes and
+no-sys-exit hygiene tests.
+
+**A picker returns parameters, never results.** It has no route to an output
+file — not by convention but because the layering makes an engine unreachable
+and the hygiene test makes a write impossible. See
+[ADR 0005](../adr/0005-gui-pickers.md) and
+[ADR 0019](../adr/0019-picker-package-and-rendering.md).
+
+**May import** — `tools` (read-only PDF geometry, via `tools/_pdf.py`), `core`,
+and the standard library.
+
+**May not import** — any interface, any `EngineStrategy`, the router, or
+`core.atomic`.
+
+---
+
+## Support — `runners`
+
+**Status:** implemented (M9) — `pipeline`, `batch`, `watch`.
+
+The other non-interface support package, placed for the same reason as
+`pickers`: composition over the tools is wanted by more than one front-end, and
+no interface may import another. It never prints — a caller passes a
+`ProgressSink` and an `on_outcome` callback — and never exits, so it is in
+`LIBRARY_PACKAGES` and covered by the same two hygiene tests.
+
+**One execution path.** A batch runs a pipeline over many inputs; a watch runs
+that same shape until it is cancelled. A bare `--tool` is a one-stage pipeline
+rather than a second route, so there is exactly one place that calls the router.
+
+**It reaches a tool only through the registry.** Unlike `pickers`, which reads
+`tools/_pdf.py` for page geometry, a runner names a tool by string and lets
+`EngineRouter` resolve it — so nothing here imports a tool, and adding tool #51
+costs the runners nothing.
+
+**May import** — `core`, and the standard library.
+
+**May not import** — `tools`, `cloud_client`, any interface, or any UI
+framework. The first of those is stricter than the layers contract and is
+enforced by a separate test; see
+[ADR 0023](../adr/0023-runners-are-a-package-below-the-interfaces.md).
+
+---
+
 ## Application — `tools`
 
-**Status:** `merge` and `ocr` exist as reference layouts — real `ToolSpec`,
-`Param` and validators; their `run()` bodies are stubs until Phase 6.
+**Status:** implemented — **nineteen tools, and all nineteen run.** `ocr` was
+the last skeleton and shipped at M8.
 
 One subpackage per operation, each self-registering. Adding tool #51 must not
 require editing a central file, and *listing* tools must not import their
@@ -96,11 +165,16 @@ cannot be driven by an HTTP server.
 
 **The dual-engine rule**
 
-Only five tools have a cloud engine — `ocr`, `compress`, `convert`, `pdfa`,
-`remove-bg` — because cloud exists to eliminate install pain and nothing else.
+Only a handful of tools have a cloud engine, because cloud exists to eliminate
+install pain and nothing else. Two do today — `compress` and `convert`, since
+M6, and `ocr` joined them at M8 — the tool the Cloud Engine's whole
+justification names. `pdfa` and `remove-bg` are named in
+[overview.md](overview.md#the-dual-engine-model)'s end-state table and do not
+exist.
+
 Everything pypdf-only sets `cloud = None`: uploading a document to perform a
 millisecond-long pure-Python operation is slower, less private, and needs a
-network. See [overview.md](overview.md#the-dual-engine-model).
+network.
 
 ---
 

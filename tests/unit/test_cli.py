@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from typer.testing import CliRunner
 
 from docmax import __version__
@@ -36,11 +37,64 @@ def test_help_lists_doctor() -> None:
 def test_bare_invocation_orients_the_user() -> None:
     """A bare invocation must never leave the user staring at nothing.
 
-    Today it prints help. In M7 it will launch the TUI instead — at which point
-    this test changes to assert the app starts, and the exit code becomes 0.
+    Since M7 it launches the TUI — but only where there is a person at a
+    terminal to use one. Under a test runner there is not, so it prints help,
+    which is the same behaviour a pipe, a CI step and a cron job get. Exit 0:
+    help is not a failure.
     """
     result = runner.invoke(app, [])
+    assert result.exit_code == 0
     assert "Usage" in plain(result.stdout)
+
+
+def test_a_bare_invocation_launches_the_tui_at_a_real_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the rule above, with the guards satisfied."""
+    import docmax.cli.main as main_module
+    from docmax.cli import interactive
+
+    launched: list[bool] = []
+    monkeypatch.setattr(interactive, "is_interactive", lambda: True)
+    monkeypatch.setattr(main_module, "_launch_tui", lambda: launched.append(True))
+    monkeypatch.setattr(main_module, "_tui_is_available", lambda: True)
+
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    assert launched == [True]
+
+
+def test_a_bare_invocation_never_launches_the_tui_under_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Textual app writes escape sequences to the stream ADR 0017 reserves
+    for one JSON object."""
+    import docmax.cli.main as main_module
+    from docmax.cli import interactive
+
+    launched: list[bool] = []
+    monkeypatch.setattr(interactive, "is_interactive", lambda: True)
+    monkeypatch.setattr(main_module, "_launch_tui", lambda: launched.append(True))
+    monkeypatch.setattr(main_module, "_tui_is_available", lambda: True)
+
+    result = runner.invoke(app, ["--json"])
+
+    assert result.exit_code == 0
+    assert launched == []
+    assert "Usage" in plain(result.stdout)
+
+
+def test_the_tui_command_refuses_a_non_interactive_terminal() -> None:
+    """Never a hang, never a screenful of escapes into a pipe."""
+    result = runner.invoke(app, ["tui"])
+    assert result.exit_code == 1
+    assert "Traceback" not in plain(result.stdout)
+
+
+def test_the_tui_command_refuses_json() -> None:
+    result = runner.invoke(app, ["--json", "tui"])
+    assert result.exit_code == 1
 
 
 def test_doctor_reports_without_mutating_anything() -> None:

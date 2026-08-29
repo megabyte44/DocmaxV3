@@ -1,80 +1,68 @@
 """The cloud engine for ``ocr``.
 
-The whole point of the tools layer sitting above ``cloud_client``: this module
-is where a tool decides *what* to send, and the client below it decides how. It
-holds no HTTP, no retry logic, and no knowledge of the wire format.
+Two lines of tool-specific behaviour, and the rest is ``tools/_cloud.py``: which
+tool name to send, and what to check about what comes back. Everything else --
+upload, poll, fetch, atomic write -- is the shared flow, so a fix to it fixes
+every cloud tool at once.
 
-What it must not do is decide *whether* to send. Consent is the router's
-business, checked before this strategy is ever constructed, and a test asserts
-no path reaches ``cloud_client`` without passing that check.
+This module was the *reference skeleton* the M6 strategies were written from,
+and it kept a hand-rolled ``OcrCloud`` class through five milestones because
+[ADR 0012](../../../docs/adr/0012-cloud-engines-are-compress-and-convert.md)
+deliberately held OCR back to M8. The class is gone now: keeping it would have
+meant a second implementation of the flow ``_cloud.py`` owns, in the one tool
+most likely to need the flow's fixes.
+
+## Why OCR is the case cloud exists for
+
+Ghostscript is one package. OCR is Tesseract, a language pack per language, and
+Poppler -- the single most painful install in the project, and the one
+``architecture/overview.md`` has used to justify the Cloud Engine since M0. The
+endpoint is a machine that already has all of it.
+
+## What is checked is what the local engine checks
+
+The same two validators, from the same module: no page added or dropped, and
+the result actually carries extractable text. A cloud OCR that came back with a
+blank text layer -- a wrong language pack on the server, a bad rasterisation --
+fails exactly where a local one would, and the destination is untouched either
+way.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from docmax.cloud_client import CloudClient, CloudConfig
-from docmax.core.models import Engine, ToolResult
+from docmax.tools._cloud import CloudEngine
+from docmax.tools._pdf import open_pdf, page_count
+from docmax.tools.ocr.validators import checks_for
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
-    from docmax.core.cancellation import CancellationToken
-    from docmax.core.models import DocumentRef, OutputTarget
-    from docmax.core.protocols import EngineStrategy, ProgressSink
+    from docmax.cloud_client import CloudClient
+    from docmax.core.models import DocumentRef
+    from docmax.core.protocols import EngineStrategy, Validator
 
 TOOL_NAME = "ocr"
 
 
-class OcrCloud:
-    """Post the document to an endpoint that already has Tesseract installed."""
+def validators_for(
+    docs: Sequence[DocumentRef],
+    params: Mapping[str, Any],
+) -> Sequence[Validator]:
+    """Check the returned document page for page, and for a real text layer.
 
-    def __init__(self, client: CloudClient | None = None) -> None:
-        self._client = client or CloudClient()
-
-    def is_available(self) -> bool:
-        """Configured, and offered by this endpoint.
-
-        Deliberately not a reachability check: availability is asked on every
-        routing decision, and a network round trip there would make every
-        command slower for the sake of a question the request itself answers.
-        """
-        return self._client.config.is_configured
-
-    def unavailable_reason(self) -> str | None:
-        if self.is_available():
-            return None
-        return "No API key is configured for the cloud endpoint."
-
-    def run(
-        self,
-        docs: Sequence[DocumentRef],
-        target: OutputTarget,
-        *,
-        progress: ProgressSink,
-        cancellation: CancellationToken,
-        **params: Any,
-    ) -> ToolResult:
-        """Upload, wait, and write the result. Lands in M6.
-
-        The remaining piece is the write: ``fetch_output`` returns bytes, and
-        they go to ``core/atomic.py`` along with this tool's validators — so a
-        cloud result is checked by the same code as a local one and lands under
-        the same crash-safety guarantee.
-        """
-        raise NotImplementedError
-
-    def _result(self, target: OutputTarget, *, duration_ms: int, version: str | None) -> ToolResult:
-        return ToolResult(
-            outputs=(target.destination,),
-            engine_used=Engine.CLOUD,
-            duration_ms=duration_ms,
-            engine_version=version,
-        )
+    The source is opened *here*, before anything is uploaded, so a file that is
+    not a readable PDF is refused without a round trip -- and so the expected
+    count comes from the user's own copy rather than from anything the endpoint
+    said about it.
+    """
+    return checks_for(page_count(open_pdf(docs[0])))
 
 
-def build(config: CloudConfig | None = None) -> EngineStrategy:
-    return OcrCloud(CloudClient(config))
+def build(client: CloudClient | None = None) -> EngineStrategy:
+    """Factory the registry calls. Every strategy module exposes exactly this."""
+    return CloudEngine(TOOL_NAME, validators=validators_for, client=client)
 
 
-__all__ = ["OcrCloud", "build"]
+__all__ = ["TOOL_NAME", "build", "validators_for"]

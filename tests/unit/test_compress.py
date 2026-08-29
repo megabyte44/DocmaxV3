@@ -155,9 +155,19 @@ def test_compress_is_discoverable() -> None:
     assert spec.default_suffix == ".pdf"
 
 
-def test_compress_has_no_cloud_engine_yet() -> None:
-    """It is one of the five that will get one — at M6, when the engine exists."""
-    assert not get_tool("compress").supports(Engine.CLOUD)
+def test_compress_has_both_engines() -> None:
+    """Since M6. Installing Ghostscript is exactly the pain cloud exists to remove.
+
+    Was `test_compress_has_no_cloud_engine_yet` until the engine existed. The
+    condition M3 set for declaring it has not been relaxed, only met: the
+    strategy loads and reports its own availability, which is asserted here
+    rather than taken on trust.
+    """
+    spec = get_tool("compress")
+
+    assert spec.supports(Engine.LOCAL)
+    assert spec.supports(Engine.CLOUD)
+    assert spec.load_strategy(Engine.CLOUD) is not None
 
 
 def test_the_router_loads_the_local_strategy() -> None:

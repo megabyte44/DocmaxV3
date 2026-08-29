@@ -44,8 +44,11 @@ make the ADR a justification rather than a decision.
       [ADR 0008](../adr/0008-consent-record.md) and implemented in Phase 3:
       app-owned `consent.json` beside the user-owned `config.toml`, scoped to
       `(tool, endpoint)` and a hand-bumped terms version, failing closed.
-- [ ] **Execution model.** Whether jobs are in-process or queued, and what that
-      means for cancellation crossing a process boundary.
+- [x] ~~**Execution model.**~~ Settled by
+      [ADR 0016](../adr/0016-jobs-run-in-process.md) at M6: the reference server
+      runs jobs in-process, synchronously, with an in-memory job store. The wire
+      contract already permits a queued implementation to answer `202` later
+      without a client change, which is what makes the decision reversible.
 - [ ] **Observability.** One approach to logging, and the mechanism that keeps
       cloud-api.md's "document contents are never logged" true rather than
       merely stated.
@@ -56,8 +59,10 @@ make the ADR a justification rather than a decision.
       links contributors to ADRs and architecture, but never explains how to run
       anything
 - [x] ~~`docs/implementation/core.md`~~ — written in Phase 2
-- [ ] `benchmarks/` — the README promises published benchmarks with real
-      hardware and methodology, and no numbers appear until they are measured
+- [ ] `benchmarks/` — **the harness landed at M6** and the methodology is
+      written down, but **no numbers have been measured**: the development
+      machine has neither Ghostscript nor Pandoc. Publishing needs a machine
+      with both, and CI deliberately does not publish.
 
 ### Environment
 
@@ -74,6 +79,15 @@ Worth doing, not blocking anything.
       `phase-2/core-contracts` and `docs/architecture-and-planning` are all
       superseded by this reconciliation. Deleting them is a separate
       decision; none has been touched.
+- [ ] **Concurrency for batch.** Deliberately not built at M9 —
+      [ADR 0025](../adr/0025-batch-mirrors-names-into-an-output-directory.md)
+      records why, and names the three contracts that would have to change:
+      `CancellationToken` across a process boundary, `ProgressSink` describing N
+      simultaneous items, and `ConsoleProgress`'s single live region. Worth doing
+      only against a measured need; a 200-file OCR batch is the obvious one.
+- [ ] **Recursive folder watch.** M9 watches one directory, non-recursively. A
+      recursive watch turns ADR 0026's containment rule into a subtree question
+      and should be decided with that in mind rather than added.
 - [ ] **Python 3.14 in the CI matrix.** The development machine runs 3.14; CI
       tests 3.11–3.13. The gap means local runs exercise a version CI does not.
 - [ ] **A `conftest.py` with shared fixtures.** Currently every test builds its
@@ -92,14 +106,40 @@ Worth doing, not blocking anything.
 Decided in principle, not scheduled. Mostly already on the
 [roadmap](roadmap.md) — listed here where they carry an open question.
 
-- [ ] **Pipelines and resumable batch** (M9). Needs the cancellation and progress
-      contracts to survive crossing a process boundary.
-- [ ] **Folder watch** (M9). v2's version fed on its own output; the replacement
-      needs a rule about outputs written into a watched directory.
+- [x] ~~**Pipelines and batch** (M9).~~ Delivered 2026-08-28. The open question
+      resolved itself: batch is **serial**, so the cancellation and progress
+      contracts never cross a process boundary and needed no change. See
+      [ADR 0025](../adr/0025-batch-mirrors-names-into-an-output-directory.md),
+      which also records what revisiting that would cost.
+- [x] ~~**Folder watch** (M9).~~ Delivered 2026-08-28. The rule the backlog
+      asked for is containment in both directions — the output directory may not
+      be inside the watched tree, nor the watched tree inside it.
+      [ADR 0026](../adr/0026-the-watcher-polls-and-never-watches-its-own-output.md).
+- [ ] **A resume journal, and `--resume`** (deferred from M9). The roadmap row
+      says "resumable batch" and no journal exists. It needs a decided location,
+      a schema version, and a defined behaviour on a corrupt or future-version
+      record — the treatment [ADR 0008](../adr/0008-consent-record.md) gave the
+      consent record. `core/errors.py`'s `CancelledError` docstring promises it,
+      and is currently ahead of the code. The watcher's in-memory processed-set
+      is the same gap seen from the other side.
 - [ ] **Third-party tool plugins.** The entry-point group exists in
-      `branding.py`; the trust model for third-party code does not.
-- [ ] **`--json` everywhere** (M6). `ErrorCode` is already described as public
-      API, so this partly exists as a commitment already.
+      `branding.py`; the trust model for third-party code does not. M10 raises
+      the stakes: a third-party tool would appear over MCP automatically, where
+      an agent could call it.
+- [ ] **MCP progress notifications.** M10 reports none, so a long call is silent
+      until it returns. Needs the request's progress token plumbed through and a
+      `ProgressSink` that emits async notifications from a worker thread — the
+      one place that interface must think about the async boundary. See
+      [ADR 0030](../adr/0030-mcp-cancellation-maps-onto-the-cancellation-token.md).
+- [ ] **Reconcile `main` with the feature line.** `docs/plans/` and `CLAUDE.md`
+      exist only on `main`, whose merge-base with this line is `4a5d74a` (M3).
+      `main` also carries `3ea4d3e fix(core): compare output against inputs by
+      identity, not by path string`, a `models.py` fix this line does not have.
+      M10's own specification was found on `main` and nowhere else, which is the
+      clearest sign yet that the divergence costs something.
+- [x] ~~**`--json` everywhere**~~ — delivered at M6.
+      [ADR 0017](../adr/0017-json-output-contract.md) and
+      [implementation/json.md](../implementation/json.md).
 - [ ] **`docmax setup`** (M3) — idempotent, `--dry-run`, verifies afterwards
       rather than assuming success.
 
@@ -109,8 +149,11 @@ Decided in principle, not scheduled. Mostly already on the
 
 Ideas. No commitment, and none of these should be treated as planned.
 
-- [ ] A local HTTP mode for the TUI's visual pickers — see
-      [ADR 0005](../adr/0005-gui-pickers.md).
+- [x] ~~A local HTTP mode for the TUI's visual pickers.~~ This was never
+      exploratory — [ADR 0005](../adr/0005-gui-pickers.md) had already accepted
+      localhost HTTP as *the* implementation, and this line contradicted it.
+      Delivered at M7; see [ADR 0019](../adr/0019-picker-package-and-rendering.md)
+      for where the package lives and how a page is rendered.
 - [ ] Content-addressed caching of expensive operations (OCR, compression).
 - [ ] Streaming operations for documents larger than memory.
 - [ ] A `docmax explain` that prints which engine would run and why, without

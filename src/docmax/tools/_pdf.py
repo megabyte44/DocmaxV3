@@ -1,9 +1,14 @@
 """Opening and saving PDFs, the same way in every tool.
 
-Eight tools open a PDF and map the same three failures onto the same three typed
-errors. Written once here, they cannot drift into eight slightly different
-messages for the same problem — which is the difference between a user learning
-one behaviour and learning eight.
+Every tool here opens a PDF and maps the same failures onto the same typed
+errors. Written once, they cannot drift into a dozen slightly different messages
+for the same problem — which is the difference between a user learning one
+behaviour and learning a dozen.
+
+Two entry points, because there are two situations. :func:`open_pdf` refuses an
+encrypted document, which is right for every tool that wants to *do* something
+to a file. :func:`open_encrypted_pdf` takes a password, for the two tools whose
+subject is the lock itself.
 
 Private to ``tools``, like ``_pagespec``: no package of its own, so the
 registry's directory walk never sees it.
@@ -18,9 +23,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from docmax.core.branding import DIST_NAME
 from docmax.core.errors import (
     CorruptDocumentError,
     EncryptedDocumentError,
+    LocalDependencyMissingError,
     UnsupportedFormatError,
 )
 
@@ -35,6 +42,19 @@ if TYPE_CHECKING:
 #: The only extension these tools read. A tool that grows a second one overrides
 #: this rather than widening it for everybody.
 PDF_SUFFIX = ".pdf"
+
+#: The package pypdf needs in order to read or write anything but RC4, the extra
+#: that carries it, and the one sentence that says how to get it.
+#:
+#: Here rather than in ``protect`` because both halves of the encryption story
+#: hit it -- ``open_encrypted_pdf`` below when *reading* an AES file, and
+#: ``protect`` when writing one -- and a user must not meet two different
+#: install lines for one missing package. Built from ``DIST_NAME`` because
+#: ``core/branding.py`` is the only module allowed to spell the brand out;
+#: ``tests/hygiene/test_branding.py`` enforces it.
+CRYPTO_DEPENDENCY = "cryptography"
+CRYPTO_EXTRA = "crypto"
+CRYPTO_INSTALL_HINT = f'Install it with: pip install "{DIST_NAME}[{CRYPTO_EXTRA}]"'
 
 
 def require_pdf(document: DocumentRef) -> None:
@@ -82,6 +102,81 @@ def open_pdf(document: DocumentRef) -> PdfReader:
     return reader
 
 
+def open_encrypted_pdf(
+    document: DocumentRef,
+    password: str | None = None,
+) -> tuple[PdfReader, str | None]:
+    """Open an input that may be encrypted, using ``password`` when it is.
+
+    The counterpart to :func:`open_pdf`, which refuses an encrypted file
+    outright — correctly, because for `rotate` or `merge` a locked document is
+    something the user must unlock first. ``unlock`` and ``permissions`` are the
+    two tools for which a locked document is the *subject*, so they need a way
+    in, and they must both find the same behaviour behind the same errors.
+
+    Returns the reader and how it opened: ``None`` when the file was not
+    encrypted at all, otherwise ``"user"`` or ``"owner"`` naming which password
+    matched. That distinction is not cosmetic — a PDF's permissions only
+    restrict the holder of the *user* password, so a caller reporting them needs
+    to know which one it holds.
+
+    A wrong password and a missing one are both
+    :class:`EncryptedDocumentError`, with different messages: they need
+    different next steps, and neither is a corrupt file.
+    """
+    from pypdf import PasswordType, PdfReader
+    from pypdf.errors import DependencyError, PyPdfError
+
+    require_pdf(document)
+
+    try:
+        reader = PdfReader(str(document.path))
+        encrypted = bool(reader.is_encrypted)
+    except (PyPdfError, OSError, ValueError) as exc:
+        raise CorruptDocumentError(
+            f"{document.path.name} could not be read as a PDF: {exc}",
+            context={"path": str(document.path)},
+        ) from exc
+
+    if not encrypted:
+        return reader, None
+
+    if password is None:
+        raise EncryptedDocumentError(
+            f"{document.path.name} is password-protected.",
+            remedy="Supply the password with --password.",
+            context={"path": str(document.path)},
+        )
+
+    try:
+        outcome = reader.decrypt(password)
+    except DependencyError as exc:
+        # AES-encrypted, and `cryptography` is not installed. A missing package
+        # is not a bad password, and telling the user to check their password
+        # would send them somewhere there is nothing to find.
+        raise LocalDependencyMissingError(
+            f"{document.path.name} uses an encryption algorithm that needs "
+            f"the {CRYPTO_DEPENDENCY!r} package: {exc}",
+            dependency=CRYPTO_DEPENDENCY,
+            install_hint=CRYPTO_INSTALL_HINT,
+            context={"path": str(document.path)},
+        ) from exc
+    except (PyPdfError, OSError, ValueError) as exc:
+        raise CorruptDocumentError(
+            f"The encryption in {document.path.name} could not be read: {exc}",
+            context={"path": str(document.path)},
+        ) from exc
+
+    if outcome == PasswordType.NOT_DECRYPTED:
+        raise EncryptedDocumentError(
+            f"That password does not open {document.path.name}.",
+            remedy="Check the password. Both the user and the owner password work here.",
+            context={"path": str(document.path)},
+        )
+
+    return reader, "owner" if outcome == PasswordType.OWNER_PASSWORD else "user"
+
+
 def page_count(reader: PdfReader) -> int:
     """How many pages, translating a late parse failure into a typed error.
 
@@ -96,6 +191,32 @@ def page_count(reader: PdfReader) -> int:
     except (PyPdfError, OSError, ValueError) as exc:
         raise CorruptDocumentError(
             f"The page tree could not be read: {exc}",
+        ) from exc
+
+
+def page_geometry(reader: PdfReader, index: int = 0) -> tuple[float, float]:
+    """The width and height of one page, in points, translating a late failure.
+
+    Here rather than in ``crop`` because two callers need it and neither should
+    learn pypdf's spelling of it: the tool, which validates a box against the
+    media it is about to replace, and the box picker, which has to draw a page
+    of the right shape before the user can choose anything on it.
+
+    Keeping it here is also what lets a picker satisfy ADR 0005's rule that it
+    never imports an engine — it asks this module for a rectangle, exactly as
+    the tools do, and learns nothing else about the document.
+
+    Like :func:`page_count`, this walks the page tree, which is where a lazily
+    parsed file finally fails.
+    """
+    from pypdf.errors import PyPdfError
+
+    try:
+        box = reader.pages[index].mediabox
+        return float(box.width), float(box.height)
+    except (PyPdfError, OSError, ValueError, IndexError) as exc:
+        raise CorruptDocumentError(
+            f"The dimensions of page {index + 1} could not be read: {exc}",
         ) from exc
 
 
@@ -130,4 +251,16 @@ def metadata_of(reader: PdfReader) -> dict[str, str]:
     return {str(key): str(value) for key, value in raw.items() if value is not None}
 
 
-__all__ = ["PDF_SUFFIX", "metadata_of", "open_pdf", "page_count", "require_pdf", "save"]
+__all__ = [
+    "CRYPTO_DEPENDENCY",
+    "CRYPTO_EXTRA",
+    "CRYPTO_INSTALL_HINT",
+    "PDF_SUFFIX",
+    "metadata_of",
+    "open_encrypted_pdf",
+    "open_pdf",
+    "page_count",
+    "page_geometry",
+    "require_pdf",
+    "save",
+]

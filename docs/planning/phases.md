@@ -312,13 +312,151 @@ external-package rule needs no layer behind it.) See
 
 ---
 
-## Phase 9 — TUI (M7) · Phase 10 — MCP server (M10)
+## Phase 9 — TUI (M7)
 
-**Status** `not started`.
+**Status** `complete` — 2026-08-28. Milestone M7.
 
-Both are additional drivers of the same core. Neither may import another
-interface. If either requires a change below the interface layer, that is a
-signal the core contracts are wrong — treat it as a finding, not a workaround.
+**Delivered** `docmax.tui` (app, generated forms, router bridge, catalog) ·
+`docmax.pickers` (the two ADR 0005 pickers) · the `crop` tool and its `--box`
+flag · `--interactive` on `crop` and `reorder` · `docmax tui` and the
+bare-invocation guards · ADRs 0019–0021 · two new import-linter layers.
+
+**It required no change below the interface layer.** That was this phase's own
+test of the core contracts, and they passed: `ProgressSink` took a Textual
+widget unmodified, `CancellationToken` took a keypress, and `ToolSpec`/`Param`
+generated eighteen forms with no per-tool code. `core/`, `registry.py` and
+`router.py` are untouched by this milestone.
+
+**One finding, reported rather than worked around.** `ToolSpec` cannot say
+"declared but not implemented", so a registry-driven tool list would offer `ocr`
+and fail with a wrapped `NotImplementedError`. The TUI names that one exception
+in `tui/catalog.py` with a test holding it, and the Core change is deferred — it
+is the fourth instance of the same `ToolSpec` gap
+[current-status.md](current-status.md) already says should be decided together.
+See [ADR 0021](../adr/0021-the-tui-is-generated-from-the-registry.md).
+
+**Two decisions changed enforced contracts**, so both were written before the
+code stayed: [ADR 0019](../adr/0019-picker-package-and-rendering.md) placed
+`pickers` as its own layer and settled how a page is rendered without vendoring
+pdf.js; [ADR 0020](../adr/0020-tui-entry-point.md) settled the single narrow
+import that lets the CLI start the TUI, and the three guards on a bare `docmax`.
+
+**Definition of done**
+- [x] `docmax tui` runs; a bare `docmax` opens it only at a real terminal
+- [x] no `textual` → a typed error naming the install command, never a traceback
+- [x] every screen generated from the registry; no per-tool code, asserted
+- [x] every run goes through `EngineRouter`; no routing in the interface
+- [x] cancellation leaves the destination untouched
+- [x] pickers return parameters, write nothing, and have headless equivalents
+- [x] `--json` and interactive sessions are mutually exclusive, both directions
+- [x] `.importlinter` carries the two new layers; 5 contracts kept
+- [ ] **CI matrix** — Windows / CPython 3.14 locally only, as for every phase
+      since Phase 2
+
+---
+
+## M9 — pipelines, batch and folder watch
+
+**Status** `complete` — 2026-08-28. Milestone M9. No phase number of its own, as
+for M4, M5 and M8.
+
+**Delivered** `docmax.runners` (`pipeline`, `batch`, `watch`) · the `pipeline`,
+`batch` and `watch` commands · a sixth import-linter layer · ADRs 0023–0026.
+
+**It required no change below the interface layer, and none inside it either.**
+`core/`, `registry.py` and `router.py` are untouched by this milestone — the same
+claim M7 made and the second time the core contracts have been tested by a
+feature that had every reason to bend them. `EngineRouter.run` took a composed
+caller unmodified, `OutputTarget.resolve` guarded every intermediate destination
+as well as every final one, and `CancellationToken` stopped a batch between items
+and a watch between ticks with no new mechanism.
+
+**Two contracts wanted something `ToolSpec` cannot say**, and both were answered
+the way [ADR 0021](../adr/0021-the-tui-is-generated-from-the-registry.md)
+answered the same seam at M7: a frozenset in the consumer, held by a test, and no
+Core change. `NOT_A_MIDDLE_STAGE` is the fifth appearance of that seam and
+`SUFFIX_FROM_PARAMS` is the third of the three
+[current-status.md](current-status.md) already says should be decided together.
+This is now the strongest argument yet for deciding them.
+
+**One row of the milestone was not delivered.** The roadmap says "resumable
+batch"; `--resume` does not exist, and was deferred rather than invented — a
+journal is a persistent app-owned format and deserves ADR 0008's treatment.
+See [roadmap.md](roadmap.md#what-m9-did-not-deliver).
+
+**Definition of done**
+- [x] a pipeline composes tools without duplicating any tool's implementation
+- [x] every stage goes through `EngineRouter`; no runner imports a tool
+- [x] only the final stage writes a destination, and it goes through
+      `core/atomic.py`; a failed or cancelled run leaves it untouched
+- [x] batch refuses a plan that could write over an input, before any work
+- [x] one failed document does not end a batch, and the typed error survives
+- [x] the watcher cannot write into the folder it watches, in either direction
+- [x] polling and settling use the standard library; no new dependency
+- [x] `--json` remains one object on stdout, for all three commands
+- [x] `.importlinter` carries the new layer; 5 contracts kept
+- [ ] **CI matrix** — Windows / CPython 3.14 locally only, as for every phase
+      since Phase 2
+
+---
+
+## Phase 10 — MCP server (M10)
+
+**Status** `complete` — 2026-08-29. Milestone M10.
+
+**Delivered** `docmax.mcp` (`schema`, `policy`, `server`) · the `docmax mcp`
+command · the `mcp` extra (`mcp>=2.1,<3`) · a sixth interface layer entry and its
+independence-contract membership · ADRs 0027–0030.
+
+**It required no change below the interface layer**, which was this phase's own
+stated test:
+
+> If it requires a change below the interface layer, that is a signal the core
+> contracts are wrong — treat it as a finding, not a workaround.
+
+`core/`, `registry.py` and `router.py` are untouched. `iter_tools()` supplied the
+whole tool surface, `Param.type_`'s closed set supplied the JSON Schema mapping
+in four lines, `EngineRouter.run` took a protocol caller unmodified, and
+`CancellationToken` absorbed the protocol's cancellation without a second
+mechanism. **Three interfaces in a row — M7, M9, M10 — have now tested the core
+contracts and none has needed one changed.**
+
+**Two things were treated as findings rather than workarounds**, as this phase
+instructed:
+
+- **`input_suffixes`.** `docs/plans/05` assumes the field; `ToolSpec` does not
+  have it. Not added — it would be a *fourth* seam beside the three
+  [current-status.md](current-status.md) says should be decided together. The
+  schema says "a path" instead. [ADR 0028](../adr/0028-the-mcp-tool-surface-is-the-registry.md).
+- **An MCP `run_pipeline`.** Proposed by plan 05 and anticipated by ADR 0023, and
+  impossible without a hand-written tool list, which ADR 0021 forbids. The
+  registry rule won and the contradiction is recorded with a test holding the
+  absence.
+
+**One genuinely new piece of design**, and it is not a Core change: the policy
+boundary. An MCP client is a program acting on someone's behalf, so reads and
+writes are confined to `--root`, cloud is off unless asked for, and consent is
+read but never written. [ADR 0029](../adr/0029-the-mcp-policy-boundary.md)
+records why it lives at the interface rather than in `OutputTarget`.
+
+**Definition of done**
+- [x] `docmax mcp` serves every registered tool over stdio, generated from the
+      registry, with no tool named anywhere in the package
+- [x] a real client completes the handshake, lists tools and runs one end to end
+      — asserted over an actual protocol session, not by calling handlers
+- [x] reads and writes outside `--root` are refused before execution, including
+      `..`, symlinks and lookalike sibling names
+- [x] cloud engines are unreachable without `--allow-cloud`, and `--allow-cloud`
+      cannot clear a configured `offline`
+- [x] consent is never granted by the server
+- [x] an existing destination is never overwritten; `force` is not exposed
+- [x] cancellation reaches the existing `CancellationToken` and leaves no partial
+      output
+- [x] no traceback and no credential reaches a client
+- [x] `lint-imports` covers `docmax.mcp`; 5 contracts kept
+- [x] the SDK is optional, and `docmax mcp --help` works without it
+- [ ] **CI matrix** — Windows / CPython 3.14 locally only, as for every phase
+      since Phase 2
 
 ---
 

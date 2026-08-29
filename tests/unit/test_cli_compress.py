@@ -204,11 +204,20 @@ def test_a_dry_run_writes_nothing(
     assert not out.exists()
 
 
-def test_a_cloud_engine_is_refused(
+def test_an_unconfigured_cloud_engine_is_refused(
     real_router: None, source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Compress gets a cloud engine at M6; declaring it sooner would offer a lie."""
+    """`--engine cloud` with no API key fails, and says which one is missing.
+
+    Was `test_a_cloud_engine_is_refused`, which asserted compress had no cloud
+    engine at all. It has one since M6, so the refusal moved rather than
+    disappearing: `engine.not_supported` ("there is no such engine") became
+    `engine.none_available` ("there is, and it is not set up"). The second is
+    the more useful failure, and it must still be a failure — this is the test
+    that would catch a run silently proceeding without credentials.
+    """
     install_fake_gs(monkeypatch, tmp_path, COPIES)
+    monkeypatch.delenv("DOCMAX_API_KEY", raising=False)
 
     result = runner.invoke(
         app,
@@ -216,7 +225,9 @@ def test_a_cloud_engine_is_refused(
     )
 
     assert result.exit_code == EXIT_FAILURE
-    assert "engine.not_supported" in shown(result)
+    assert "engine.none_available" in shown(result)
+    assert "API key" in shown(result)
+    assert not (tmp_path / "out.pdf").exists()
 
 
 # ---------------------------------------------------------------------------

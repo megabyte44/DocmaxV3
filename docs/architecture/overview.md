@@ -8,9 +8,11 @@ make specific past failures unreachable.
 
 ```
 ┌──────────────────────────────────────────┐
-│  cli/          tui/  (M7)                │  may print, may exit
+│  cli/          tui/                       │  may print, may exit
 ├──────────────────────────────────────────┤
 │  server/       the Cloud Engine, hosted  │  not in the wheel, nothing imports it
+├──────────────────────────────────────────┤
+│  pickers/      ADR 0005 parameter pickers │  writes nothing, exits nothing
 ├──────────────────────────────────────────┤
 │  tools/        one package per operation  │  self-registering, lazily loaded
 ├──────────────────────────────────────────┤
@@ -86,18 +88,32 @@ fifty OpenCV imports. See [ADR 0002](../adr/0002-registry-mechanism.md).
 `ToolResult` is engine-agnostic. The UI layer never knows or cares which one
 ran; it reads `result.engine_used` only to display a badge.
 
-**Only 5 tools have a cloud engine**, because cloud exists to eliminate install
-pain and nothing else:
+**Only a handful of tools have a cloud engine**, because cloud exists to
+eliminate install pain and nothing else:
 
-| Tool | Local install it lets you skip |
-|---|---|
-| `ocr` | Tesseract + language packs + OpenCV |
-| `compress` | Ghostscript |
-| `convert` | Pandoc + a LaTeX distribution |
-| `pdfa` | Ghostscript |
-| `remove-bg` | an ONNX model download |
+| Tool | Local install it lets you skip | Status |
+|---|---|---|
+| `compress` | Ghostscript | ✅ M6 |
+| `convert` | Pandoc | ✅ M6 |
+| `ocr` | Tesseract + language packs + Poppler | ✅ M8 |
+| `pdfa` | Ghostscript | not built |
+| `remove-bg` | an ONNX model download | not built |
 
-Everything pypdf-only — `merge`, `split`, `rotate`, `sanitize`, `get-info` — sets
+**The last two rows describe an end state, not the present.** `pdfa` and
+`remove-bg` do not exist as tools at all and are on no roadmap row. `ocr`
+joined the working set at M8 — OpenCV is no longer among its requirements
+except for `--deskew`, see
+[ADR 0022](../adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md).
+[ADR 0012](../adr/0012-cloud-engines-are-compress-and-convert.md) records why M6
+shipped two rather than five — a cloud engine for a tool with no local engine is
+exactly what the roadmap's ordering forbids.
+
+`convert`'s row once read "Pandoc + a LaTeX distribution". It does not produce
+PDF on either engine ([ADR 0011](../adr/0011-convert-is-pandoc-only.md)), so
+there is no LaTeX distribution to skip.
+
+Everything pypdf-only — `merge`, `split`, `rotate`, `sanitize`, `watermark`,
+`stamp`, `protect`, `unlock`, `get-info` — sets
 `cloud = None`. Uploading a document to perform a millisecond-long pure-Python
 operation is slower, less private, and needs a network. It would be architecture
 for its own sake.
@@ -166,3 +182,7 @@ See [`core/errors.py`](../../src/docmax/core/errors.py).
 - [ADR 0003 — Atomic writes and `OutputTarget`](../adr/0003-atomic-writes.md)
 - [ADR 0004 — Open-core boundary](../adr/0004-open-core-boundary.md)
 - [ADR 0005 — GUI pickers over localhost](../adr/0005-gui-pickers.md)
+- [ADR 0019 — Where pickers live, and how they render](../adr/0019-picker-package-and-rendering.md)
+- [ADR 0020 — The TUI entry point](../adr/0020-tui-entry-point.md)
+- [ADR 0021 — The TUI is generated from `ToolSpec`](../adr/0021-the-tui-is-generated-from-the-registry.md)
+- [ADR 0022 — OCR runs Tesseract directly](../adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md)

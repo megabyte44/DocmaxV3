@@ -22,6 +22,27 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0007](0007-m1-foundations-reconciliation.md) | `m1-foundations` is a source branch, absorbed phase by phase | **Superseded by 0009** |
 | [0008](0008-consent-record.md) | Consent is machine-local state, scoped to an endpoint and a terms version | Accepted |
 | [0009](0009-main-is-the-base.md) | `main` is the base; ADR 0007 was overtaken by events | Accepted |
+| [0010](0010-format-vocabulary.md) | Formats are declared once, and `docmax formats` reads the declaration | Accepted |
+| [0011](0011-convert-is-pandoc-only.md) | `convert` is Pandoc-only at M5: no PDF in, no PDF out, no derived output path | Accepted |
+| [0012](0012-cloud-engines-are-compress-and-convert.md) | M6 ships two cloud engines, and a cloud run never falls back to local | Accepted |
+| [0013](0013-cloud-config-comes-from-the-resolved-config.md) | A cloud strategy takes its endpoint from the resolved configuration | Accepted |
+| [0014](0014-api-key-storage.md) | The API key lives in the config file in plaintext, and DocMax says so | Accepted |
+| [0015](0015-cancellation-crosses-the-network.md) | Cancellation reaches a cloud job, and a cloud job has a deadline | Accepted |
+| [0016](0016-jobs-run-in-process.md) | Cloud jobs run in the server process, and the job store is in memory | Accepted |
+| [0017](0017-json-output-contract.md) | `--json` is a global option and stdout carries only the envelope | Accepted |
+| [0018](0018-capabilities-mean-runnable.md) | `/v1/capabilities` lists what this deployment can run, not what this build knows about | Accepted |
+| [0019](0019-picker-package-and-rendering.md) | Pickers are their own package below the interfaces, and render with the browser's own PDF viewer | Accepted |
+| [0020](0020-tui-entry-point.md) | The CLI launches the TUI; a bare `docmax` opens it only where there is someone to use it | Accepted |
+| [0021](0021-the-tui-is-generated-from-the-registry.md) | The TUI is generated from `ToolSpec` and names no tool | Accepted |
+| [0022](0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md) | OCR shells out to Tesseract directly, and leaves pages that already have text alone | Accepted |
+| [0023](0023-runners-are-a-package-below-the-interfaces.md) | Pipelines, batch and watch live in one package below the interfaces | Accepted |
+| [0024](0024-a-pipeline-is-a-toml-file.md) | A pipeline is a TOML file, and only its last stage writes a destination | Accepted |
+| [0025](0025-batch-mirrors-names-into-an-output-directory.md) | Batch mirrors input names into an output directory it may not share with its inputs | Accepted |
+| [0026](0026-the-watcher-polls-and-never-watches-its-own-output.md) | The watcher polls, waits for a file to settle, and may not write where it watches | Accepted |
+| [0027](0027-mcp-is-an-optional-interface-behind-an-extra.md) | MCP is an optional interface, behind the `mcp` extra, started by the CLI | Accepted |
+| [0028](0028-the-mcp-tool-surface-is-the-registry.md) | The MCP tool surface is the registry, and the schema says only what `ToolSpec` can | Accepted |
+| [0029](0029-the-mcp-policy-boundary.md) | MCP runs inside a policy boundary: roots, offline by default, and consent it may not grant | Accepted |
+| [0030](0030-mcp-cancellation-maps-onto-the-cancellation-token.md) | A cancelled MCP request cancels the DocMax run, through the existing token | Accepted |
 
 ## When to write one
 

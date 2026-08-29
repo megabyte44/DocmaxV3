@@ -48,9 +48,18 @@ dependencies = [
 [project.optional-dependencies]
 # Each extra maps to the local engine of a specific tool group.
 # `docmax setup` installs the external *binaries*; these are the Python bindings.
+# OpenCV is here for one thing: straightening a scanned page before it is
+# recognised. Recognition itself is the `tesseract` binary and rasterisation is
+# Poppler's `pdftoppm`, both run through `tools/_binaries.py` -- which is the
+# only place in this project that guarantees a subprocess timeout and a kill
+# switch wired to the cancellation token.
+#
+# `pytesseract` and `pdf2image` used to be here. They are thin subprocess
+# wrappers around those same two binaries, and using them would have put the
+# OCR subprocess outside `_binaries.run` -- on the exact axis v2 failed, where
+# no subprocess had a timeout at all. See ADR 0022; `docmax ocr --no-deskew`
+# now needs no Python extra whatsoever.
 ocr = [
-    "pytesseract>=0.3.10",
-    "pdf2image>=1.17.0",
     "opencv-python-headless>=4.9.0",
     "numpy>=1.26.0",
 ]
@@ -63,8 +72,22 @@ images = [
     "Pillow>=10.3.0",
     "img2pdf>=0.5.0",
 ]
+# Textual moves its own API faster than this project moves. The floor was
+# 0.60 and was never exercised: Select's "nothing chosen" sentinel alone has
+# been renamed since, and 0.60-era Textual has no `push_screen_wait`. M7 was
+# built and verified against 8.2.8; 1.0 is the honest floor for the APIs the
+# TUI actually uses, and `src/docmax/tui/app.py` avoids the ones known to have
+# churned. See docs/planning/current-status.md for what was verified.
 tui = [
-    "textual>=0.60.0",
+    "textual>=1.0.0",
+]
+# What pypdf needs in order to write anything stronger than RC4. Small, pure
+# wheels on every supported platform -- but still an extra rather than a base
+# dependency, because it is a compiled package and non-negotiable #3 says the
+# base install stays pure Python. `protect` names it in the error when the
+# default algorithm needs it and it is absent.
+crypto = [
+    "cryptography>=42.0",
 ]
 # Dependencies for the reference API server — the half a self-hoster deploys.
 # Not in `all`: installing DocMax should never install a web framework by
@@ -77,6 +100,21 @@ server = [
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
 ]
+# The MCP SDK, for `docmax mcp`. An extra rather than a base dependency: it
+# brings jsonschema, sse-starlette, httpx2, opentelemetry and (on Windows)
+# pywin32, and non-negotiable #3 says `pip install DocmaxV3` gets a terminal
+# tool and nothing else. Unlike the `server` extra, the *code* here ships in the
+# wheel -- `docmax mcp` is a command a user runs on their own machine, named in
+# their MCP client's configuration, so gating only the dependency is the whole
+# install story. See ADR 0027.
+#
+# Bounded below at 2.1 and above at 3: the 1.x -> 2.x change renamed and
+# restructured the server API this depends on (handlers are constructor
+# callbacks, not decorators), and there is no reason to assume 3.x will not do
+# the same. Verified against 2.1.1; see docs/implementation/mcp.md.
+mcp = [
+    "mcp>=2.1,<3",
+]
 # v2 shipped a `full` extra that silently omitted opencv, which broke the entire
 # OCR path for anyone who installed it. Self-referencing extras make that class
 # of mistake impossible — there is only one list.
@@ -86,7 +124,7 @@ server = [
 # resolve to that external package instead of self-referencing, shadowing the
 # local editable install with v2's incompatible module layout.
 all = [
-    "DocmaxV3[ocr,tables,images,tui]",
+    "DocmaxV3[ocr,tables,images,tui,crypto]",
 ]
 dev = [
     "pytest>=8.2.0",
@@ -158,12 +196,17 @@ ignore = [
 "tests/**" = ["S", "T20", "ARG", "PLR2004"]
 # The CLI layer is the one place that legitimately writes to stdout.
 "src/docmax/cli/**" = ["T20"]
+# The benchmark runner is a script whose entire output is a report to a
+# terminal. It is not library code and is not in the wheel.
+"benchmarks/**" = ["T20"]
 # FastAPI's dependency-injection idiom is a call in an argument default, which
 # B008 exists to catch. It is correct everywhere else.
 "src/docmax/server/**" = ["B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["docmax"]
+# `benchmarks` is first-party too: not shipped, but ours, and grouping it with
+# third-party packages would misfile it in every module that imports it.
+known-first-party = ["docmax", "benchmarks"]
 
 # ============================================================================
 # Mypy — strict. There is no legacy code to grandfather in.
@@ -175,19 +218,39 @@ warn_unreachable = true
 warn_no_return = true
 show_error_codes = true
 pretty = true
-files = ["src", "tests"]
+# `benchmarks` is included deliberately: it is not shipped, but it imports the
+# real router and the real client, and an unchecked script that reaches into
+# them is exactly where a stale call signature would hide.
+files = ["src", "tests", "benchmarks"]
 
 # Third-party packages without type stubs. Kept as a short, explicit list so
 # that adding one is a visible decision rather than a blanket ignore.
 [[tool.mypy.overrides]]
 module = [
-    "pytesseract.*",
-    "pdf2image.*",
     "cv2.*",
     "img2pdf.*",
     "pdfplumber.*",
     "rembg.*",
 ]
+ignore_missing_imports = true
+
+# OpenCV and the numpy it drags in, from the `ocr` extra.
+#
+# This project has always declared cv2 untyped in the list above, but modern
+# opencv-python ships a `py.typed`, so mypy followed it anyway — into numpy's
+# stubs, which use PEP 695 `type` statements that mypy rejects while
+# `python_version` is 3.11. The effect was that merely *installing* the `ocr`
+# extra failed the lint run for a contributor and not for CI, which installs
+# `[dev]` alone.
+#
+# Skipped rather than pinned, and `follow_imports_for_stubs` is what makes the
+# skip reach a `.pyi` at all. Nothing is lost: this project imports no numpy
+# symbol (`_deskew.py` uses the builtin `round`) and treats cv2 as untyped by
+# declaration.
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 ignore_missing_imports = true
 
 # The server extra is not part of `dev`: the lint job type-checks the terminal

@@ -2,9 +2,37 @@
 
 The endpoint is configuration, not a constant, because a self-hosted deployment
 is a first-class case: point this elsewhere and everything above it is
-identical. That is also why the TLS rule is enforced here rather than assumed —
+identical. That is also why the TLS rule is enforced here rather than assumed --
 a user-supplied endpoint is the one place a document could be sent over
 plaintext by accident.
+
+## Two constructors, and which is which
+
+:meth:`CloudConfig.from_env` reads the environment alone. It is for a library
+caller embedding this client without DocMax's config file, and for tests.
+
+:meth:`CloudConfig.from_core` projects an already-resolved ``core.config.Config``
+onto this type, and is what a *tool strategy* uses. It parses nothing: the
+precedence chain -- defaults, then ``config.toml``, then ``DOCMAX_*`` -- lives in
+``core/config.py`` and stays there, so there is one implementation of it rather
+than two that disagree about which layer wins.
+
+That split is [ADR 0013](../../../docs/adr/0013-cloud-config-comes-from-the-resolved-config.md),
+written because ``[cloud] endpoint`` was documented, parsed, and then silently
+ignored: the registry constructs a strategy with no arguments, so the only
+strategy that existed fell back to the environment and sent documents to the
+default endpoint regardless of what the user had configured.
+
+## The three timeouts, and how they relate
+
+They are easy to set independently and wrong. ``read_timeout`` bounds one HTTP
+response; ``DEFAULT_JOB_TIMEOUT`` in ``client.py`` bounds a whole job across
+however many polls; ``poll_after_ms`` from the server decides the gap between
+them. The first must be at least as large as the second, because
+[ADR 0016](../../../docs/adr/0016-jobs-run-in-process.md) has the reference
+server answer synchronously -- a job that takes five minutes *is* a five-minute
+HTTP response, and a shorter read timeout would kill it from this side while it
+was succeeding on the other.
 """
 
 from __future__ import annotations
@@ -19,6 +47,8 @@ from docmax.core.errors import InvalidParameterError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from docmax.core.config import Config
 
 ENDPOINT_ENV = f"{ENV_PREFIX}CLOUD_ENDPOINT"
 API_KEY_ENV = f"{ENV_PREFIX}API_KEY"
@@ -41,9 +71,15 @@ class CloudConfig:
     endpoint: str = DEFAULT_CLOUD_ENDPOINT
     api_key: str | None = None
     connect_timeout: float = 10.0
-    #: Generous, because OCR of a long document legitimately takes minutes.
-    #: A timeout is still mandatory: v2 had none anywhere and hung indefinitely.
-    read_timeout: float = 120.0
+    #: Must be at least ``client.DEFAULT_JOB_TIMEOUT``. The reference server runs
+    #: jobs in-process and answers synchronously (ADR 0016), so a long job is a
+    #: long *response* -- at 120s this killed a five-minute conversion from the
+    #: client side while the server was still succeeding. A timeout is still
+    #: mandatory: v2 had none anywhere and hung indefinitely.
+    #:
+    #: ``tests/unit/test_cloud_client.py`` asserts the two stay ordered, so
+    #: lowering one without the other fails rather than reintroducing this.
+    read_timeout: float = 900.0
     max_retries: int = 3
     max_sync_bytes: int = DEFAULT_MAX_SYNC_BYTES
 
@@ -64,16 +100,32 @@ class CloudConfig:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> CloudConfig:
-        """Read the endpoint and key from the environment.
+        """Read the endpoint and key from the environment alone.
 
-        The config file is the other source and takes lower precedence; that
-        merge belongs to ``core/config.py`` in M1, which will construct this.
+        For a library caller with no DocMax config file, and for tests. A tool
+        strategy uses :meth:`from_core` instead -- see the module docstring.
         """
         source = os.environ if env is None else env
         return cls(
             endpoint=source.get(ENDPOINT_ENV, DEFAULT_CLOUD_ENDPOINT),
             api_key=source.get(API_KEY_ENV) or None,
         )
+
+    @classmethod
+    def from_core(cls, config: Config) -> CloudConfig:
+        """Project a resolved :class:`docmax.core.config.Config` onto this type.
+
+        A projection, not a parse. ``config`` has already been through the whole
+        precedence chain, so everything this reads is settled; the timeouts and
+        retry count are this client's own concern and keep their defaults.
+
+        ``offline`` is deliberately not consulted. It is the router's to enforce
+        and it is enforced before a strategy is ever built -- honouring it a
+        second time here would be a second implementation of a rule that must
+        never differ, and the one that runs in tests would not be the one that
+        matters.
+        """
+        return cls(endpoint=config.cloud_endpoint, api_key=config.api_key)
 
     @property
     def is_configured(self) -> bool:

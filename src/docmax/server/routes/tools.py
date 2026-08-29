@@ -54,7 +54,15 @@ async def run_tool(tool_name: str, request: Request) -> JSONResponse:
     if key:
         state.jobs.remember_idempotency_key(key, job)
 
-    state.runner.start(job, payload, filename=filename)
+    state.runner.start(
+        job,
+        payload,
+        filename=filename,
+        # The request's own base URL, so a server reachable by two names hands
+        # each caller a URL on the name they used.
+        base_url=str(request.base_url),
+        storage=state.storage,
+    )
     return JSONResponse(
         status_code=200 if job.status.is_terminal else 202,
         content=job.to_payload(),

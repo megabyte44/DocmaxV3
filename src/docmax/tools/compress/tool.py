@@ -21,11 +21,10 @@ SPEC = register(
         summary="Shrink a PDF with Ghostscript.",
         category="optimise",
         module=__name__.rpartition(".")[0],
-        # Cloud lands at M6. Compress is one of the five tools that will get it,
-        # because installing Ghostscript is exactly the pain cloud exists to
-        # remove — but the engine does not exist yet, and declaring it before it
-        # does would make the router offer something that cannot run.
-        supported_engines=frozenset({Engine.LOCAL}),
+        # Both, since M6. Installing Ghostscript is exactly the pain cloud
+        # exists to remove, and `cloud.py` now implements it — the condition M3
+        # set for declaring this: never offer an engine that cannot run.
+        supported_engines=frozenset({Engine.LOCAL, Engine.CLOUD}),
         accepts_multiple_inputs=False,
         default_suffix=".pdf",
         params=(

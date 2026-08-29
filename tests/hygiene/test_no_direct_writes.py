@@ -27,8 +27,22 @@ import pytest
 
 from tests.paths import library_sources, relative
 
-#: The only module allowed to touch a destination path directly.
-EXEMPT = frozenset({"core/atomic.py"})
+#: The only modules allowed to call a write directly, and why.
+#:
+#: ``core/atomic.py`` is the mechanism itself.
+#:
+#: ``tools/_deskew.py`` (M8) is the first library code to write a *scratch*
+#: file: it rotates a rasterised page in place, and the path it is handed is
+#: always inside a ``TemporaryDirectory`` that ``ocr/local.py`` created and
+#: removes. Every other tool avoids appearing here only because its intermediate
+#: writes happen inside a subprocess — Ghostscript writing a staged file is the
+#: same act, invisible to an AST scan.
+#:
+#: The rule this test exists for is unweakened: a *destination* is still written
+#: only by ``core/atomic.py``. What is exempted is a file that cannot be a
+#: user's, and `test_deskew.py::test_straighten_writes_only_the_file_it_was_given`
+#: asserts that at run time — which the AST cannot. See ADR 0022.
+EXEMPT = frozenset({"core/atomic.py", "tools/_deskew.py"})
 
 #: ``path.write_text(...)`` / ``path.write_bytes(...)`` and friends.
 FORBIDDEN_METHODS = frozenset({"write_text", "write_bytes"})
@@ -83,7 +97,7 @@ def _describe_write(node: ast.AST) -> str | None:
 @pytest.mark.parametrize("source", library_sources(), ids=relative)
 def test_no_direct_writes_outside_atomic(source: Path) -> None:
     if relative(source).replace("\\", "/").endswith(tuple(EXEMPT)):
-        pytest.skip("core/atomic.py is the one module permitted to write directly")
+        pytest.skip("exempt: see EXEMPT for the reason this module may write")
 
     tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
 

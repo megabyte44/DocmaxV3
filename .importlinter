@@ -16,14 +16,33 @@ name = Layered architecture
 type = layers
 layers =
     docmax.cli
+    docmax.tui
     docmax.server
+    docmax.mcp
+    docmax.pickers
+    docmax.runners
     docmax.tools
     docmax.cloud_client
     docmax.core
 ; Read bottom-up: core depends on nothing internal; cloud_client may use core;
 ; tools may use both; the server may use tools and core (but not the client —
-; see below); and only cli may use everything. docmax.tui joins the top layer
-; in M7.
+; see below); and the two terminal interfaces may use everything.
+;
+; docmax.pickers (M7) sits below every interface and above tools because both
+; the CLI and the TUI reach for it and neither may import the other. It is not
+; itself an interface: it never prints and never exits, which is why it is in
+; LIBRARY_PACKAGES and covered by the no-direct-writes and no-sys-exit hygiene
+; tests. That is what makes ADR 0005's "a picker never touches the filesystem"
+; a property rather than a promise. See ADR 0019.
+;
+; docmax.runners (M9) is placed for the same reason and answers the same
+; question: pipelines, batch and folder watch are wanted by more than one
+; interface, and `interfaces-are-independent` forbids the TUI from reaching into
+; the CLI to get them. It is library code on the same terms as pickers -- it
+; never prints and never exits -- and it imports docmax.core only. It sits above
+; docmax.tools purely because this contract is a total order and something has
+; to go first; a runner names a tool by string and lets the registry resolve it,
+; which `test_m9_runners.py` asserts. See ADR 0023.
 ;
 ; The server sits above tools because it is an interface, exactly like the CLI:
 ; it drives the same registry and the same engines over HTTP instead of argv.
@@ -60,14 +79,39 @@ name = interfaces never import each other
 type = independence
 modules =
     docmax.cli
+    docmax.tui
     docmax.server
+    docmax.mcp
+ignore_imports =
+    docmax.cli.main -> docmax.tui
+    docmax.cli.main -> docmax.mcp
 ; CLI and HTTP are siblings — two front-ends over one tool layer, neither built
 ; on the other. The layers contract below must be totally ordered, so it cannot
 ; express "same level, mutually forbidden" on its own; this states it directly.
 ;
 ; The direction that matters is cli -> server: without this, `import docmax.cli`
 ; could pull in FastAPI, and `pip install DocmaxV3` would owe a user a web
-; framework to run `docmax merge`. docmax.tui joins this contract in M7.
+; framework to run `docmax merge`. docmax.tui joined at M7: the TUI is a second
+; driver of the same core, not a layer built on the CLI, and it may not reach
+; into cli/execution.py for the four lines of router construction they share.
+;
+; The one ignored import is the entry point and nothing else. Something has to
+; start the TUI, and turning argv into a call is the CLI's entire job -- so
+; `docmax tui` and a bare `docmax` reach `docmax.tui`, whose package root
+; exposes exactly three things: is_available, require_available and launch.
+;
+; docmax.mcp (M10) joins on the same terms and for the same reason: `docmax mcp`
+; is a process entry point, and its package root exposes exactly three things --
+; is_available, require_available and serve. Two ignored pairs, both spelled as
+; module pairs, both reaching only a package root. See ADR 0027.
+;
+; It is deliberately spelled as one module pair rather than as a package-wide
+; allowance. `cli.main -> docmax.tui` is a process entry point; anything
+; importing `docmax.tui.app`, `.runner`, `.forms` or `.catalog` would be the CLI
+; reaching into the TUI's internals, which is the traffic this contract exists
+; to forbid -- and it stays broken, here and in tests/unit/test_tui.py. The
+; reverse direction is not ignored at all: the TUI may never import the CLI.
+; See ADR 0020.
 
 [importlinter:contract:core-is-standalone]
 name = core never imports tools or interfaces
@@ -77,10 +121,18 @@ source_modules =
 forbidden_modules =
     docmax.tools
     docmax.cli
+    docmax.tui
+    docmax.pickers
+    docmax.runners
     docmax.cloud_client
     docmax.server
+    docmax.mcp
 ; The registry resolves tools by lazy metadata, never by importing them. This
 ; is what keeps `import docmax` free of OpenCV.
+;
+; docmax.runners joined at M9. ADR 0023's load-bearing claim is that M9 needed
+; no Core change; listing the package here is what makes "core does not know the
+; runners exist" a checked fact rather than a sentence in an ADR.
 
 [importlinter:contract:server-is-not-a-client]
 name = the server never uses the cloud client
@@ -90,6 +142,7 @@ source_modules =
 forbidden_modules =
     docmax.cloud_client
     docmax.cli
+    docmax.tui
 ; The two halves of the cloud contract are independent implementations of one
 ; document. Letting the server reach for the client's parsing would make the
 ; contract self-referential — and a bug in it would then agree with itself.

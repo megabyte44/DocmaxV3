@@ -1,22 +1,32 @@
 # Cloud Engine API contract
 
-**Status:** design. Both halves exist in skeleton: the client in
-`src/docmax/cloud_client/` speaks the whole contract, and the reference server
-in `src/docmax/server/` implements every endpoint below except the part that
-runs the tool, which lands with the cloud engines in M6.
+**Status:** implemented, for two tools. The client in
+`src/docmax/cloud_client/` speaks the whole contract; the reference server in
+`src/docmax/server/` implements every endpoint below, including running the
+tool. `compress` and `convert` have cloud engines as of M6 —
+[ADR 0012](adr/0012-cloud-engines-are-compress-and-convert.md) records why those
+two and not the five this document once listed.
 
 This document is the contract, and it has two independent implementations on
 purpose — a client that borrowed the server's parsing (or the reverse) would
-agree with itself about its own bugs. `respx`-based tests assert the client
-honours it. Any server implementing this document — the hosted service, or a
-self-hosted one — works with an unmodified client.
+agree with itself about its own bugs. `tests/unit/test_cloud_client.py` asserts
+the client honours it with `respx`. Any server implementing this document — the
+hosted service, or a self-hosted one — works with an unmodified client.
+
+> Until M6 this section claimed those `respx` tests existed. They did not. The
+> client shipped untested through five milestones, and the claim is left here in
+> corrected form rather than quietly deleted.
 
 ## Why this exists
 
 Cloud is not a paid tier and not a capability gate. Every cloud-backed tool has
-a fully functional local engine. Cloud exists so a user can run OCR without
-installing Tesseract, or convert to PDF without installing a LaTeX
-distribution.
+a fully functional local engine. Cloud exists so a user can compress a PDF
+without installing Ghostscript, or convert a document without installing Pandoc.
+
+Three tools have it since M8: `compress`, `convert` and `ocr` — the case this
+section always led with, and the one whose local install is genuinely painful.
+`convert` still does not produce PDF on either engine
+([ADR 0011](adr/0011-convert-is-pandoc-only.md)).
 
 ## Endpoint configuration
 
@@ -136,15 +146,23 @@ is not implementing this API.
 
 ```http
 GET /v1/capabilities
-→ { "tools": ["ocr", "compress", "convert", "pdfa", "remove-bg"],
+→ { "tools": ["compress", "convert"],
     "max_sync_bytes": 10485760,
     "api_version": "1" }
 ```
 
 The client calls this once and caches it, so a self-hosted server offering a
-subset of tools degrades cleanly rather than failing per-call. The server
-answers it from the tool registry rather than from a list of its own, so it
-cannot advertise a tool it does not have.
+subset of tools degrades cleanly rather than failing per-call.
+
+**The list is what this deployment can run, not what its build knows about.**
+The server answers from the tool registry rather than from a list of its own,
+*and* asks each tool's local strategy whether it is available on this machine —
+so a server without Ghostscript does not advertise `compress`. See
+[ADR 0018](adr/0018-capabilities-mean-runnable.md); before it, an endpoint with
+nothing installed advertised the one tool it could not perform.
+
+The example above is a machine with Ghostscript and Pandoc. A different
+deployment answers differently, which is the point.
 
 ## Running the reference server
 
@@ -156,3 +174,9 @@ DOCMAX_SERVER_API_KEYS=dev-key python -m docmax.server
 It binds to localhost and accepts no keys until you name some. Point a client at
 it with `DOCMAX_CLOUD_ENDPOINT=http://localhost:8000` — plaintext is permitted
 for a local endpoint precisely so that this works, and refused everywhere else.
+
+Jobs run **in the request that submits them**, in this process, with the job
+store in memory. That is the reference server's model and not a claim about the
+hosted service; [ADR 0016](adr/0016-jobs-run-in-process.md) records what it
+costs — no durability across a restart, and a long job holds a connection open
+for its duration.
