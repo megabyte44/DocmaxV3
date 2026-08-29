@@ -107,6 +107,7 @@ def run_picker(
     worse failure than the one that caused it.
     """
     import http.server
+    import socketserver
     import webbrowser
 
     body = _read_document(document)
@@ -178,10 +179,24 @@ def run_picker(
             self._send(200, _JSON_MEDIA_TYPE, _OK)
             answered.set()
 
+    class _Server(http.server.ThreadingHTTPServer):
+        # `HTTPServer.server_bind` calls `socket.getfqdn(host)` to set
+        # `server_name` — a value nothing in this module reads. Reverse DNS for
+        # the loopback address is normally instant, but on a machine where it is
+        # slow or unreachable that lookup blocks server construction itself,
+        # before `serve_forever` is ever called — observed hanging the whole
+        # picker for 30+ seconds on a GitHub Actions macOS runner, nowhere near
+        # any request. Skipping it removes a real network call for a value this
+        # module never uses.
+        def server_bind(self) -> None:
+            socketserver.TCPServer.server_bind(self)
+            self.server_name = str(self.server_address[0])
+            self.server_port = self.server_address[1]
+
     # Port 0 asks the OS for a free one, and 127.0.0.1 keeps it off every other
     # interface. Neither is negotiable: a picker binding 0.0.0.0 would put the
     # user's document on their network.
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = _Server(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     # `server_address` is loosely typed (the host can be bytes for some address
     # families), and the loopback host is not in question here — we asked for it.
