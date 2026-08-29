@@ -23,6 +23,7 @@ than merely agreeing with it today.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -54,6 +55,15 @@ M5 = ("convert", "to-images", "from-images")
 
 needs_pandoc = pytest.mark.needs_binary("pandoc")
 needs_poppler = pytest.mark.needs_binary("pdftoppm")
+
+#: A marker rather than a module-level `importorskip`, matching the `crypto`
+#: extra's pattern in test_m4_tools.py — `from-images` is pure Python (no
+#: binary), but Pillow and img2pdf are still the optional `images` extra, not
+#: base dependencies. Only the tests that build or read a real image need this.
+needs_images = pytest.mark.skipif(
+    importlib.util.find_spec("PIL") is None or importlib.util.find_spec("img2pdf") is None,
+    reason="the images extra is not installed",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -967,6 +977,7 @@ def test_to_images_reports_every_file_it_wrote(
 
 
 @needs_poppler
+@needs_images
 def test_to_images_really_renders_a_page(
     router: EngineRouter, source: Path, tmp_path: Path
 ) -> None:
@@ -987,6 +998,7 @@ def test_to_images_really_renders_a_page(
 # ---------------------------------------------------------------------------
 
 
+@needs_images
 def test_from_images_builds_one_page_per_image(
     router: EngineRouter, images: list[Path], tmp_path: Path
 ) -> None:
@@ -999,6 +1011,7 @@ def test_from_images_builds_one_page_per_image(
     assert result.details["formats"] == ["png", "jpeg", "png"]
 
 
+@needs_images
 def test_from_images_keeps_argument_order(router: EngineRouter, tmp_path: Path) -> None:
     """Page order is argument order — the order the user can see on their command line."""
     from pypdf import PdfReader
@@ -1014,6 +1027,7 @@ def test_from_images_keeps_argument_order(router: EngineRouter, tmp_path: Path) 
     assert pages[1].mediabox.height > pages[1].mediabox.width, "tall image second"
 
 
+@needs_images
 def test_from_images_sizes_each_page_to_its_image(router: EngineRouter, tmp_path: Path) -> None:
     """Nothing is scaled, cropped or letterboxed onto a fixed page size."""
     from pypdf import PdfReader
@@ -1028,6 +1042,7 @@ def test_from_images_sizes_each_page_to_its_image(router: EngineRouter, tmp_path
     assert pages[1].mediabox.width > pages[0].mediabox.width
 
 
+@needs_images
 def test_from_images_produces_a_readable_pdf(
     router: EngineRouter, images: list[Path], tmp_path: Path
 ) -> None:
@@ -1042,6 +1057,7 @@ def test_from_images_produces_a_readable_pdf(
     assert len(reader.pages) == 3
 
 
+@needs_images
 def test_from_images_accepts_a_single_image(router: EngineRouter, tmp_path: Path) -> None:
     out = tmp_path / "one.pdf"
 
@@ -1050,6 +1066,7 @@ def test_from_images_accepts_a_single_image(router: EngineRouter, tmp_path: Path
     assert page_count(out) == 1
 
 
+@needs_images
 @pytest.mark.parametrize("name", _formats.readable_image_names())
 def test_from_images_reads_every_declared_image_format(
     router: EngineRouter, tmp_path: Path, name: str
@@ -1063,6 +1080,7 @@ def test_from_images_reads_every_declared_image_format(
     assert page_count(out) == 1
 
 
+@needs_images
 def test_from_images_refuses_a_file_that_is_not_an_image(
     router: EngineRouter, tmp_path: Path
 ) -> None:
@@ -1073,6 +1091,7 @@ def test_from_images_refuses_a_file_that_is_not_an_image(
         run(router, "from-images", [notes], tmp_path / "album.pdf")
 
 
+@needs_images
 def test_from_images_refuses_a_png_that_is_not_a_png(router: EngineRouter, tmp_path: Path) -> None:
     """The extension says one thing and the bytes say another. Pillow settles it."""
     liar = tmp_path / "liar.png"
@@ -1082,6 +1101,7 @@ def test_from_images_refuses_a_png_that_is_not_a_png(router: EngineRouter, tmp_p
         run(router, "from-images", [liar], tmp_path / "album.pdf")
 
 
+@needs_images
 def test_one_bad_image_is_reported_before_any_page_is_built(
     router: EngineRouter, tmp_path: Path
 ) -> None:
@@ -1098,6 +1118,7 @@ def test_one_bad_image_is_reported_before_any_page_is_built(
     assert not staged(tmp_path)
 
 
+@needs_images
 def test_from_images_refuses_to_write_over_one_of_its_inputs(
     images: list[Path],
 ) -> None:
@@ -1111,6 +1132,7 @@ def test_from_images_refuses_to_write_over_one_of_its_inputs(
         router.target_for("from-images", docs, requested=str(images[0]), force=True)
 
 
+@needs_images
 def test_an_already_cancelled_assembly_produces_nothing(
     router: EngineRouter, images: list[Path], tmp_path: Path
 ) -> None:
@@ -1124,6 +1146,7 @@ def test_an_already_cancelled_assembly_produces_nothing(
     assert not out.exists()
 
 
+@needs_images
 def test_a_cancelled_assembly_leaves_the_destination_untouched(
     router: EngineRouter, images: list[Path], tmp_path: Path
 ) -> None:
@@ -1153,6 +1176,7 @@ def test_a_cancelled_assembly_leaves_the_destination_untouched(
     assert not staged(tmp_path)
 
 
+@needs_images
 def test_from_images_reports_progress_per_image(
     router: EngineRouter, images: list[Path], tmp_path: Path
 ) -> None:

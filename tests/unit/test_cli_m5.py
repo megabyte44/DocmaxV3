@@ -28,6 +28,7 @@ actually owns.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,14 @@ runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 COMMANDS = ("convert", "to-images", "from-images")
+
+#: `from-images` is pure Python (no binary), but Pillow and img2pdf are still
+#: the optional `images` extra, not base dependencies. Matches the `crypto`
+#: extra's pattern in test_m4_tools.py.
+needs_images = pytest.mark.skipif(
+    importlib.util.find_spec("PIL") is None or importlib.util.find_spec("img2pdf") is None,
+    reason="the images extra is not installed",
+)
 
 #: Typer's own exit code for a usage error — a missing required option is
 #: refused by argument parsing, before any DocMax code runs.
@@ -184,6 +193,7 @@ def test_to_images_help_lists_the_shared_image_vocabulary(real_router: None) -> 
 # ---------------------------------------------------------------------------
 
 
+@needs_images
 def test_from_images_refuses_an_existing_output_without_force(
     real_router: None, images: list[Path], tmp_path: Path
 ) -> None:
@@ -197,6 +207,7 @@ def test_from_images_refuses_an_existing_output_without_force(
     assert out.read_bytes() == b"already here", "the existing file is untouched"
 
 
+@needs_images
 def test_from_images_overwrites_an_existing_output_with_force(
     real_router: None, images: list[Path], tmp_path: Path
 ) -> None:
@@ -209,6 +220,7 @@ def test_from_images_overwrites_an_existing_output_with_force(
     assert page_count(out) == 2
 
 
+@needs_images
 def test_from_images_refuses_to_write_over_one_of_its_images(
     real_router: None, images: list[Path]
 ) -> None:
@@ -261,6 +273,7 @@ def test_to_images_refuses_an_existing_output_without_force(
 # ---------------------------------------------------------------------------
 
 
+@needs_images
 def test_from_images_writes_a_pdf(real_router: None, images: list[Path], tmp_path: Path) -> None:
     out = tmp_path / "album.pdf"
 
@@ -270,6 +283,7 @@ def test_from_images_writes_a_pdf(real_router: None, images: list[Path], tmp_pat
     assert page_count(out) == 2
 
 
+@needs_images
 def test_from_images_reports_what_it_wrote(
     real_router: None, images: list[Path], tmp_path: Path
 ) -> None:
@@ -281,6 +295,7 @@ def test_from_images_reports_what_it_wrote(
     assert "local engine" in shown(result)
 
 
+@needs_images
 def test_from_images_reports_a_file_that_is_not_an_image_without_a_traceback(
     real_router: None, tmp_path: Path
 ) -> None:
@@ -294,6 +309,7 @@ def test_from_images_reports_a_file_that_is_not_an_image_without_a_traceback(
     assert "Traceback" not in shown(result)
 
 
+@needs_images
 def test_a_from_images_dry_run_writes_nothing(
     real_router: None, images: list[Path], tmp_path: Path
 ) -> None:
@@ -425,6 +441,7 @@ def test_the_unsupported_format_remedy_names_a_command_the_cli_registers() -> No
     )
 
 
+@needs_images
 def test_an_unsupported_format_error_reaches_the_user_with_that_remedy(
     real_router: None, tmp_path: Path
 ) -> None:

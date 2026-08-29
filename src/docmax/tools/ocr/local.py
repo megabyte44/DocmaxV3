@@ -88,27 +88,32 @@ _SCRATCH_PREFIX = f"{CLI_NAME}-ocr-"
 
 
 def missing_dependencies() -> tuple[str, ...]:
-    """Everything this engine needs and cannot find, in one list.
+    """Everything the engine itself needs and cannot find, in one list.
+
+    Binaries only. OpenCV is deliberately excluded: it is needed only for
+    ``--deskew``, so it must not gate whether the engine is *available* — that
+    would make ``ocr --no-deskew`` unavailable on a machine without it,
+    contradicting the promise ADR 0022 makes. ``run()`` checks ``cv2`` itself,
+    only when ``deskew`` is actually requested, and raises ``_opencv_missing()``
+    with its own remedy.
 
     Kept module-level and public so the router can quote it when it builds the
     ``LocalDependencyMissingError`` that justifies the cloud fallback.
     """
-    import importlib.util
-
-    missing = [name for name in BINARIES if _binaries.find(name) is None]
-    missing.extend(name for name in PYTHON_DEPENDENCIES if importlib.util.find_spec(name) is None)
-    return tuple(missing)
+    return tuple(name for name in BINARIES if _binaries.find(name) is None)
 
 
 def install_hint() -> str:
-    """What to type to get what is missing, per platform.
+    """What to type to get the engine itself running, per platform.
 
     Built from ``_binaries``' own declarations rather than written out, so the
     command here and the one ``doctor`` prints cannot disagree. It used to name
     ``setup --ocr``, a command that does not exist — see ADR 0022.
-    """
-    from docmax.core.branding import DIST_NAME
 
+    Says nothing about OpenCV: that is a ``--deskew``-only dependency, and
+    ``_opencv_missing()`` gives its own remedy at the point ``--deskew`` is
+    actually requested and found absent.
+    """
     # One clause per missing thing, semicolon-separated. Two binaries missing
     # used to render as "Install it with: X Install it with: Y", which reads as
     # one broken sentence rather than two commands to type.
@@ -117,8 +122,6 @@ def install_hint() -> str:
         for name in BINARIES
         if _binaries.find(name) is None
     ]
-    if any(name in missing_dependencies() for name in PYTHON_DEPENDENCIES):
-        steps.append(f'pip install "{DIST_NAME}[ocr]"')
 
     if not steps:  # pragma: no cover — nothing is missing
         return f"Or run `{CLI_NAME} ocr --engine cloud` to skip the install entirely."
