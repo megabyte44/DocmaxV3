@@ -6,15 +6,22 @@ name: CI
 # So the matrix is chosen per event rather than fixed:
 #
 #   pull request   lint, four test legs, open-core          ~2 min
-#   push to main   lint, all nine test legs, golden, open-core
-#   release        the same as main, via workflow_call from release.yml
+#   release        lint, all nine test legs, golden, open-core, via
+#                  workflow_call from release.yml
 #
 # A pull request that touches only prose runs nothing but the aggregate check.
 # Label a PR `ci:full` to get the whole gate before merging, which is worth
 # doing for anything touching engines or packaging.
+#
+# No `push: branches: [main]` trigger. Branch protection requires this
+# workflow's own `CI` check to pass before a pull request can merge, so
+# every commit that lands on `main` was already run through the gate above —
+# rerunning the identical tree state a second time the moment it lands would
+# just be the same answer twice. release.yml's `workflow_call` still reruns
+# the full gate a final time immediately before publishing (see its own
+# comment for why that one stays), so a typo still cannot reach PyPI even if
+# someone bypasses the branch protection.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -87,7 +94,7 @@ jobs:
           # failing command and aborts the step. Every branch is an `if`.
           golden=false
           case "$event" in
-            push|release|workflow_dispatch)
+            release|workflow_dispatch)
               golden=true
               ;;
             pull_request)
@@ -99,8 +106,8 @@ jobs:
           # --- the test matrix ------------------------------------------
           # A pull request gets every operating system and both ends of the
           # supported Python range: four legs instead of nine, and nothing that
-          # has ever caught a bug here is lost. The full cross product runs on
-          # `main` and before a release, where it is worth the wait.
+          # has ever caught a bug here is lost. The full cross product runs
+          # before a release, where it is worth the wait.
           if [ "$event" = "pull_request" ] && [ "$full_label" != "true" ]; then
             matrix='{"include":[
               {"os":"ubuntu-latest","python":"3.11"},
