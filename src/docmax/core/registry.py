@@ -68,6 +68,15 @@ class Param:
     default: Any = None
     required: bool = False
     choices: tuple[str, ...] = ()
+    #: Labels a comma-separated composite value's parts, e.g. ``("x", "y",
+    #: "width", "height")`` for ``crop``'s ``box``. Purely presentational: the
+    #: value is still one ``str`` on the wire, parsed exactly as it always was,
+    #: so a CLI flag, an MCP schema and API validation are unaffected — only
+    #: the TUI reads it, rendering one labelled field per label and rejoining
+    #: them with commas rather than asking someone to type a tuple blind. Empty
+    #: (the default) renders as the single text field every other param gets.
+    #: See ADR 0032.
+    component_labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +95,12 @@ class ToolSpec:
     accepts_multiple_inputs: bool = False
     #: Used by ``OutputTarget.resolve`` when the user does not pass ``-o``.
     default_suffix: str = ".pdf"
+    #: ``split`` and ``to-images`` write many files into ``-o`` as a directory
+    #: — see ADR 0003's ``atomic_dir`` and ADR 0031. Every other tool writes
+    #: one file, and ``OutputTarget.resolve`` reads this to decide whether an
+    #: extensionless destination is a typo to correct (a file) or exactly what
+    #: was meant (a directory almost never has a dot in its name).
+    produces_directory: bool = False
     #: Free-form, for ``--help`` grouping and search.
     aliases: tuple[str, ...] = field(default_factory=tuple)
 

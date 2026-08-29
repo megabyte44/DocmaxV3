@@ -102,6 +102,7 @@ class FakeSpec:
     name: str = "widget"
     strategies: dict[Engine, FakeStrategy] = field(default_factory=dict)
     default_suffix: str = ".pdf"
+    produces_directory: bool = False
     loads: list[Engine] = field(default_factory=list)
 
     @property
@@ -527,6 +528,57 @@ def test_target_for_uses_the_tools_default_suffix(tmp_path: Path) -> None:
     target = make_router(spec).target_for("widget", [DocumentRef.from_path(source)])
 
     assert target.destination == tmp_path / "scan.pdf"
+
+
+def test_target_for_appends_the_default_suffix_to_an_extensionless_request(
+    tmp_path: Path,
+) -> None:
+    """Requirement 5: generic through the router for any tool, not a `merge`
+    special case — ``widget`` is the router test suite's own fake spec, with
+    nothing merge-shaped about it."""
+    source = tmp_path / "in.pdf"
+    source.write_bytes(b"x")
+    spec = dual()
+    spec.default_suffix = ".pdf"
+
+    target = make_router(spec).target_for(
+        "widget", [DocumentRef.from_path(source)], requested=str(tmp_path / "out")
+    )
+
+    assert target.destination == tmp_path / "out.pdf"
+
+
+def test_target_for_leaves_an_extensioned_request_alone(tmp_path: Path) -> None:
+    """The other half: a request that already names an extension — right or
+    wrong for the tool — passes through the router unchanged, same as it
+    always has."""
+    source = tmp_path / "in.pdf"
+    source.write_bytes(b"x")
+    spec = dual()
+    spec.default_suffix = ".pdf"
+
+    target = make_router(spec).target_for(
+        "widget", [DocumentRef.from_path(source)], requested=str(tmp_path / "out.pdf")
+    )
+
+    assert target.destination == tmp_path / "out.pdf"
+
+
+def test_target_for_leaves_a_directory_shaped_output_untouched(tmp_path: Path) -> None:
+    """The router forwards `produces_directory` from the looked-up spec, the
+    same way it already forwards `default_suffix` — `widget`, not `split` or
+    `to-images` by name, since the router does not know either exists."""
+    source = tmp_path / "in.pdf"
+    source.write_bytes(b"x")
+    spec = dual()
+    spec.default_suffix = ".pdf"
+    spec.produces_directory = True
+
+    target = make_router(spec).target_for(
+        "widget", [DocumentRef.from_path(source)], requested=str(tmp_path / "parts")
+    )
+
+    assert target.destination == tmp_path / "parts"
 
 
 def test_target_for_still_refuses_an_in_place_overwrite(tmp_path: Path) -> None:

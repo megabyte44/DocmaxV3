@@ -118,6 +118,7 @@ class RecordingStrategy:
 class FakeSpec:
     name: str = "merge"
     default_suffix: str = ".pdf"
+    produces_directory: bool = False
     strategies: dict[Engine, RecordingStrategy] = field(default_factory=dict)
 
     @property

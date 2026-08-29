@@ -43,6 +43,8 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0028](0028-the-mcp-tool-surface-is-the-registry.md) | The MCP tool surface is the registry, and the schema says only what `ToolSpec` can | Accepted |
 | [0029](0029-the-mcp-policy-boundary.md) | MCP runs inside a policy boundary: roots, offline by default, and consent it may not grant | Accepted |
 | [0030](0030-mcp-cancellation-maps-onto-the-cancellation-token.md) | A cancelled MCP request cancels the DocMax run, through the existing token | Accepted |
+| [0031](0031-toolspec-says-when-output-is-a-directory.md) | `ToolSpec` says when output is a directory, so `OutputTarget` can safely fill in a missing extension | Accepted |
+| [0032](0032-param-gains-component-labels-for-composite-values.md) | `Param` gains `component_labels`, so a composite value gets one labelled field per part | Accepted |
 
 ## When to write one
 

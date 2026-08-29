@@ -23,6 +23,7 @@ then thin enough that a Pilot test only has to prove they are wired up.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from docmax.core.errors import InvalidParameterError
@@ -55,6 +56,10 @@ class Field:
     default: Any = None
     required: bool = False
     choices: tuple[str, ...] = ()
+    #: Copied from ``Param.component_labels`` — see its docstring and ADR 0032.
+    #: Non-empty means "render one labelled text input per label and join
+    #: them with commas", instead of the single field every other kind gets.
+    components: tuple[str, ...] = ()
 
     def default_text(self) -> str:
         """The default rendered for a text input. Empty means "nothing yet"."""
@@ -63,6 +68,19 @@ class Field:
         if isinstance(self.default, bool):
             return "true" if self.default else "false"
         return str(self.default)
+
+    def default_component(self, index: int) -> str:
+        """The default for one part of a composite field, or ``""``.
+
+        Splits ``default_text()`` on commas only when it has exactly as many
+        parts as there are labels — a default that does not fit the shape
+        (usually because there is no default at all) leaves every part blank
+        rather than guessing which numbers go where.
+        """
+        parts = self.default_text().split(",")
+        if len(parts) != len(self.components):
+            return ""
+        return parts[index].strip()
 
 
 def field_for(param: Param) -> Field:
@@ -79,6 +97,7 @@ def field_for(param: Param) -> Field:
         default=param.default,
         required=param.required,
         choices=param.choices,
+        components=param.component_labels,
     )
 
 
@@ -193,6 +212,45 @@ def _choice(field: Field, text: str) -> str:
     )
 
 
+def describe_missing_paths(raw: str) -> str:
+    """A one-line problem with the ``__inputs__`` text, or ``""`` if there is none.
+
+    Generic filesystem checks only — existence and "is this a file" — because
+    that is all that can be known before a tool has even been chosen to run.
+    ``DocumentRef.from_path`` remains the authority the router calls before any
+    work starts; this exists only so a typo is visible while the user is still
+    looking at the field, not after they press Run.
+    """
+    problems = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        path = Path(part).expanduser()
+        if not path.exists():
+            problems.append(f"{part} does not exist")
+        elif path.is_dir():
+            problems.append(f"{part} is a directory, not a file")
+    return "; ".join(problems)
+
+
+def first_input_directory(raw: str) -> Path | None:
+    """The directory of the first path in the ``__inputs__`` text, or ``None``.
+
+    Used to open the output save dialog somewhere more useful than the home
+    directory — the same folder the inputs already live in, which is where a
+    merged or converted result most often belongs. Purely a starting point for
+    the dialog, never a destination: the user still names the file, and
+    ``OutputTarget.resolve`` remains the sole authority on whether whatever
+    they choose is safe to write to.
+    """
+    for part in raw.split(","):
+        part = part.strip()
+        if part:
+            return Path(part).expanduser().parent
+    return None
+
+
 #: ``Param.type_`` to :attr:`Field.kind`. Anything unrecognised renders as text
 #: rather than raising: a tool declaring an unknown type is a registry bug, and
 #: refusing to draw the whole form over it would hide nineteen working tools
@@ -206,4 +264,12 @@ _KINDS_BY_TYPE = {
 }
 
 
-__all__ = ["KINDS", "Field", "collect", "field_for", "fields_for"]
+__all__ = [
+    "KINDS",
+    "Field",
+    "collect",
+    "describe_missing_paths",
+    "field_for",
+    "fields_for",
+    "first_input_directory",
+]
