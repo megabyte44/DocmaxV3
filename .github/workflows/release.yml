@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/docmax
+      url: https://pypi.org/p/DocmaxV3
     permissions:
       id-token: write  # trusted publishing — no long-lived API token in secrets
     steps:
