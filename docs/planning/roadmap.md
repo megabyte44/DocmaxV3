@@ -19,6 +19,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M8** | OCR, done properly | ✅ complete |
 | **M9** | Pipelines, resumable batch, folder watch | ✅ complete — except `--resume`, [deferred](#what-m9-did-not-deliver) |
 | **M10** | Local MCP server — drive DocMax from an AI agent | ✅ complete |
+| **M11** | Remote MCP — a network-reachable tool server, for clients that can't spawn a local process | 🔜 not started, design not settled |
 
 ## What the ordering is for
 
@@ -94,6 +95,29 @@ client is a program acting on someone's behalf, so reads and writes are confined
 to `--root`, cloud engines are off unless asked for, and an agent cannot consent
 to an upload on the user's behalf. See
 [ADR 0029](../adr/0029-the-mcp-policy-boundary.md).
+
+## M11 — why it isn't just M10 with a different transport
+
+M10's tool schema takes `inputs` as **local filesystem paths**, checked against
+`--root` (ADR 0029). That only means something when the client and server share
+a filesystem — true over stdio, false over a network. A remote client (ChatGPT's
+connectors, or any MCP-over-HTTP client) has no local path to hand the server, so
+this is not "mount the same server on a port":
+
+- **The tool contract changes.** `inputs` becomes a reference to something
+  already uploaded, not a path — the shape `docmax.server` already chose for the
+  same problem (`POST /uploads` → `file_id` → job references it). Whether M11
+  reuses that job model or defines its own is an open question.
+- **The policy boundary changes.** ADR 0029 assumes one trusted local caller.
+  A network-reachable MCP session needs an auth model — who may open one, and
+  whether "roots" mean anything once the caller isn't on the same machine.
+- **It may not be a new interface at all.** `docmax.server` is already
+  network-reachable (ADR 0006); M11 could be a transport bridge in front of it
+  rather than a fourth thing. That choice belongs in the ADR, not this table.
+
+None of this is decided. See [phases.md](phases.md#phase-11--remote-mcp-transport-m11)
+for the task list and [backlog.md](backlog.md#decisions-owed-an-adr) for the ADR
+this owes before any code lands.
 
 ## What is not on the roadmap
 

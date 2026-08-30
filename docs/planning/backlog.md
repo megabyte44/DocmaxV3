@@ -52,6 +52,15 @@ make the ADR a justification rather than a decision.
 - [ ] **Observability.** One approach to logging, and the mechanism that keeps
       cloud-api.md's "document contents are never logged" true rather than
       merely stated.
+- [ ] **Remote MCP transport (M11).** M10's tool schema takes local filesystem
+      paths, which only means something when client and server share a
+      filesystem. A network-reachable MCP session (for a client that can't
+      spawn a local process, e.g. ChatGPT's connectors) needs its own file
+      reference shape, its own auth model, and a decision on whether "roots"
+      mean anything remotely — none of which ADR 0029 answers, because it
+      assumed one trusted local caller. See
+      [phases.md](phases.md#phase-11--remote-mcp-transport-m11) for the
+      question list.
 
 ### Documentation the project promises but does not have
 
