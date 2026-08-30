@@ -569,9 +569,10 @@ def _text_of(widget: Any) -> str:
 
 
 def test_the_app_starts_and_lists_tools() -> None:
+    """Requirement 2: every offered tool is present, as a button."""
     import asyncio
 
-    from textual.widgets import ListItem
+    from textual.widgets import Button
 
     from docmax.tui.app import DocMaxApp
 
@@ -580,15 +581,206 @@ def test_the_app_starts_and_lists_tools() -> None:
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             assert type(app.screen).__name__ == "ToolListScreen"
-            items = app.screen.query(ListItem)
-            assert len(items) == len(catalog.offered_tools())
-            ids = {item.id for item in items}
+            buttons = app.screen.query(".tool-button")
+            assert len(buttons) == len(catalog.offered_tools()) == 19
+            ids = {button.id for button in buttons}
             assert "tool-crop" in ids
             # `ocr` was the one name `UNIMPLEMENTED` ever held, and M8 shipped
             # it. Every registered tool is now listed.
             assert "tool-ocr" in ids
+            assert all(isinstance(button, Button) for button in buttons)
 
     asyncio.run(scenario())
+
+
+def test_categories_render_as_headings_over_their_own_tools() -> None:
+    """Requirement 1: category headings stay, each grouping exactly the tools
+    ``catalog.categories()`` puts under it — generic over whatever the
+    registry currently reports, not a fixed, hand-written list."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp
+    from docmax.tui.catalog import categories
+
+    async def scenario() -> dict[str, list[str]]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            headings = [_text_of(widget) for widget in screen.query(".category")]
+            columns = list(screen.query(".tool-column"))
+            assert len(headings) == len(columns)
+            return {
+                heading: [button.id or "" for button in column.query(".tool-button")]
+                for heading, column in zip(headings, columns, strict=True)
+            }
+
+    rendered = asyncio.run(scenario())
+    expected = {
+        category.upper(): [f"tool-{spec.name}" for spec in specs]
+        for category, specs in categories().items()
+    }
+    assert rendered == expected
+
+
+def test_tools_within_a_category_are_stacked_vertically() -> None:
+    """Requirement 3: tools in the same category are stacked, one per row —
+    a wide terminal must not spread `edit`'s four tools — crop, pages,
+    reorder, rotate — across the screen the way the grid layout once did."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp
+
+    async def scenario() -> list[int]:
+        app = DocMaxApp()
+        async with app.run_test(size=(160, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            return [
+                screen.query_one(f"#tool-{name}").region.y
+                for name in ("crop", "pages", "reorder", "rotate")
+            ]
+
+    rows = asyncio.run(scenario())
+    assert len(set(rows)) == len(rows), f"expected four distinct rows, got {rows}"
+    assert rows == sorted(rows), "expected top-to-bottom order matching declaration order"
+
+
+def test_tool_button_width_fits_its_own_name() -> None:
+    """Requirement 4/5: compact and readable — a short name gets a short
+    button, a long one gets a wider one, neither padded to a shared column."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.tui.app import DocMaxApp
+
+    async def scenario() -> tuple[int, int]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            short = screen.query_one("#tool-ocr", Button).size.width
+            long = screen.query_one("#tool-from-images", Button).size.width
+            return short, long
+
+    short_width, long_width = asyncio.run(scenario())
+    assert short_width < long_width
+    assert short_width <= len("ocr") + 4  # a little padding, not a fixed wide column
+
+
+def test_every_tool_buttons_label_is_its_own_name() -> None:
+    """Requirement 5: tool names must be visible — each button's rendered
+    label is the exact tool name it opens, for every offered tool, not a
+    sample."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.tui.app import DocMaxApp
+
+    async def scenario() -> dict[str, str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            return {
+                button.id or "": str(button.label)
+                for button in app.screen.query(Button).filter(".tool-button")
+            }
+
+    labels = asyncio.run(scenario())
+    for spec in catalog.offered_tools():
+        assert labels[f"tool-{spec.name}"] == spec.name
+
+
+def test_clicking_a_tool_button_opens_its_run_screen() -> None:
+    """Requirement 3."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.click("#tool-merge")
+            await pilot.pause()
+            assert isinstance(app.screen, RunScreen)
+            return app.screen.tool
+
+    assert asyncio.run(scenario()) == "merge"
+
+
+def test_enter_opens_the_focused_tool() -> None:
+    """Requirement 4: keyboard-only, no mouse."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.query_one("#tool-crop", Button).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, RunScreen)
+            return app.screen.tool
+
+    assert asyncio.run(scenario()) == "crop"
+
+
+def test_tab_moves_focus_across_tools_in_the_offered_order() -> None:
+    """Requirement 5: keyboard navigation, preserving the existing tool
+    ordering (category, then name) rather than some grid-shaped order of its
+    own."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp
+
+    async def scenario() -> list[str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            buttons = list(app.screen.query(".tool-button"))
+            buttons[0].focus()
+            await pilot.pause()
+            assert app.screen.focused is not None
+            focused = [app.screen.focused.id or ""]
+            for _ in range(len(buttons) - 1):
+                await pilot.press("tab")
+                await pilot.pause()
+                assert app.screen.focused is not None
+                focused.append(app.screen.focused.id or "")
+            return focused
+
+    focused = asyncio.run(scenario())
+    assert focused == [f"tool-{spec.name}" for spec in catalog.offered_tools()]
+
+
+def test_the_catalog_scrolls_when_the_window_is_too_small() -> None:
+    """Requirement 6."""
+    import asyncio
+
+    from textual.containers import VerticalScroll
+
+    from docmax.tui.app import DocMaxApp
+
+    async def scenario() -> tuple[int, int]:
+        app = DocMaxApp()
+        async with app.run_test(size=(60, 15)) as pilot:
+            await pilot.pause()
+            buttons = app.screen.query(".tool-button")
+            assert len(buttons) == 19, "every tool stays reachable, just off-screen"
+            container = app.screen.query_one("#tools", VerticalScroll)
+            return container.max_scroll_y, len(buttons)
+
+    max_scroll_y, button_count = asyncio.run(scenario())
+    assert max_scroll_y > 0
+    assert button_count == 19
 
 
 def test_every_offered_tool_opens_a_form() -> None:

@@ -44,8 +44,6 @@ from textual.widgets import (
     Header,
     Input,
     Label,
-    ListItem,
-    ListView,
     ProgressBar,
     Select,
     Static,
@@ -91,10 +89,18 @@ def _selected(widget: Select[str], choices: tuple[str, ...]) -> str:
 
 
 class ToolListScreen(Screen[None]):
-    """Every offered tool, grouped by category. The application's home."""
+    """Every offered tool, grouped by category, as a compact vertical list.
+
+    A full-width row per tool — name, then its summary — read as "there are
+    only a handful of these" once there were nineteen, and a wide grid that
+    spread them across the screen read as scattered rather than organised. A
+    button names one tool and nothing else, stacked directly under its
+    category heading; the summary is still the first thing ``RunScreen``
+    shows, one keypress away, so nothing here is lost, only deferred until it
+    is wanted.
+    """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("enter", "choose", "Run", show=True),
         Binding("q", "app.quit", "Quit", show=True),
     ]
 
@@ -103,29 +109,17 @@ class ToolListScreen(Screen[None]):
         with VerticalScroll(id="tools"):
             for category, specs in catalog.categories().items():
                 yield Static(category.upper(), classes="category")
-                yield ListView(
-                    *(
-                        ListItem(
-                            Label(f"{spec.name}\n  {spec.summary}", markup=False),
-                            id=f"tool-{spec.name}",
-                        )
-                        for spec in specs
-                    ),
-                    classes="tool-list",
-                )
+                with Vertical(classes="tool-column"):
+                    for spec in specs:
+                        yield Button(spec.name, id=f"tool-{spec.name}", classes="tool-button")
         yield Footer()
 
-    @on(ListView.Selected)
-    def open_tool(self, event: ListView.Selected) -> None:
-        identifier = event.item.id or ""
+    @on(Button.Pressed, "Button.tool-button")
+    def open_tool(self, event: Button.Pressed) -> None:
+        identifier = event.button.id or ""
         name = identifier.removeprefix("tool-")
         if catalog.is_offered(name):
             self.app.push_screen(RunScreen(name))
-
-    def action_choose(self) -> None:
-        focused = self.focused
-        if isinstance(focused, ListView):
-            focused.action_select_cursor()
 
 
 class RunScreen(Screen[None]):
@@ -671,6 +665,10 @@ class DocMaxApp(App[None]):
     CSS = """
     .title { text-style: bold; padding: 1 0; }
     .category { color: $text-muted; text-style: bold; padding: 1 0 0 0; }
+    .tool-column { height: auto; padding: 0 0 1 2; }
+    .tool-button { width: auto; min-width: 0; margin: 0 0 1 0; }
+    .tool-button:focus { text-style: bold reverse; }
+    .tool-button:hover { text-style: bold; background: $primary; }
     .hint { color: $text-muted; padding: 0 0 1 0; }
     .remedy { color: $accent; padding: 1 0 0 0; }
     .actions { height: auto; padding: 1 0; }
