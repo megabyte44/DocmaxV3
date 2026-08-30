@@ -65,6 +65,20 @@ if TYPE_CHECKING:
 #: deliberately want otherwise.
 _ENGINES = ("auto", "local", "cloud")
 
+#: Status-line glyphs, keyed by state rather than by anything a tool chose.
+#: ``RunScreen._set_status`` pairs each with a same-named CSS class
+#: (``status-running`` etc.) so colour and icon always move together — see
+#: issue #26: idle / running / succeeded / failed need to read as different
+#: states, not just different words in the same line. A cancelled run reports
+#: as ``"error"`` here: nothing was written, the same outcome a real failure
+#: leaves, and the ask names four states, not five.
+_STATUS_ICONS: dict[str, str] = {
+    "idle": "",
+    "running": "◐",
+    "success": "✔",
+    "error": "✘",
+}
+
 
 def _select(choices: tuple[str, ...], *, default: object, id_: str) -> Select[str]:
     """A ``Select`` whose "nothing chosen" state is spelled the same in every Textual.
@@ -392,7 +406,7 @@ class RunScreen(Screen[None]):
                 yield Button("Cancel run", variant="warning", id="cancel", disabled=True)
 
             yield ProgressBar(id="progress", show_eta=False)
-            yield Static("", id="status", markup=False)
+            yield Static("", id="status", classes="status-idle", markup=False)
         yield Static(
             "Ctrl+R Run   Ctrl+C Cancel   Esc Back   Tab Next field",
             id="help",
@@ -413,7 +427,7 @@ class RunScreen(Screen[None]):
         """Ask the run to stop. Never raises; never kills the app."""
         if self._token is not None:
             self._token.cancel()
-            self._set_status("Stopping…")
+            self._set_status("Stopping…", state="running")
 
     _force = False
 
@@ -433,7 +447,8 @@ class RunScreen(Screen[None]):
         self._set_status(
             "The output will be overwritten if it exists."
             if self._force
-            else "The output will not be overwritten."
+            else "The output will not be overwritten.",
+            state="idle",
         )
 
     @on(Button.Pressed, "#cancel")
@@ -446,7 +461,7 @@ class RunScreen(Screen[None]):
             return
         self._browsing = True
         self.query_one("#browse-inputs", Button).disabled = True
-        self._set_status("Opening the file browser…")
+        self._set_status("Opening the file browser…", state="running")
         self._browse()
 
     @work(thread=True, exclusive=True)
@@ -498,7 +513,7 @@ class RunScreen(Screen[None]):
         self._browsing = False
         self.query_one("#browse-inputs", Button).disabled = False
         if not chosen:
-            self._set_status("")
+            self._set_status("", state="idle")
             return
         field = self.query_one("#field-__inputs__", Input)
         if self.spec.accepts_multiple_inputs:
@@ -506,7 +521,7 @@ class RunScreen(Screen[None]):
         else:
             field.value = render_paths(chosen)
         self._update_input_hint()
-        self._set_status("")
+        self._set_status("", state="idle")
 
     @on(Button.Pressed, "#browse-output")
     def _on_browse_output(self) -> None:
@@ -514,7 +529,7 @@ class RunScreen(Screen[None]):
             return
         self._browsing_output = True
         self.query_one("#browse-output", Button).disabled = True
-        self._set_status("Opening the save dialog…")
+        self._set_status("Opening the save dialog…", state="running")
         self._browse_output()
 
     @work(thread=True, exclusive=True)
@@ -560,7 +575,7 @@ class RunScreen(Screen[None]):
         self.query_one("#browse-output", Button).disabled = False
         if chosen is not None:
             self.query_one("#field-__output__", Input).value = str(chosen)
-        self._set_status("")
+        self._set_status("", state="idle")
 
     @on(Input.Changed, "#field-__inputs__")
     def _on_inputs_changed(self) -> None:
@@ -594,7 +609,7 @@ class RunScreen(Screen[None]):
         self._run_in_progress = True
         self.query_one("#cancel", Button).disabled = False
         self.query_one("#run", Button).disabled = True
-        self._set_status("Running…")
+        self._set_status("Running…", state="running")
         self._execute(request)
 
     def _request(self, *, dry_run: bool, force: bool) -> runner.RunRequest:
@@ -725,7 +740,7 @@ class RunScreen(Screen[None]):
     def _progress_start(self, description: str, total: int | None) -> None:
         bar = self.query_one("#progress", ProgressBar)
         bar.update(total=total, progress=0)
-        self._set_status(description)
+        self._set_status(description, state="running")
 
     def _progress_advance(self, amount: int) -> None:
         self.query_one("#progress", ProgressBar).advance(amount)
@@ -744,11 +759,12 @@ class RunScreen(Screen[None]):
             self._set_status(
                 f"Dry run — would use the {result.engine_used.value} engine "
                 f"({result.details.get('reason', 'no reason given')}), "
-                f"writing {result.details.get('destination', '—')}."
+                f"writing {result.details.get('destination', '—')}.",
+                state="success",
             )
             return
         written = ", ".join(str(path) for path in result.outputs) or "nothing"
-        self._set_status(f"Wrote {written}  ·  {result.engine_used.value} engine")
+        self._set_status(f"Wrote {written}  ·  {result.engine_used.value} engine", state="success")
 
     def _ask_consent(self, exc: DocMaxError) -> bool:
         from docmax.core.errors import ConsentRequiredError
@@ -761,7 +777,7 @@ class RunScreen(Screen[None]):
         from docmax.core.errors import CancelledError, DocMaxError, InternalError
 
         if isinstance(exc, CancelledError):
-            self._set_status(f"{exc.message} Nothing was written.")
+            self._set_status(f"{exc.message} Nothing was written.", state="error")
             return
         if not isinstance(exc, DocMaxError):
             # The router wraps anything escaping a tool, so reaching here means
@@ -769,11 +785,23 @@ class RunScreen(Screen[None]):
             # than a stack trace: a user should never see one for a condition we
             # anticipated, and an unanticipated one becomes a bug report.
             exc = InternalError(str(exc) or exc.__class__.__name__)
-        self._set_status(exc.message)
+        self._set_status(exc.message, state="error")
         self.app.push_screen(ErrorScreen(exc))
 
-    def _set_status(self, text: str) -> None:
-        self.query_one("#status", Static).update(text)
+    def _set_status(self, text: str, *, state: str = "idle") -> None:
+        """Set the status line's text and its state-driven visual treatment.
+
+        ``state`` is one of ``idle`` / ``running`` / ``success`` / ``error``.
+        It selects a CSS class — colour and weight — and a small icon glyph
+        from ``_STATUS_ICONS``, so idle, running, succeeded and failed read as
+        genuinely different states rather than the same plain line with
+        different words in it. Driven entirely by ``state``, never by
+        anything about a particular tool.
+        """
+        widget = self.query_one("#status", Static)
+        widget.set_classes(f"status-{state}")
+        icon = _STATUS_ICONS.get(state, "")
+        widget.update(f"{icon}  {text}" if icon and text else text)
 
 
 class ConsentScreen(ModalScreen[bool]):
@@ -812,7 +840,15 @@ class ConsentScreen(ModalScreen[bool]):
 
 
 class ErrorScreen(ModalScreen[None]):
-    """A typed error, as its message and its remedy. Never a stack trace."""
+    """A typed error, as its message and its remedy. Never a stack trace.
+
+    An error is the moment a run stops mattering to a user the most, so this
+    modal is built to outweigh a routine status line: a heavier border in
+    ``$error`` rather than the ``$accent`` every other modal uses, and an icon
+    beside the error code rather than the code standing alone. Nothing here
+    is keyed on which tool failed or which error code it is — the weight
+    comes from the fact that it *is* an error, not from what kind.
+    """
 
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "close", "Close", show=True)]
 
@@ -822,8 +858,10 @@ class ErrorScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal error"):
-            yield Static(self.error.code.value, classes="title", markup=False)
-            yield Static(self.error.message, markup=False)
+            with Horizontal(classes="error-heading"):
+                yield Static("✘", classes="error-icon", markup=False)
+                yield Static(self.error.code.value, classes="title", markup=False)
+            yield Static(self.error.message, classes="error-message", markup=False)
             if self.error.remedy:
                 yield Static(f"→ {self.error.remedy}", classes="remedy", markup=False)
             with Horizontal(classes="actions"):
@@ -930,6 +968,15 @@ class DocMaxApp(App[None]):
     .component-label { color: $text-muted; text-style: bold; }
     #progress { padding: 1 0; }
 
+    /* Status line: idle / running / succeeded / failed read as distinct
+       states — colour and weight driven by ``RunScreen._set_status``'s
+       ``state``, never by anything about a particular tool. See issue #26. */
+    #status { padding: 0 0 1 0; }
+    #status.status-idle { color: $text-muted; text-style: none; }
+    #status.status-running { color: $warning; text-style: bold; }
+    #status.status-success { color: $success; text-style: bold; }
+    #status.status-error { color: $error; text-style: bold; }
+
     /* -- modals -------------------------------------------------------- */
 
     .modal {
@@ -939,7 +986,18 @@ class DocMaxApp(App[None]):
         border: round $accent;
         background: $surface;
     }
-    .modal.error { border: round $error; }
+    /* Heavier than the round/$accent border every other modal gets: an error
+       is deliberately the most visually weighty thing the TUI shows. */
+    .modal.error { border: heavy $error; background: $error 10%; }
+    .error-heading { height: auto; padding: 0 0 1 0; }
+    .error-icon {
+        width: auto;
+        color: $error;
+        text-style: bold;
+        padding: 0 1 0 0;
+    }
+    .modal.error .title { color: $error; padding: 0; }
+    .error-message { text-style: bold; padding: 0 0 1 0; }
     ModalScreen { align: center middle; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
