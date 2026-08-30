@@ -27,6 +27,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from docmax.server.app import create_app  # noqa: E402
+from docmax.server.app import create_app
 
 app = create_app()
