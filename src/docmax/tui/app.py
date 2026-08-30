@@ -33,15 +33,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
+from textual.widget import Widget
 from textual.widgets import (
     Button,
-    Footer,
-    Header,
     Input,
     Label,
     ProgressBar,
@@ -49,6 +48,7 @@ from textual.widgets import (
     Static,
 )
 
+from docmax import __version__
 from docmax.core.branding import APP_NAME
 from docmax.tui import catalog, forms, runner
 from docmax.tui.browser import merge_paths, pick_files, pick_save_path, render_paths
@@ -88,31 +88,105 @@ def _selected(widget: Select[str], choices: tuple[str, ...]) -> str:
     return value if isinstance(value, str) and value in choices else ""
 
 
+class Brand(Horizontal):
+    """The one-line header every screen shares: mark, subtitle, version.
+
+    A self-contained widget rather than a chunk of markup repeated in every
+    screen's ``compose`` — the same reuse ``forms.py`` exists for, applied to
+    chrome instead of a field.
+    """
+
+    DEFAULT_CSS = """
+    Brand {
+        height: 1;
+        background: $panel;
+    }
+    Brand > #brand-title {
+        width: auto;
+        color: $accent;
+        text-style: bold;
+        padding: 0 2;
+    }
+    Brand > #brand-sub {
+        width: 1fr;
+        color: $text-muted;
+    }
+    Brand > #brand-version {
+        width: auto;
+        color: $text-muted;
+        padding: 0 2;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"◆ {APP_NAME.upper()}", id="brand-title", markup=False)
+        yield Static("PDF Toolkit", id="brand-sub", markup=False)
+        yield Static(f"v{__version__}", id="brand-version", markup=False)
+
+
 class ToolListScreen(Screen[None]):
-    """Every offered tool, grouped by category, as a compact vertical list.
+    """The workspace: every offered tool, grouped by category, plus a live
+    preview of whatever is focused and a filter over the whole list.
 
     A full-width row per tool — name, then its summary — read as "there are
     only a handful of these" once there were nineteen, and a wide grid that
     spread them across the screen read as scattered rather than organised. A
     button names one tool and nothing else, stacked directly under its
-    category heading; the summary is still the first thing ``RunScreen``
-    shows, one keypress away, so nothing here is lost, only deferred until it
-    is wanted.
+    category heading; the summary is still the first thing the preview pane
+    and ``RunScreen`` show, one keypress or one focus-change away, so nothing
+    here is lost, only deferred until it is wanted.
+
+    The nav column's structure — same ids, same classes, same vertical
+    stacking order — is unchanged from before this screen grew a search box
+    and a preview pane either side of it: ``tests/unit/test_tui.py`` pins
+    that shape, deliberately, as the seam a future redesign should respect
+    too.
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "app.quit", "Quit", show=True),
+        Binding("/", "focus_search", "Search", show=True),
+        Binding("up", "cursor_up", "Navigate", show=True),
+        Binding("down", "cursor_down", "Navigate", show=False),
+        Binding("left", "previous_category", "Category", show=True),
+        Binding("right", "next_category", "Category", show=False),
+        Binding("escape", "clear_search", "Clear search", show=False),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._specs_by_name: dict[str, ToolSpec] = {}
+
     def compose(self) -> ComposeResult:
-        yield Header()
-        with VerticalScroll(id="tools"):
-            for category, specs in catalog.categories().items():
-                yield Static(category.upper(), classes="category")
-                with Vertical(classes="tool-column"):
-                    for spec in specs:
-                        yield Button(spec.name, id=f"tool-{spec.name}", classes="tool-button")
-        yield Footer()
+        yield Brand()
+        with Horizontal(id="body"):
+            with Vertical(id="sidebar"):
+                yield Input(placeholder="/ search tools…", id="search")
+                with VerticalScroll(id="tools"):
+                    for category, specs in catalog.categories().items():
+                        yield Static(category.upper(), classes="category")
+                        with Vertical(classes="tool-column"):
+                            for spec in specs:
+                                yield Button(
+                                    spec.name, id=f"tool-{spec.name}", classes="tool-button"
+                                )
+            with VerticalScroll(id="preview"):
+                yield Static("Select a tool", id="preview-title", classes="title", markup=False)
+                yield Static(
+                    "Use the arrow keys to browse, Enter to open, / to search.",
+                    id="preview-body",
+                    classes="hint",
+                    markup=False,
+                )
+        yield Static(
+            "↑↓ Navigate   ←→ Category   Enter Open   / Search   Esc Clear   q Quit",
+            id="help",
+            classes="help-bar",
+            markup=False,
+        )
+
+    def on_mount(self) -> None:
+        self._specs_by_name = {spec.name: spec for spec in catalog.offered_tools()}
 
     @on(Button.Pressed, "Button.tool-button")
     def open_tool(self, event: Button.Pressed) -> None:
@@ -120,6 +194,105 @@ class ToolListScreen(Screen[None]):
         name = identifier.removeprefix("tool-")
         if catalog.is_offered(name):
             self.app.push_screen(RunScreen(name))
+
+    # -- live preview ---------------------------------------------------
+
+    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
+        """Show whatever tool just received focus, keyboard or mouse alike."""
+        identifier = event.widget.id or ""
+        name = identifier.removeprefix("tool-")
+        spec = self._specs_by_name.get(name)
+        if spec is not None:
+            self._show_preview(spec)
+
+    def _show_preview(self, spec: ToolSpec) -> None:
+        engines = ", ".join(sorted(engine.value for engine in spec.supported_engines))
+        output = "a directory" if spec.produces_directory else f"a {spec.default_suffix} file"
+        inputs = "multiple documents" if spec.accepts_multiple_inputs else "one document"
+        self.query_one("#preview-title", Static).update(spec.name)
+        self.query_one("#preview-body", Static).update(
+            "\n".join(
+                [
+                    spec.summary,
+                    "",
+                    f"category   {spec.category}",
+                    f"engines    {engines}",
+                    f"input      {inputs}",
+                    f"output     {output}",
+                    "",
+                    "Enter to open this tool.",
+                ]
+            )
+        )
+
+    # -- search / filter --------------------------------------------------
+
+    def action_focus_search(self) -> None:
+        self.query_one("#search", Input).focus()
+
+    def action_clear_search(self) -> None:
+        search = self.query_one("#search", Input)
+        if search.value:
+            search.value = ""
+        search.focus()
+
+    @on(Input.Changed, "#search")
+    def _on_search_changed(self, event: Input.Changed) -> None:
+        self._filter(event.value.strip().lower())
+
+    def _filter(self, query: str) -> None:
+        headings = list(self.query(".category"))
+        columns = list(self.query(".tool-column"))
+        for heading, column in zip(headings, columns, strict=True):
+            buttons = list(column.query(".tool-button"))
+            visible = [self._matches(button, query) for button in buttons]
+            for button, keep in zip(buttons, visible, strict=True):
+                button.display = keep
+            column.display = any(visible)
+            heading.display = column.display
+
+    def _matches(self, button: Widget, query: str) -> bool:
+        if not query:
+            return True
+        name = (button.id or "").removeprefix("tool-")
+        spec = self._specs_by_name.get(name)
+        haystack = f"{name} {spec.summary if spec else ''}".lower()
+        return query in haystack
+
+    # -- keyboard navigation ----------------------------------------------
+
+    def action_cursor_down(self) -> None:
+        self.focus_next()
+
+    def action_cursor_up(self) -> None:
+        self.focus_previous()
+
+    def action_next_category(self) -> None:
+        self._jump_category(1)
+
+    def action_previous_category(self) -> None:
+        self._jump_category(-1)
+
+    def _jump_category(self, direction: int) -> None:
+        buttons = [button for button in self.query(".tool-button") if button.display]
+        if not buttons:
+            return
+        boundaries = self._category_boundaries()
+        focused = self.focused
+        current = buttons.index(focused) if focused in buttons else 0
+        segment = max(index for index, start in enumerate(boundaries) if start <= current)
+        target = (segment + direction) % len(boundaries)
+        buttons[boundaries[target]].focus()
+
+    def _category_boundaries(self) -> list[int]:
+        boundaries = []
+        index = 0
+        for column in self.query(".tool-column"):
+            if not column.display:
+                continue
+            boundaries.append(index)
+            index += len([button for button in column.query(".tool-button") if button.display])
+        return boundaries or [0]
 
 
 class RunScreen(Screen[None]):
@@ -162,9 +335,10 @@ class RunScreen(Screen[None]):
         spec = self.spec
         self._fields = forms.fields_for(spec)
 
-        yield Header()
-        with VerticalScroll(id="form"):
-            yield Static(f"{spec.name} — {spec.summary}", classes="title", markup=False)
+        yield Brand()
+        with VerticalScroll(id="form"), Vertical(classes="panel"):
+            yield Static(spec.name, classes="title", markup=False)
+            yield Static(spec.summary, classes="hint", markup=False)
 
             plural = "s, comma-separated" if spec.accepts_multiple_inputs else ""
             yield Label(f"input{plural}")
@@ -219,7 +393,12 @@ class RunScreen(Screen[None]):
 
             yield ProgressBar(id="progress", show_eta=False)
             yield Static("", id="status", markup=False)
-        yield Footer()
+        yield Static(
+            "Ctrl+R Run   Ctrl+C Cancel   Esc Back   Tab Next field",
+            id="help",
+            classes="help-bar",
+            markup=False,
+        )
 
     # -- actions ------------------------------------------------------------
 
@@ -659,18 +838,88 @@ class ErrorScreen(ModalScreen[None]):
 
 
 class DocMaxApp(App[None]):
-    """The application shell."""
+    """The application shell.
+
+    Styling leans on Textual's own design tokens (``$accent``, ``$panel``,
+    ``$text-muted``, …) and a bundled theme, rather than hardcoded colours —
+    the same reason ``core/branding.py`` is the only place that names the
+    product: one seam to change, not colours scattered through every screen.
+    """
 
     TITLE = APP_NAME
     CSS = """
-    .title { text-style: bold; padding: 1 0; }
-    .category { color: $text-muted; text-style: bold; padding: 1 0 0 0; }
-    .tool-column { height: auto; padding: 0 0 1 2; }
-    .tool-button { width: auto; min-width: 0; margin: 0 0 1 0; }
-    .tool-button:focus { text-style: bold reverse; }
-    .tool-button:hover { text-style: bold; background: $primary; }
+    Screen { background: $background; }
+
+    .title { text-style: bold; color: $foreground; padding: 0 0 1 0; }
     .hint { color: $text-muted; padding: 0 0 1 0; }
     .remedy { color: $accent; padding: 1 0 0 0; }
+
+    /* -- workspace: sidebar + preview -------------------------------- */
+
+    #body { height: 1fr; }
+
+    #sidebar {
+        width: 38;
+        border-right: solid $panel-lighten-1;
+        padding: 0 1;
+    }
+    #search { margin: 1 1 1 0; }
+    #tools { padding: 0 1 1 0; }
+
+    .category {
+        color: $accent;
+        text-style: bold;
+        padding: 1 0 0 1;
+    }
+    .tool-column { height: auto; padding: 0 0 0 1; }
+    /* Button's built-in default style sets border-top/border-bottom as
+       separate longhand rules of equal-or-higher specificity than a plain
+       class selector, so a shorthand `border: none` here is silently lost.
+       Matching on type-plus-class (`Button.tool-button`) wins the tie and
+       turns the button into a flat row instead of a boxed widget. */
+    Button.tool-button {
+        width: auto;
+        min-width: 0;
+        margin: 0;
+        padding: 0 2;
+        border-top: none;
+        border-bottom: none;
+        background: transparent;
+        color: $foreground;
+    }
+    Button.tool-button:focus {
+        text-style: bold;
+        color: $text;
+        background: $accent 30%;
+    }
+    Button.tool-button:hover {
+        color: $accent;
+        border-top: none;
+        background: transparent;
+    }
+
+    #preview {
+        width: 1fr;
+        padding: 1 3;
+    }
+    #preview-title { color: $accent; text-style: bold; padding: 0 0 1 0; }
+
+    .help-bar {
+        height: 1;
+        background: $panel;
+        color: $text-muted;
+        padding: 0 2;
+    }
+
+    /* -- run screen: a single card ------------------------------------ */
+
+    #form { padding: 1 2; }
+    .panel {
+        height: auto;
+        border: round $panel-lighten-2;
+        background: $surface;
+        padding: 1 2;
+    }
     .actions { height: auto; padding: 1 0; }
     .actions Button { margin-right: 1; }
     .input-row { height: auto; }
@@ -679,24 +928,26 @@ class DocMaxApp(App[None]):
     .component-row { height: auto; }
     .component { width: 1fr; margin-right: 1; height: auto; }
     .component-label { color: $text-muted; text-style: bold; }
+    #progress { padding: 1 0; }
+
+    /* -- modals -------------------------------------------------------- */
+
     .modal {
         width: 70;
         height: auto;
         padding: 1 2;
-        border: thick $primary;
+        border: round $accent;
         background: $surface;
     }
-    .modal.error { border: thick $error; }
+    .modal.error { border: round $error; }
     ModalScreen { align: center middle; }
-    #form { padding: 0 2; }
-    #tools { padding: 0 2; }
-    #progress { padding: 1 0; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
     def on_mount(self) -> None:
+        self.theme = "tokyo-night"
         self.push_screen(ToolListScreen())
 
 
