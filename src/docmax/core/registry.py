@@ -93,6 +93,17 @@ class ToolSpec:
     params: tuple[Param, ...] = ()
     #: ``merge`` and ``from-images`` take several inputs; most tools take one.
     accepts_multiple_inputs: bool = False
+    #: ``get-info``, ``permissions`` and a bare ``metadata`` write nothing —
+    #: the answer travels in ``ToolResult.details`` instead. Defaults to
+    #: ``True`` so every other tool needs no edit. ``EngineRouter.target_for``
+    #: reads this to skip ``OutputTarget.resolve`` entirely for such a tool,
+    #: and every interface reads it to skip asking for ``-o`` in the first
+    #: place — see ADR 0036. Before this flag existed, each interface worked
+    #: around the gap on its own: the CLI built a throwaway ``OutputTarget``
+    #: by hand in ``execute_read_only`` rather than calling ``target_for``,
+    #: and the TUI had no such workaround at all, so it asked for an output
+    #: path a report-only tool would never use.
+    produces_output: bool = True
     #: Used by ``OutputTarget.resolve`` when the user does not pass ``-o``.
     default_suffix: str = ".pdf"
     #: ``split`` and ``to-images`` write many files into ``-o`` as a directory

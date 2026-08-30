@@ -780,6 +780,37 @@ def test_get_info_writes_nothing(router: EngineRouter, tmp_path: Path) -> None:
     assert not out.exists()
 
 
+def test_get_info_declares_that_it_produces_no_output(router: EngineRouter) -> None:
+    """ADR 0036: the generic flag every interface reads to skip asking for
+    `-o` in the first place, rather than asking and discovering it did not
+    matter."""
+    assert get_tool("get-info").produces_output is False
+
+
+def test_get_infos_target_is_never_resolved_or_checked(
+    router: EngineRouter, tmp_path: Path
+) -> None:
+    """The router-level half of ADR 0036: whatever an interface put in an
+    output field is never even looked at, and an existing file at that path
+    is never a reason to refuse the run."""
+    source = write_pdf(tmp_path / "doc.pdf", 1)
+    collision = tmp_path / "already-exists.pdf"
+    collision.write_bytes(b"a previous run")
+
+    target = router.target_for("get-info", [DocumentRef.from_path(source)], requested=str(source))
+    assert target.destination == source.resolve()
+
+    result = router.run(
+        "get-info",
+        [DocumentRef.from_path(source)],
+        router.target_for("get-info", [DocumentRef.from_path(source)], requested=str(collision)),
+        progress=NULL_PROGRESS,
+        cancellation=NEVER_CANCELLED,
+    )
+    assert result.outputs == ()
+    assert collision.read_bytes() == b"a previous run", "the pre-existing file must be untouched"
+
+
 def test_get_info_reports_encryption_rather_than_refusing(
     router: EngineRouter, tmp_path: Path
 ) -> None:

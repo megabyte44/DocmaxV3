@@ -1069,6 +1069,31 @@ def test_permissions_writes_nothing(router: EngineRouter, source: Path, tmp_path
     assert not unused.exists()
 
 
+def test_permissions_declares_that_it_produces_no_output(router: EngineRouter) -> None:
+    """ADR 0036: the same generic flag `get-info` declares."""
+    assert get_tool("permissions").produces_output is False
+
+
+def test_permissions_target_is_never_resolved_or_checked(
+    router: EngineRouter, source: Path, tmp_path: Path
+) -> None:
+    """An existing file at whatever path an interface happened to have in an
+    output field is never a reason to refuse a `permissions` run."""
+    collision = tmp_path / "already-exists.pdf"
+    collision.write_bytes(b"a previous run")
+
+    result = router.run(
+        "permissions",
+        [DocumentRef.from_path(source)],
+        router.target_for("permissions", [DocumentRef.from_path(source)], requested=str(collision)),
+        progress=NULL_PROGRESS,
+        cancellation=NEVER_CANCELLED,
+    )
+
+    assert result.outputs == ()
+    assert collision.read_bytes() == b"a previous run"
+
+
 def test_permissions_reports_everything_allowed_for_an_unencrypted_document(
     router: EngineRouter, source: Path, tmp_path: Path
 ) -> None:

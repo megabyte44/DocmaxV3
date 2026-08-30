@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
     from docmax.core.cancellation import CancellationToken
     from docmax.core.models import DocumentRef, OutputTarget
-    from docmax.core.protocols import EngineStrategy, ProgressSink
+    from docmax.core.protocols import EngineStrategy, MissingDependency, ProgressSink
 
 #: The recogniser, and the rasteriser. Both are declared in ``_binaries`` with
 #: their per-platform install lines, and ``doctor`` has reported on both since M0.
@@ -142,6 +142,32 @@ class OcrLocal:
         if not missing:
             return None
         return f"Not installed: {', '.join(missing)}. {install_hint()}"
+
+    def missing_dependencies(self) -> tuple[MissingDependency, ...]:
+        """Structured detail behind :meth:`unavailable_reason`, for a TUI dialog.
+
+        The optional, duck-typed extra ``EngineStrategy`` documents —
+        ``EngineRouter.missing_dependencies`` reads it with ``getattr``
+        rather than requiring it, so this is the one method that turns "the
+        local engine is unavailable" into "Dependency Required: Tesseract".
+
+        Binaries only, for the same reason :func:`is_available` excludes
+        OpenCV: a ``--deskew``-only Python dependency must not appear as a
+        reason the whole engine cannot run.
+        """
+        from docmax.core.protocols import MissingDependency
+
+        return tuple(
+            MissingDependency(
+                name=_binaries.describe(name).name,
+                reason=f"OCR cannot run because {_binaries.describe(name).name} is not installed.",
+                url=_binaries.describe(name).homepage or None,
+            )
+            # `missing_dependencies()` — the module function above — is what
+            # `is_available` itself calls; reusing it here is what keeps this
+            # method and that check unable to disagree.
+            for name in missing_dependencies()
+        )
 
     def run(
         self,

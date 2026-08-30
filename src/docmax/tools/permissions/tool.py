@@ -20,6 +20,8 @@ SPEC = register(
         # could make faster.
         supported_engines=frozenset({Engine.LOCAL}),
         accepts_multiple_inputs=False,
+        # Read-only: the answer travels in ToolResult.details. See ADR 0036.
+        produces_output=False,
         params=(
             Param(
                 name="password",

@@ -598,6 +598,75 @@ def test_a_missing_dependency_is_reported_with_an_install_command() -> None:
     assert "--engine cloud" in install_hint()
 
 
+def test_missing_dependencies_is_empty_when_everything_is_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optional, duck-typed extra `protocols.py` documents: deterministic
+    here, unlike `unavailable_reason` above, because the whole point is not
+    to depend on what happens to be on this machine's PATH."""
+    from docmax.tools.ocr.local import OcrLocal
+
+    monkeypatch.setattr(_binaries, "find", lambda name: f"/usr/bin/{name}")
+
+    assert OcrLocal().missing_dependencies() == ()
+
+
+def test_missing_dependencies_names_exactly_whats_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One `MissingDependency` per absent binary, each carrying the official
+    install page `_binaries.py` declares for it — never a name this test
+    invented, and never a third-party mirror."""
+    from docmax.tools.ocr.local import OcrLocal
+
+    def find(name: str) -> str | None:
+        return "/usr/bin/pdftoppm" if name == "pdftoppm" else None
+
+    monkeypatch.setattr(_binaries, "find", find)
+
+    (missing,) = OcrLocal().missing_dependencies()
+
+    assert missing.name == "tesseract"
+    assert "OCR" in missing.reason
+    assert "tesseract" in missing.reason.lower()
+    assert missing.url == _binaries.describe("tesseract").homepage
+    assert missing.url is not None
+    assert missing.url.startswith("https://")
+
+
+def test_missing_dependencies_excludes_opencv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OpenCV is a `--deskew`-only Python dependency and must never appear as
+    a reason the whole engine is unavailable — the same rule
+    `missing_dependencies()` (the module function) already applies to
+    `is_available`."""
+    from docmax.tools.ocr.local import OcrLocal
+
+    monkeypatch.setattr(_binaries, "find", lambda name: f"/usr/bin/{name}")
+
+    reported = OcrLocal().missing_dependencies()
+
+    assert not any("opencv" in dependency.name.lower() for dependency in reported)
+    assert not any("cv2" in dependency.name.lower() for dependency in reported)
+
+
+def test_the_router_reports_ocrs_missing_dependencies_generically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other end of the same mechanism: `EngineRouter.missing_dependencies`
+    reads `OcrLocal`'s method by `getattr`, exactly as it would for any other
+    tool that implemented one — this test is the one place that exercises
+    both halves together through the real registry. No registry refresh is
+    needed: `load_strategy` builds a fresh `OcrLocal()` on every call, so the
+    `_binaries.find` patch below is picked up regardless of when `ocr` was
+    first registered."""
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+
+    router = EngineRouter()
+    reported = router.missing_dependencies("ocr", Engine.LOCAL)
+
+    names = {dependency.name for dependency in reported}
+    assert names == {"tesseract", "pdftoppm"}
+    assert all(dependency.url for dependency in reported)
+
+
 # ---------------------------------------------------------------------------
 # Failure, validation and atomicity
 # ---------------------------------------------------------------------------
