@@ -69,3 +69,6 @@ desktop.ini
 # DOCMAX_API_KEY environment variable, never in the repo.
 .env
 *.local.toml
+
+.vercel
+.env*

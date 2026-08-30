@@ -1,8 +1,11 @@
 """Vercel entrypoint for the Cloud Engine.
 
-Vercel's Python runtime looks for an ASGI ``app`` here and calls it directly —
-it never runs ``python -m docmax.server`` or imports ``uvicorn``, so
-``server/__main__.py`` is not part of this path at all.
+Vercel's zero-config Python/FastAPI preset only looks for an ``app`` instance
+at the project root or inside ``src/``/``app/`` — never inside ``api/``. An
+earlier version of this file lived at ``api/index.py``; the preset detected
+FastAPI (from ``requirements.txt``) but couldn't find a supported entrypoint,
+and the deployed function crashed on the first request instead of failing at
+build time. This is that fix.
 
 The server package is deliberately excluded from the built wheel (see
 ``pyproject.toml``'s ``packages.find.exclude``) because it ships from a
@@ -22,7 +25,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from docmax.server.app import create_app  # noqa: E402
 

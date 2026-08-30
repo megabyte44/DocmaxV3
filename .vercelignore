@@ -1,0 +1,46 @@
+# Vercel's Python builder prefers pyproject.toml over requirements.txt when
+# both are present and no lockfile pins it. This project's pyproject.toml is
+# the real package manifest — its base [project.dependencies] deliberately
+# excludes fastapi (see pyproject.toml's `server` extra comment and CLAUDE.md
+# rule #3: installing DocMax should never install a web framework by
+# accident). Left visible to Vercel, that means the deploy silently installs
+# only the base deps and every request crashes with
+# "ModuleNotFoundError: No module named 'fastapi'".
+#
+# Hiding it here forces Vercel to fall back to requirements.txt, which is
+# the deployment-specific dependency list this actually needs.
+pyproject.toml
+
+# Creating this file makes Vercel stop honoring .gitignore for uploads, so
+# everything below is a duplicate of .gitignore's excludes — none of it is
+# needed at runtime, and without it the upload includes .venv/ and every
+# dev cache (multiple hundred MB) instead of the ~50KB of source this
+# function actually needs.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+.import_linter_cache/
+tests/
+docs/
+benchmarks/
+.github/
+.vscode/
+.idea/
+.claude/
+.git/
+.vercel/
+.env*
