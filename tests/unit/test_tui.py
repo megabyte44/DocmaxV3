@@ -675,6 +675,8 @@ def test_every_tool_buttons_label_is_its_own_name() -> None:
     sample."""
     import asyncio
 
+    from textual.widgets import Button
+
     from docmax.tui.app import DocMaxApp
 
     async def scenario() -> dict[str, str]:
@@ -682,7 +684,8 @@ def test_every_tool_buttons_label_is_its_own_name() -> None:
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             return {
-                button.id or "": str(button.label) for button in app.screen.query(".tool-button")
+                button.id or "": str(button.label)
+                for button in app.screen.query(Button).filter(".tool-button")
             }
 
     labels = asyncio.run(scenario())
@@ -745,12 +748,13 @@ def test_tab_moves_focus_across_tools_in_the_offered_order() -> None:
             buttons = list(app.screen.query(".tool-button"))
             buttons[0].focus()
             await pilot.pause()
-            focused = [app.screen.focused.id]
+            assert app.screen.focused is not None
+            focused = [app.screen.focused.id or ""]
             for _ in range(len(buttons) - 1):
                 await pilot.press("tab")
                 await pilot.pause()
                 assert app.screen.focused is not None
-                focused.append(app.screen.focused.id)
+                focused.append(app.screen.focused.id or "")
             return focused
 
     focused = asyncio.run(scenario())
