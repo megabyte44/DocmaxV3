@@ -144,6 +144,7 @@ class OutputTarget:
         inputs: Sequence[DocumentRef],
         requested: Path | str | None = None,
         default_suffix: str = ".pdf",
+        produces_directory: bool = False,
         force: bool = False,
     ) -> OutputTarget:
         """Validate a requested destination against the inputs it came from.
@@ -152,12 +153,33 @@ class OutputTarget:
         inputs, and :class:`OutputExistsError` if it exists without ``force``.
         Neither condition is recoverable further down: by the time bytes are
         being written, the source may already be gone.
+
+        An extensionless ``requested`` gets ``default_suffix`` appended for a
+        file-producing tool — a user who types ``-o merged`` and gets a file
+        Windows opens in Notepad has not been served by treating that case
+        differently from the derive-from-input branch below, which has always
+        appended it. A ``requested`` that already carries *any* suffix, right
+        or wrong, is left exactly as given: this fills in one missing piece,
+        it does not validate what the user chose. ``.tar.gz``-style double
+        suffixes are unaffected either way, since ``Path.suffix`` already sees
+        a non-empty ``.gz``.
+
+        ``produces_directory`` (``ToolSpec.produces_directory`` — ``split``,
+        ``to-images``; see ADR 0031) turns that appending off entirely. A
+        directory's name almost never has a dot in it, and "no suffix" is the
+        *correct*, ordinary shape for one — appending ``default_suffix`` to
+        ``-o parts`` would turn a real directory into a file-shaped path named
+        ``parts.pdf`` that the tool then creates as a directory anyway,
+        silently going where the caller did not ask it to.
         """
         if requested is not None:
             destination = Path(requested).expanduser().resolve()
+            if not produces_directory and not destination.suffix:
+                destination = destination.with_suffix(default_suffix)
         elif inputs:
             first = inputs[0].path
-            destination = first.with_name(f"{first.stem}{default_suffix}")
+            name = first.stem if produces_directory else f"{first.stem}{default_suffix}"
+            destination = first.with_name(name)
         else:
             raise InvalidParameterError(
                 "No output path was given, and there is no input to derive one from.",

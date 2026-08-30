@@ -105,6 +105,22 @@ def test_split_writes_a_directory_of_parts(real_router: None, source: Path, tmp_
     assert len(list(out.glob("*.pdf"))) == 4
 
 
+def test_an_extensionless_output_names_a_directory_not_pdf_pdf(
+    real_router: None, source: Path, tmp_path: Path
+) -> None:
+    """Requirement 4, ADR 0031: `-o parts` with no extension names the
+    directory `parts` — not `parts.pdf`, which is what a file-shaped
+    normalisation would have produced (and did, before the fix)."""
+    out = tmp_path / "parts"
+
+    result = runner.invoke(app, ["split", str(source), "-o", str(out)])
+
+    assert result.exit_code == 0, shown(result)
+    assert out.is_dir()
+    assert not (tmp_path / "parts.pdf").exists()
+    assert len(list(out.glob("*.pdf"))) == 4
+
+
 def test_split_honours_every(real_router: None, source: Path, tmp_path: Path) -> None:
     out = tmp_path / "parts"
 
@@ -412,7 +428,12 @@ WRITING_COMMANDS = (
 def test_an_existing_output_needs_force(
     real_router: None, source: Path, tmp_path: Path, command: str, extra: list[str]
 ) -> None:
-    out = tmp_path / "existing"
+    """The pre-existing file is named after the command's own placeholder —
+    ``OUT.pdf`` for a file-producing command, bare ``OUT`` for `split`, whose
+    output is a directory (ADR 0031) — so it sits exactly where
+    ``OutputTarget.resolve`` will actually check, file-shaped or not."""
+    placeholder = next(a for a in extra if a.startswith("OUT"))
+    out = tmp_path / placeholder.replace("OUT", "existing")
     out.write_bytes(b"a previous run")
     args = [command, str(source), *[str(out) if a.startswith("OUT") else a for a in extra]]
 

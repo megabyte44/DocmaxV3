@@ -149,6 +149,199 @@ def test_an_explicit_destination_is_honoured(tmp_path: Path, document: DocumentR
     assert target.force is False
 
 
+def test_an_extensionless_explicit_destination_gets_the_tools_default_suffix(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """Requirement 1. `-o merged` for a PDF-producing tool must not hand
+    Windows a file with no extension to guess at — it opened `merged` in
+    Notepad rather than a PDF viewer, because there was nothing to tell it
+    otherwise. The derive-from-input branch already appends `default_suffix`;
+    an explicit destination with no suffix of its own gets the same treatment,
+    for the same reason."""
+    target = OutputTarget.resolve(
+        inputs=[document], requested=tmp_path / "merged", default_suffix=".pdf"
+    )
+
+    assert target.destination == tmp_path / "merged.pdf"
+
+
+def test_an_explicit_destination_that_already_has_the_suffix_is_unchanged(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """Requirement 2 and 3. `-o merged.pdf` must stay `merged.pdf` — never
+    `merged.pdf.pdf`."""
+    target = OutputTarget.resolve(
+        inputs=[document], requested=tmp_path / "merged.pdf", default_suffix=".pdf"
+    )
+
+    assert target.destination == tmp_path / "merged.pdf"
+    assert target.destination.name.count(".pdf") == 1
+
+
+def test_an_explicit_destination_with_a_different_extension_is_left_alone(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """A tool whose output format depends on a parameter — `convert --to
+    docx` — must not have its user-chosen extension second-guessed just
+    because it differs from `default_suffix`. Only a *missing* suffix is
+    filled in; a present one, right or wrong for the operation, is the user's
+    own explicit choice and is never overridden."""
+    target = OutputTarget.resolve(
+        inputs=[document], requested=tmp_path / "result.docx", default_suffix=".pdf"
+    )
+
+    assert target.destination == tmp_path / "result.docx"
+
+
+def test_a_multi_dotted_suffix_is_not_touched(tmp_path: Path, document: DocumentRef) -> None:
+    """`Path.suffix` already sees `.gz` as a real suffix, so `archive.tar.gz`
+    never enters the extensionless branch at all — this pins that rather than
+    leaving it as an accident of `Path.suffix`'s own behaviour."""
+    target = OutputTarget.resolve(
+        inputs=[document], requested=tmp_path / "archive.tar.gz", default_suffix=".pdf"
+    )
+
+    assert target.destination == tmp_path / "archive.tar.gz"
+
+
+def test_an_extensionless_destination_is_still_checked_for_collision(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """Requirement 4 (part 1): normalisation happens before the in-place
+    check, not after — an extensionless request for the input's own stem must
+    still be refused, the same as if the user had typed the extension."""
+    with pytest.raises(InPlaceOverwriteError):
+        OutputTarget.resolve(
+            inputs=[document],
+            requested=document.path.with_suffix(""),
+            default_suffix=document.suffix,
+        )
+
+
+def test_an_extensionless_destination_that_exists_still_needs_force(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """Requirement 4 (part 2): the existing-output check also sees the
+    normalised name, not the one the user typed."""
+    existing = tmp_path / "merged.pdf"
+    existing.write_bytes(b"a previous run")
+
+    with pytest.raises(OutputExistsError):
+        OutputTarget.resolve(
+            inputs=[document], requested=tmp_path / "merged", default_suffix=".pdf"
+        )
+
+    target = OutputTarget.resolve(
+        inputs=[document], requested=tmp_path / "merged", default_suffix=".pdf", force=True
+    )
+    assert target.destination == existing
+
+
+# ---------------------------------------------------------------------------
+# OutputTarget — produces_directory (ADR 0031)
+# ---------------------------------------------------------------------------
+
+
+def test_a_directory_destination_keeps_its_extensionless_name(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """Requirement 4/5: `split`/`to-images` name a directory with `-o`, and a
+    directory almost never has a dot in it — that is the ordinary, correct
+    shape, not a missing extension to be corrected."""
+    target = OutputTarget.resolve(
+        inputs=[document],
+        requested=tmp_path / "parts",
+        default_suffix=".pdf",
+        produces_directory=True,
+    )
+
+    assert target.destination == tmp_path / "parts"
+    assert target.destination.suffix == ""
+
+
+def test_a_directory_destination_with_a_dot_in_its_name_is_still_untouched(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """A directory happens to have a dot in its name sometimes — `produces_directory`
+    does not go looking for one to react to either way; it simply never appends."""
+    target = OutputTarget.resolve(
+        inputs=[document],
+        requested=tmp_path / "v1.2-pages",
+        default_suffix=".pdf",
+        produces_directory=True,
+    )
+
+    assert target.destination == tmp_path / "v1.2-pages"
+
+
+def test_a_directory_destination_derived_from_the_first_input_has_no_suffix(
+    tmp_path: Path,
+) -> None:
+    """The derive-from-input branch is symmetric with the explicit-path one:
+    a directory-shaped tool derives a directory-shaped name."""
+    source = tmp_path / "doc.pdf"
+    source.write_bytes(b"x")
+    document = DocumentRef.from_path(source)
+
+    target = OutputTarget.resolve(inputs=[document], default_suffix=".pdf", produces_directory=True)
+
+    assert target.destination == tmp_path / "doc"
+
+
+def test_a_directory_destination_that_collides_with_an_input_is_refused(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """Requirement 6 (directory half): the in-place check applies identically
+    regardless of what `produces_directory` says — asking for the input's own
+    path as a directory-shaped destination is exactly as refused as asking
+    for it as a file-shaped one."""
+    with pytest.raises(InPlaceOverwriteError):
+        OutputTarget.resolve(
+            inputs=[document],
+            requested=document.path,
+            default_suffix=".pdf",
+            produces_directory=True,
+        )
+
+
+def test_a_directory_destination_that_exists_needs_force(
+    tmp_path: Path, document: DocumentRef
+) -> None:
+    """Requirement 6/7 (directory half): existence and force behave exactly
+    as they do for a file destination — `OutputTarget` never distinguishes a
+    file from a directory for these two checks, only for the suffix."""
+    existing = tmp_path / "parts"
+    existing.mkdir()
+
+    with pytest.raises(OutputExistsError):
+        OutputTarget.resolve(
+            inputs=[document],
+            requested=existing,
+            default_suffix=".pdf",
+            produces_directory=True,
+        )
+
+    target = OutputTarget.resolve(
+        inputs=[document],
+        requested=existing,
+        default_suffix=".pdf",
+        produces_directory=True,
+        force=True,
+    )
+    assert target.destination == existing
+    assert target.force is True
+
+
+def test_split_and_to_images_are_the_only_directory_producing_tools() -> None:
+    """Requirement 9 (the registry half): confirmed by inspecting all
+    nineteen registered tools — CLI help text, `local.py`'s use of
+    `atomic_dir`, and ADR 0003's own list all agree on exactly these two."""
+    from docmax.core.registry import build_registry
+
+    directory_tools = {name for name, spec in build_registry().items() if spec.produces_directory}
+    assert directory_tools == {"split", "to-images"}
+
+
 def test_a_destination_is_derived_from_the_first_input(tmp_path: Path) -> None:
     source = tmp_path / "scan.tiff"
     source.write_bytes(b"x")

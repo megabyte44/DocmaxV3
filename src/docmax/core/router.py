@@ -249,6 +249,7 @@ class EngineRouter:
             inputs=docs,
             requested=requested,
             default_suffix=spec.default_suffix,
+            produces_directory=spec.produces_directory,
             force=force,
         )
 

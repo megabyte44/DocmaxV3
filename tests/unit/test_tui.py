@@ -182,6 +182,69 @@ def test_an_unknown_type_still_renders_as_text() -> None:
     assert forms.field_for(Param(name="p", description="d", type_="mystery")).kind == "text"
 
 
+# ---------------------------------------------------------------------------
+# Composite fields (ADR 0032) — a comma-separated value with labelled parts
+# ---------------------------------------------------------------------------
+
+
+def test_field_for_copies_component_labels_from_the_param() -> None:
+    param = Param(name="box", description="d", component_labels=("x", "y", "width", "height"))
+    assert forms.field_for(param).components == ("x", "y", "width", "height")
+
+
+def test_a_param_with_no_component_labels_has_an_empty_components_field() -> None:
+    """Every param but `crop`'s `box` renders as the single field it always
+    has — `components` defaults to empty, not `None`, so callers can test it
+    with a plain truthiness check."""
+    assert forms.field_for(Param(name="p", description="d")).components == ()
+
+
+def test_crops_box_param_declares_its_four_components() -> None:
+    """The registry is the one place this is declared — see ADR 0032."""
+    spec = get_tool("crop")
+    (box,) = spec.params
+    assert box.name == "box"
+    assert box.component_labels == ("x", "y", "width", "height")
+
+
+def test_default_component_splits_a_default_that_fits_the_shape() -> None:
+    field = forms.Field(
+        name="box",
+        label="box",
+        kind="text",
+        description="d",
+        default="10,10,500,700",
+        components=("x", "y", "width", "height"),
+    )
+    assert [field.default_component(i) for i in range(4)] == ["10", "10", "500", "700"]
+
+
+def test_default_component_is_blank_when_there_is_no_default() -> None:
+    field = forms.Field(
+        name="box",
+        label="box",
+        kind="text",
+        description="d",
+        components=("x", "y", "width", "height"),
+    )
+    assert [field.default_component(i) for i in range(4)] == ["", "", "", ""]
+
+
+def test_default_component_is_blank_when_the_default_does_not_fit_the_shape() -> None:
+    """A default with the wrong number of parts is not partially guessed at —
+    every part is left blank rather than misassigning a value to the wrong
+    label."""
+    field = forms.Field(
+        name="box",
+        label="box",
+        kind="text",
+        description="d",
+        default="1,2,3",
+        components=("x", "y", "width", "height"),
+    )
+    assert [field.default_component(i) for i in range(4)] == ["", "", "", ""]
+
+
 def test_fields_keep_declaration_order() -> None:
     spec = get_tool("compress")
     assert [f.name for f in forms.fields_for(spec)] == [p.name for p in spec.params]
@@ -461,6 +524,31 @@ def _touch(path: Path) -> Path:
     return path
 
 
+def _write_pdf(path: Path, pages: int = 1) -> Path:
+    """A real, parseable PDF — for the handful of tests that let the real
+    `local.py` strategy actually run, rather than stopping at `_touch`'s stub
+    before any real parsing happens."""
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=200, height=200)
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
+def _set_box(screen: Any, spec: str) -> None:
+    """Fill crop's four labelled ``box`` inputs from an ``x,y,width,height``
+    string. The composite-field UI (ADR 0032) replaced the single
+    ``#field-box`` input these tests used to set directly with one input per
+    label, ``#field-box-0`` through ``#field-box-3``."""
+    from textual.widgets import Input
+
+    for index, value in enumerate(spec.split(",")):
+        screen.query_one(f"#field-box-{index}", Input).value = value.strip()
+
+
 def _text_of(widget: Any) -> str:
     """The text a ``Static`` is showing, whatever Textual calls it this year.
 
@@ -504,7 +592,13 @@ def test_the_app_starts_and_lists_tools() -> None:
 
 
 def test_every_offered_tool_opens_a_form() -> None:
-    """Eighteen tools, one screen class, no per-tool code."""
+    """Eighteen tools, one screen class, no per-tool code.
+
+    A param with ``component_labels`` (see ADR 0032) renders one labelled
+    input per label instead of the single field every other param gets — this
+    checks for whichever shape the registry itself declares, rather than
+    assuming one.
+    """
     import asyncio
 
     from docmax.tui.app import DocMaxApp, RunScreen
@@ -518,7 +612,11 @@ def test_every_offered_tool_opens_a_form() -> None:
                 await pilot.pause()
                 assert isinstance(app.screen, RunScreen)
                 for param in spec.params:
-                    assert len(app.screen.query(f"#field-{param.name}")) == 1
+                    if param.component_labels:
+                        for index in range(len(param.component_labels)):
+                            assert len(app.screen.query(f"#field-{param.name}-{index}")) == 1
+                    else:
+                        assert len(app.screen.query(f"#field-{param.name}")) == 1
                 app.pop_screen()
                 await pilot.pause()
 
@@ -548,7 +646,7 @@ def test_selecting_parameters_reaches_the_normal_execution_path(tmp_path: Path) 
 
             screen.query_one("#field-__inputs__", Input).value = str(source)
             screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
-            screen.query_one("#field-box", Input).value = "10,10,100,100"
+            _set_box(screen, "10,10,100,100")
             await pilot.pause()
 
             request = screen._request(dry_run=False, force=True)
@@ -561,6 +659,109 @@ def test_selecting_parameters_reaches_the_normal_execution_path(tmp_path: Path) 
     assert call["tool"] == "crop"
     assert call["box"] == "10,10,100,100"
     assert router.targets == [("crop", str(tmp_path / "out.pdf"), True)]
+
+
+def test_box_renders_as_four_labelled_inputs_not_one_blind_field() -> None:
+    """ADR 0032: `crop`'s `box` param declares `component_labels`, so the form
+    renders one labelled input per label instead of a single `x,y,width,height`
+    field nobody can fill in without reading the docs first."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> tuple[list[str], list[str]]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert len(screen.query("#field-box")) == 0, "no single blind field remains"
+
+            labels = [_text_of(widget) for widget in screen.query(".component-label")]
+            placeholders = [
+                screen.query_one(f"#field-box-{i}", Input).placeholder for i in range(4)
+            ]
+            return labels, placeholders
+
+    labels, placeholders = asyncio.run(scenario())
+    assert labels == ["x", "y", "width", "height"]
+    assert placeholders == ["x", "y", "width", "height"]
+
+
+def test_leaving_every_box_component_empty_is_not_supplied(tmp_path: Path) -> None:
+    """Requirement: the composite field's "empty" rule matches every other
+    field's — nothing typed reads as "not supplied", which for a required
+    field like `box` is the usual missing-parameter error."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            await pilot.pause()
+
+            with pytest.raises(InvalidParameterError) as caught:
+                screen._request(dry_run=False, force=False)
+            assert caught.value.context["parameter"] == "box"
+
+    asyncio.run(scenario())
+
+
+def test_a_partially_filled_box_still_reaches_the_router_joined(tmp_path: Path) -> None:
+    """Filling in only some of the four inputs is not blocked by the TUI —
+    the joined value reaches the router exactly as a hand-typed
+    `10,,500,700` always did, and `tools/_box.py`'s own parser is what gives
+    the actionable error naming the empty part. Duplicating that check here
+    would be a second implementation of the same message."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "in.pdf")
+    router = FakeRouter()
+    seen: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            screen.query_one("#field-box-0", Input).value = "10"
+            screen.query_one("#field-box-2", Input).value = "500"
+            screen.query_one("#field-box-3", Input).value = "700"
+            await pilot.pause()
+
+            request = screen._request(dry_run=False, force=True)
+            runner.run(request, router=router)  # type: ignore[arg-type]
+            seen.extend(router.calls)
+
+    asyncio.run(scenario())
+
+    (call,) = seen
+    assert call["box"] == "10,,500,700"
 
 
 def test_a_form_with_no_input_is_a_typed_error_not_a_crash(tmp_path: Path) -> None:
@@ -577,6 +778,72 @@ def test_a_form_with_no_input_is_a_typed_error_not_a_crash(tmp_path: Path) -> No
             await pilot.pause()
             with pytest.raises(InvalidParameterError):
                 screen._request(dry_run=False, force=False)
+
+    asyncio.run(scenario())
+
+
+def test_a_form_with_no_output_is_a_typed_error_not_a_crash(tmp_path: Path) -> None:
+    """Output is required, the same as every command the CLI exposes.
+
+    `merge`'s own CLI docstring explains why: a derived destination for a
+    PDF-to-PDF tool lands on the first input, and `OutputTarget` refuses it as
+    `InPlaceOverwriteError`. ADR 0028 rejected the alternative — "let an
+    omitted output default beside the input" — outright, calling it "the M9
+    watcher defect in another costume." Asked here, before a request is even
+    built, rather than after a run that could never have written anything.
+    """
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            screen.query_one("#field-__inputs__", Input).value = str(_touch(tmp_path / "in.pdf"))
+            await pilot.pause()
+            with pytest.raises(InvalidParameterError) as caught:
+                screen._request(dry_run=False, force=False)
+            assert caught.value.context["parameter"] == "output"
+
+    asyncio.run(scenario())
+
+
+def test_merge_with_no_output_is_a_typed_error_not_a_silent_collision(tmp_path: Path) -> None:
+    """The exact scenario reported: two PDFs selected, Output left empty.
+
+    Before this fix, leaving Output empty for a multi-input, PDF-producing
+    tool like `merge` derived a destination equal to the first input — a
+    guaranteed `InPlaceOverwriteError` the user would only see after clicking
+    Run. This pins the fix's visible behaviour: a clear, immediate, typed
+    error naming the missing field, before anything is derived or refused.
+    """
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    a = _touch(tmp_path / "Linux Exp-5.pdf")
+    b = _touch(tmp_path / "Linux Exp-8.pdf")
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            await pilot.pause()
+            with pytest.raises(InvalidParameterError) as caught:
+                screen._request(dry_run=False, force=False)
+            assert caught.value.context["parameter"] == "output"
 
     asyncio.run(scenario())
 
@@ -629,6 +896,195 @@ def test_a_non_docmax_failure_is_wrapped_rather_than_raised() -> None:
     asyncio.run(scenario())
 
 
+# ---------------------------------------------------------------------------
+# Clicking Run for real — the worker actually has to start
+#
+# Every test above either calls `_request()`/`runner.run()` directly or sets
+# `_run_in_progress`/`_token` by hand. None of them drove a real click through
+# a real `@work(thread=True)` worker and waited for it — which is exactly the
+# path a regression lived on undetected: `_running` (the attribute's old name)
+# collided with `textual.message_pump.MessagePump`'s own attribute of the same
+# name, which is `True` for the entire time a screen is mounted. `_start`'s
+# "already running" guard read that and returned immediately, every time,
+# forever — so clicking Run silently did nothing at all, for any tool, from
+# the moment the screen appeared. These tests exist so that class of bug
+# cannot recur unnoticed.
+# ---------------------------------------------------------------------------
+
+
+def test_clicking_run_actually_executes_the_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    router = FakeRouter()
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            _set_box(screen, "10,10,100,100")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            return str(screen.query_one("#status", Static).content)
+
+    status = asyncio.run(scenario())
+    assert len(router.calls) == 1, "the real worker must have called the router exactly once"
+    assert "Wrote" in status
+
+
+def test_clicking_run_with_a_failing_router_shows_the_error_modal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the same regression: a failure must reach the error
+    modal by way of a real click too, not only when `_show` is called directly."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.core.errors import InPlaceOverwriteError
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, ErrorScreen, RunScreen
+
+    router = FakeRouter(raises=InPlaceOverwriteError("boom", context={"path": "x"}))
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            _set_box(screen, "10,10,100,100")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            assert isinstance(app.screen, ErrorScreen)
+
+    asyncio.run(scenario())
+
+
+def test_merging_two_pdfs_via_the_real_tui_writes_the_merged_file(tmp_path: Path) -> None:
+    """The exact scenario reported, resolved end-to-end: two PDFs, an explicit
+    output, Run clicked for real — the real registry, the real router, the
+    real `merge` tool, no fakes. This is the claim the whole fix rests on: the
+    file really gets written where the user said."""
+    import asyncio
+
+    from pypdf import PdfReader, PdfWriter
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    def write_pdf(path: Path, pages: int = 1) -> Path:
+        writer = PdfWriter()
+        for _ in range(pages):
+            writer.add_blank_page(width=200, height=200)
+        with path.open("wb") as handle:
+            writer.write(handle)
+        return path
+
+    a = write_pdf(tmp_path / "Linux Exp-5.pdf", 2)
+    b = write_pdf(tmp_path / "Linux Exp-8.pdf", 3)
+    out = tmp_path / "merged.pdf"
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            screen.query_one("#field-__output__", Input).value = str(out)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(1.0)
+
+            return str(screen.query_one("#status", Static).content)
+
+    status = asyncio.run(scenario())
+    assert "Wrote" in status
+    assert out.is_file()
+    assert len(PdfReader(str(out)).pages) == 5
+
+
+def test_an_extensionless_typed_output_still_gets_a_real_pdf(tmp_path: Path) -> None:
+    """The follow-up bug this fix addresses: typing `merged` with no
+    extension wrote valid PDF bytes to a file named `merged`, and Windows
+    opened it in Notepad because nothing said it was a PDF. The fix lives in
+    `OutputTarget.resolve`, so it applies here with no TUI-specific code —
+    `_request` still just reads the field text verbatim."""
+    import asyncio
+
+    from pypdf import PdfReader, PdfWriter
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    def write_pdf(path: Path, pages: int = 1) -> Path:
+        writer = PdfWriter()
+        for _ in range(pages):
+            writer.add_blank_page(width=200, height=200)
+        with path.open("wb") as handle:
+            writer.write(handle)
+        return path
+
+    a = write_pdf(tmp_path / "a.pdf", 2)
+    b = write_pdf(tmp_path / "b.pdf", 3)
+    out = tmp_path / "merged.pdf"
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "merged")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(1.0)
+
+            return str(screen.query_one("#status", Static).content)
+
+    status = asyncio.run(scenario())
+    assert "Wrote" in status
+    assert out.is_file()
+    assert not (tmp_path / "merged").exists(), "no extensionless file should exist alongside it"
+    assert len(PdfReader(str(out)).pages) == 5
+
+
 def test_cancelling_a_run_cancels_the_token() -> None:
     """ctrl+c asks the operation to stop; it does not raise KeyboardInterrupt,
     because Textual owns the keyboard."""
@@ -647,7 +1103,7 @@ def test_cancelling_a_run_cancels_the_token() -> None:
 
             token = CancellationToken()
             screen._token = token
-            screen._running = True
+            screen._run_in_progress = True
 
             await pilot.press("ctrl+c")
             await pilot.pause()
@@ -655,6 +1111,1066 @@ def test_cancelling_a_run_cancels_the_token() -> None:
             assert token.is_cancelled
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Browsing for input files — pure helpers
+# ---------------------------------------------------------------------------
+
+
+def test_render_paths_joins_with_comma_and_space(tmp_path: Path) -> None:
+    from docmax.tui.browser import render_paths
+
+    a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    assert render_paths([a]) == str(a)
+    assert render_paths([a, b]) == f"{a}, {b}"
+
+
+def test_merge_paths_appends_to_an_empty_field(tmp_path: Path) -> None:
+    from docmax.tui.browser import merge_paths
+
+    a = tmp_path / "a.pdf"
+    assert merge_paths("", [a]) == str(a)
+
+
+def test_merge_paths_adds_new_paths_after_the_existing_ones(tmp_path: Path) -> None:
+    """Requirement 5: a second trip to the dialog must add to the field, not
+    replace it."""
+    from docmax.tui.browser import merge_paths
+
+    a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    assert merge_paths(str(a), [b]) == f"{a}, {b}"
+
+
+def test_merge_paths_does_not_duplicate_an_already_present_path(tmp_path: Path) -> None:
+    from docmax.tui.browser import merge_paths
+
+    a = tmp_path / "a.pdf"
+    assert merge_paths(str(a), [a]) == str(a)
+
+
+def test_merge_paths_leaves_an_existing_path_in_its_original_position(tmp_path: Path) -> None:
+    """Ordering is preserved: re-choosing `a` must not move it to the end."""
+    from docmax.tui.browser import merge_paths
+
+    a, b, c = tmp_path / "a.pdf", tmp_path / "b.pdf", tmp_path / "c.pdf"
+    assert merge_paths(f"{a}, {b}", [a, c]) == f"{a}, {b}, {c}"
+
+
+def test_default_start_is_the_users_home_directory() -> None:
+    """The dialog's default `initialdir` is the platform's home, not the
+    process's cwd — a TUI started from a project checkout must not open the
+    dialog inside that checkout."""
+    from docmax.tui.browser import default_start
+
+    assert default_start() == Path.home()
+
+
+def test_describe_missing_paths_is_empty_for_a_real_file(tmp_path: Path) -> None:
+    real = _touch(tmp_path / "in.pdf")
+    assert forms.describe_missing_paths(str(real)) == ""
+
+
+def test_describe_missing_paths_flags_a_nonexistent_path(tmp_path: Path) -> None:
+    missing = tmp_path / "nope.pdf"
+    assert "does not exist" in forms.describe_missing_paths(str(missing))
+
+
+def test_describe_missing_paths_flags_a_directory(tmp_path: Path) -> None:
+    assert "directory" in forms.describe_missing_paths(str(tmp_path))
+
+
+def test_describe_missing_paths_checks_every_comma_separated_part(tmp_path: Path) -> None:
+    real = _touch(tmp_path / "in.pdf")
+    missing = tmp_path / "nope.pdf"
+    problem = forms.describe_missing_paths(f"{real}, {missing}")
+    assert str(real) not in problem
+    assert "does not exist" in problem
+
+
+# ---------------------------------------------------------------------------
+# pick_files / _native_dialog — no display required
+#
+# `_native_dialog` is the one seam this module has for testing without an OS
+# window: nothing that opens a real dialog can be driven by a simulated
+# keypress the way a Textual widget can, since it is a window the OS owns and
+# not one Textual draws — the same reason `pickers/`'s own tests replace a
+# real browser with an `announce` callback instead of one.
+# ---------------------------------------------------------------------------
+
+
+def test_pick_files_returns_none_for_a_cancelled_single_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Tk's own convention: a cancelled single-file dialog returns `""`."""
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "_native_dialog", lambda **_: "")
+    assert browser_module.pick_files(multiple=False, start=tmp_path) is None
+
+
+def test_pick_files_returns_none_for_a_cancelled_multi_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Tk's own convention: a cancelled multi-file dialog returns `()`."""
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "_native_dialog", lambda **_: ())
+    assert browser_module.pick_files(multiple=True, start=tmp_path) is None
+
+
+def test_pick_files_wraps_a_single_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import docmax.tui.browser as browser_module
+
+    a = tmp_path / "a.pdf"
+    monkeypatch.setattr(browser_module, "_native_dialog", lambda **_: str(a))
+    assert browser_module.pick_files(multiple=False, start=tmp_path) == [a]
+
+
+def test_pick_files_wraps_a_multi_result_in_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    monkeypatch.setattr(browser_module, "_native_dialog", lambda **_: (str(a), str(b)))
+    assert browser_module.pick_files(multiple=True, start=tmp_path) == [a, b]
+
+
+def test_pick_files_defaults_to_the_users_home_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No `start=` override reaches the dialog as the platform's home."""
+    import docmax.tui.browser as browser_module
+
+    seen: list[Path] = []
+
+    def fake(*, multiple: bool, start: Path) -> str:
+        seen.append(start)
+        return ""
+
+    monkeypatch.setattr(browser_module, "_native_dialog", fake)
+    browser_module.pick_files(multiple=False)
+
+    assert seen == [Path.home()]
+
+
+def test_native_dialog_raises_a_typed_error_when_there_is_no_display(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Tk can fail this way on a headless machine; it must never be a
+    traceback, the same discipline `docmax.tui.require_available` applies to a
+    missing `textual`."""
+    import tkinter
+
+    from docmax.core.errors import LocalDependencyMissingError
+    from docmax.tui.browser import _native_dialog
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise tkinter.TclError("no display name and no $DISPLAY environment variable")
+
+    monkeypatch.setattr(tkinter, "Tk", boom)
+
+    with pytest.raises(LocalDependencyMissingError):
+        _native_dialog(multiple=False, start=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# The run screen's wiring
+# ---------------------------------------------------------------------------
+
+
+def _mock_dialog(
+    monkeypatch: pytest.MonkeyPatch, *results: str | tuple[str, ...]
+) -> list[dict[str, object]]:
+    """Replace ``docmax.tui.browser._native_dialog`` with a fake.
+
+    Returns one of ``results`` per call, in order, repeating the last one if
+    called more times than there are results (or ``""`` if none were given —
+    a bare cancel). Records the keyword arguments of every call. A single
+    ``tuple`` result stands for one multi-select dialog returning several
+    files at once; several separate ``str`` results stand for separate trips
+    to the dialog, each choosing one file.
+    """
+    import docmax.tui.browser as browser_module
+
+    calls: list[dict[str, object]] = []
+    remaining = list(results)
+
+    def fake(*, multiple: bool, start: Path) -> str | tuple[str, ...]:
+        calls.append({"multiple": multiple, "start": start})
+        if remaining:
+            return remaining.pop(0)
+        return results[-1] if results else ""
+
+    monkeypatch.setattr(browser_module, "_native_dialog", fake)
+    return calls
+
+
+async def _click_browse(pilot: Any) -> None:
+    """Click Browse and give the worker thread time to call back.
+
+    The dialog runs on a real OS thread (see ``RunScreen._browse``), so
+    ``pilot.pause()``'s "wait for cpu idle" is not enough to observe its
+    result — the callback arrives from a different thread on its own
+    schedule. A short real-time pause is.
+    """
+    await pilot.click("#browse-inputs")
+    await pilot.pause(0.2)
+
+
+def test_the_run_screen_has_a_browse_button() -> None:
+    """The input control has a browse/select mechanism."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            assert len(screen.query("#browse-inputs")) == 1
+
+    asyncio.run(scenario())
+
+
+def test_browsing_invokes_the_native_dialog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Requirement 1: Browse invokes the picker."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    calls = _mock_dialog(monkeypatch, str(tmp_path / "a.pdf"))
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse(pilot)
+
+    asyncio.run(scenario())
+    assert len(calls) == 1
+
+
+def test_browsing_asks_for_one_file_or_several_from_the_spec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Shaped by `ToolSpec.accepts_multiple_inputs`, not a tool name.
+
+    `crop` takes one input; `merge` takes several. Neither name may appear
+    inside `docmax.tui` itself — `test_the_tui_names_no_tool_except_the_unimplemented_one`
+    guards that — but a test is free to name them to prove the *wiring* reads
+    the spec instead of hardcoding either shape.
+    """
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    calls = _mock_dialog(monkeypatch, str(tmp_path / "a.pdf"))
+
+    async def multiple_for(tool: str) -> bool:
+        calls.clear()
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen(tool)
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse(pilot)
+        return bool(calls[0]["multiple"])
+
+    assert asyncio.run(multiple_for("crop")) is False
+    assert asyncio.run(multiple_for("merge")) is True
+
+
+def test_selecting_one_file_populates_the_input_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 2."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    chosen = _touch(tmp_path / "only.pdf")
+    _mock_dialog(monkeypatch, str(chosen))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse(pilot)
+            return screen.query_one("#field-__inputs__", Input).value
+
+    assert asyncio.run(scenario()) == str(chosen)
+
+
+def test_selecting_several_files_populates_the_multi_input_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 3: one multi-select dialog choosing two files populates a
+    multi-input tool's field with both, comma-separated."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    first = _touch(tmp_path / "a.pdf")
+    second = _touch(tmp_path / "b.pdf")
+    _mock_dialog(monkeypatch, (str(first), str(second)))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse(pilot)
+            return screen.query_one("#field-__inputs__", Input).value
+
+    assert asyncio.run(scenario()) == f"{first}, {second}"
+
+
+def test_cancelling_the_dialog_leaves_the_form_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 4, for a single-input tool (Tk's cancel convention: `""`)."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    _mock_dialog(monkeypatch, "")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            field = screen.query_one("#field-__inputs__", Input)
+            field.value = "untouched.pdf"
+            await pilot.pause()
+
+            await _click_browse(pilot)
+
+            return field.value
+
+    assert asyncio.run(scenario()) == "untouched.pdf"
+
+
+def test_cancelling_a_multi_input_dialog_leaves_the_form_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 4, for a multi-input tool (Tk's cancel convention: `()`,
+    not `""`)."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    _mock_dialog(monkeypatch, ())
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            field = screen.query_one("#field-__inputs__", Input)
+            field.value = "untouched.pdf"
+            await pilot.pause()
+
+            await _click_browse(pilot)
+
+            return field.value
+
+    assert asyncio.run(scenario()) == "untouched.pdf"
+
+
+def test_browsing_twice_for_a_multi_input_tool_accumulates_both_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 5.
+
+    Browse, select one document; Browse again, select a second. Both must end
+    up in the field — a second trip must add, not replace.
+    """
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    first = _touch(tmp_path / "a.pdf")
+    second = _touch(tmp_path / "b.pdf")
+    _mock_dialog(monkeypatch, str(first), str(second))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            await _click_browse(pilot)
+            assert screen.query_one("#field-__inputs__", Input).value == str(first)
+
+            await _click_browse(pilot)
+            return screen.query_one("#field-__inputs__", Input).value
+
+    assert asyncio.run(scenario()) == f"{first}, {second}"
+
+
+def test_reselecting_an_already_added_file_does_not_duplicate_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    first = _touch(tmp_path / "a.pdf")
+    _mock_dialog(monkeypatch, str(first), str(first))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            await _click_browse(pilot)
+            await _click_browse(pilot)
+
+            return screen.query_one("#field-__inputs__", Input).value
+
+    assert asyncio.run(scenario()) == str(first)
+
+
+def test_single_input_tools_still_replace_on_a_second_browse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Single-input tools keep replacing, not accumulating."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    _touch(tmp_path / "a.pdf")
+    second = _touch(tmp_path / "b.pdf")
+    _mock_dialog(monkeypatch, str(tmp_path / "a.pdf"), str(second))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            await _click_browse(pilot)
+            await _click_browse(pilot)
+
+            return screen.query_one("#field-__inputs__", Input).value
+
+    assert asyncio.run(scenario()) == str(second)
+
+
+def test_browsing_writes_no_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requirement 7, checked the same way ADR 0005's pickers are: watch the disk."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    chosen = _touch(tmp_path / "only.pdf")
+    _mock_dialog(monkeypatch, str(chosen))
+    before = sorted(tmp_path.rglob("*"))
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse(pilot)
+
+    asyncio.run(scenario())
+    assert sorted(tmp_path.rglob("*")) == before
+
+
+def test_a_typed_error_from_the_dialog_is_shown_not_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Tk missing or no display must reach the user as the usual error modal,
+    and Browse must recover rather than staying disabled behind a dead worker."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.core.errors import LocalDependencyMissingError
+    from docmax.tui.app import DocMaxApp, ErrorScreen, RunScreen
+
+    def boom(*, multiple: bool, start: Path) -> str:
+        raise LocalDependencyMissingError(
+            "The file browser needs a display, and none is available.",
+            dependency="tkinter",
+        )
+
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "_native_dialog", boom)
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            await _click_browse(pilot)
+            assert isinstance(app.screen, ErrorScreen)
+
+            app.pop_screen()
+            await pilot.pause()
+            assert screen.query_one("#browse-inputs", Button).disabled is False
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Browsing for an output path
+#
+# The output field's own Browse button, wired to `tkinter.filedialog
+# .asksaveasfilename` — the save-dialog counterpart of the input Browse
+# button's open dialog. Generic across every tool: `RunScreen` never asks
+# whether it is looking at `merge` or anything else, only whether the output
+# field already has a path in it (to replace) and whether the input field
+# names a folder worth starting the dialog in.
+# ---------------------------------------------------------------------------
+
+
+def _mock_save_dialog(monkeypatch: pytest.MonkeyPatch, result: str) -> list[Path]:
+    """Replace ``docmax.tui.browser._native_save_dialog`` with a fake.
+
+    Always returns ``result`` and records the ``start`` directory of every
+    call — the save-dialog analogue of ``_mock_dialog``, and mocked at the
+    same seam for the same reason: a native save dialog is a window the OS
+    owns, not something Pilot can click into.
+    """
+    import docmax.tui.browser as browser_module
+
+    calls: list[Path] = []
+
+    def fake(*, start: Path) -> str:
+        calls.append(start)
+        return result
+
+    monkeypatch.setattr(browser_module, "_native_save_dialog", fake)
+    return calls
+
+
+async def _click_browse_output(pilot: Any) -> None:
+    """Click the output Browse button and give the worker thread time to
+    call back — see ``_click_browse``'s docstring for why a real pause is
+    needed rather than ``pilot.pause()``'s "wait for cpu idle"."""
+    await pilot.click("#browse-output")
+    await pilot.pause(0.2)
+
+
+def test_the_run_screen_has_a_browse_output_button() -> None:
+    """Requirement 1."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            assert len(screen.query("#browse-output")) == 1
+
+    asyncio.run(scenario())
+
+
+def test_browsing_output_invokes_the_native_save_dialog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 2."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    calls = _mock_save_dialog(monkeypatch, str(tmp_path / "out.pdf"))
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse_output(pilot)
+
+    asyncio.run(scenario())
+    assert len(calls) == 1
+
+
+def test_selecting_an_output_path_populates_the_output_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 3."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    chosen = tmp_path / "out.pdf"
+    _mock_save_dialog(monkeypatch, str(chosen))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse_output(pilot)
+            return screen.query_one("#field-__output__", Input).value
+
+    assert asyncio.run(scenario()) == str(chosen)
+
+
+def test_the_save_dialog_opens_in_the_first_inputs_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worked example from the request: Downloads, because that is where
+    the selected inputs already are — never a destination chosen on the
+    user's behalf, only where the dialog starts browsing."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    inputs_dir = tmp_path / "Downloads"
+    inputs_dir.mkdir()
+    a = _touch(inputs_dir / "Linux Exp-5.pdf")
+    b = _touch(inputs_dir / "Linux Exp-8.pdf")
+    calls = _mock_save_dialog(monkeypatch, str(inputs_dir / "merged.pdf"))
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            await pilot.pause()
+            await _click_browse_output(pilot)
+
+    asyncio.run(scenario())
+    assert calls == [inputs_dir]
+
+
+def test_cancelling_the_save_dialog_leaves_output_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 4. Tk's cancel convention for a save dialog: ``""``."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    _mock_save_dialog(monkeypatch, "")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            field = screen.query_one("#field-__output__", Input)
+            field.value = "untouched.pdf"
+            await pilot.pause()
+
+            await _click_browse_output(pilot)
+
+            return field.value
+
+    assert asyncio.run(scenario()) == "untouched.pdf"
+
+
+def test_browsing_output_writes_no_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requirement 5, checked the same way ADR 0005's pickers are: watch the disk."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    _mock_save_dialog(monkeypatch, str(tmp_path / "out.pdf"))
+    before = sorted(tmp_path.rglob("*"))
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse_output(pilot)
+
+    asyncio.run(scenario())
+    assert sorted(tmp_path.rglob("*")) == before
+    assert not (tmp_path / "out.pdf").exists(), "the save dialog must not create the file"
+
+
+def test_pick_save_path_returns_none_for_a_cancelled_dialog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "_native_save_dialog", lambda **_: "")
+    assert browser_module.pick_save_path(start=tmp_path) is None
+
+
+def test_pick_save_path_wraps_the_chosen_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    chosen = tmp_path / "result.pdf"
+    monkeypatch.setattr(browser_module, "_native_save_dialog", lambda **_: str(chosen))
+    assert browser_module.pick_save_path(start=tmp_path) == chosen
+
+
+def test_pick_save_path_defaults_to_the_users_home_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    seen: list[Path] = []
+
+    def fake(*, start: Path) -> str:
+        seen.append(start)
+        return ""
+
+    monkeypatch.setattr(browser_module, "_native_save_dialog", fake)
+    browser_module.pick_save_path()
+
+    assert seen == [Path.home()]
+
+
+def test_first_input_directory_is_none_for_an_empty_field() -> None:
+    assert forms.first_input_directory("") is None
+
+
+def test_first_input_directory_reads_the_first_comma_separated_path(tmp_path: Path) -> None:
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    assert forms.first_input_directory(f"{a}, {b}") == tmp_path
+
+
+def test_multi_input_merge_can_use_the_browsed_output_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 8."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    a = _touch(tmp_path / "a.pdf")
+    b = _touch(tmp_path / "b.pdf")
+    out = tmp_path / "merged.pdf"
+    _mock_save_dialog(monkeypatch, str(out))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            await pilot.pause()
+            await _click_browse_output(pilot)
+
+            return screen.query_one("#field-__output__", Input).value
+
+    assert asyncio.run(scenario()) == str(out)
+
+
+def test_single_input_tools_can_also_browse_for_an_output_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 9: the output picker is generic, not merge-specific."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "in.pdf")
+    out = tmp_path / "out.pdf"
+    _mock_save_dialog(monkeypatch, str(out))
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+            await _click_browse_output(pilot)
+
+            return screen.query_one("#field-__output__", Input).value
+
+    assert asyncio.run(scenario()) == str(out)
+
+
+def test_a_typed_error_from_the_save_dialog_is_shown_not_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The save dialog's own version of the earlier open-dialog test: Tk
+    missing or no display must reach the user as the usual error modal, and
+    the button must recover rather than staying disabled behind a dead worker."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.core.errors import LocalDependencyMissingError
+    from docmax.tui.app import DocMaxApp, ErrorScreen, RunScreen
+
+    def boom(*, start: Path) -> str:
+        raise LocalDependencyMissingError(
+            "The file browser needs a display, and none is available.",
+            dependency="tkinter",
+        )
+
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "_native_save_dialog", boom)
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            await _click_browse_output(pilot)
+            assert isinstance(app.screen, ErrorScreen)
+
+            app.pop_screen()
+            await pilot.pause()
+            assert screen.query_one("#browse-output", Button).disabled is False
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# A browsed output path still goes through every existing safety check
+# ---------------------------------------------------------------------------
+
+
+def test_a_browsed_output_that_collides_with_an_input_is_still_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement 7 (collision half). The save dialog can return any path it
+    likes, including one of the inputs — the picker does not know what an
+    input is, and must not. `OutputTarget.resolve` is what actually refuses
+    it, exactly as it would for a path typed by hand."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, ErrorScreen, RunScreen
+
+    a = _touch(tmp_path / "a.pdf")
+    b = _touch(tmp_path / "b.pdf")
+    _mock_save_dialog(monkeypatch, str(a))  # the dialog "chose" an input
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            await pilot.pause()
+            await _click_browse_output(pilot)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(1.0)
+
+            assert isinstance(app.screen, ErrorScreen)
+            assert app.screen.error.code.value == "output.in_place_overwrite"
+
+    asyncio.run(scenario())
+
+
+def test_a_browsed_output_that_already_exists_needs_force(tmp_path: Path) -> None:
+    """Requirement 6 and 7 (existing-output half), via a real click and the
+    real registry/router — no mocked dialog needed, since this exercises what
+    happens *after* a path reaches the field, whichever way it got there."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, ErrorScreen, RunScreen
+
+    source = _touch(tmp_path / "in.pdf")
+    out = tmp_path / "out.pdf"
+    out.write_bytes(b"a previous run")
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(out)
+            _set_box(screen, "10,10,100,100")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(1.0)
+
+            assert isinstance(app.screen, ErrorScreen)
+            assert app.screen.error.code.value == "output.exists"
+
+    asyncio.run(scenario())
+
+
+def test_force_permits_overwriting_a_browsed_output_path(tmp_path: Path) -> None:
+    """The other half: `force` still works for a path that reached the field
+    via Browse — the button is a plain `Input` either way, and `_request`
+    reads it the same way regardless of how it was filled in."""
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _write_pdf(tmp_path / "in.pdf")
+    out = tmp_path / "out.pdf"
+    out.write_bytes(b"a previous run")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(out)
+            _set_box(screen, "10,10,100,100")
+            await pilot.pause()
+            await pilot.click("#force")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(1.0)
+
+            return str(screen.query_one("#status", Static).content)
+
+    status = asyncio.run(scenario())
+    assert "Wrote" in status
+
+
+def test_the_input_hint_flags_a_nonexistent_typed_path() -> None:
+    """Requirement 5, for a path typed by hand rather than browsed to."""
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = "/no/such/file.pdf"
+            await pilot.pause()
+
+            return _text_of(screen.query_one("#input-hint", Static))
+
+    assert "does not exist" in asyncio.run(scenario())
+
+
+def test_the_input_hint_is_empty_for_a_typed_path_that_exists(tmp_path: Path) -> None:
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    real = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(real)
+            await pilot.pause()
+
+            return _text_of(screen.query_one("#input-hint", Static))
+
+    assert asyncio.run(scenario()) == ""
 
 
 def test_the_consent_modal_answers_yes_and_no() -> None:

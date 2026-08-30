@@ -10,7 +10,10 @@ Every screen here does the same two things — read a ``ToolSpec`` and call
 ``EngineRouter.run`` blocks. Blocking Textual's event loop would freeze the UI
 and make cancellation impossible — which is the one thing a long compress most
 needs. So a run happens on a worker thread (``@work(thread=True)``), and
-everything it wants to say comes back through ``call_from_thread``.
+everything it wants to say comes back through ``call_from_thread``. The native
+file dialog ``tui/browser.py`` opens for Browse blocks the same way — it is the
+OS's own event loop, not Textual's, running until the user closes it — so it
+gets the identical treatment.
 
 That is safe by construction rather than by care: ``ProgressSink`` has required
 implementations to *"tolerate being called from a worker thread"* since M0, and
@@ -50,8 +53,11 @@ from textual.widgets import (
 
 from docmax.core.branding import APP_NAME
 from docmax.tui import catalog, forms, runner
+from docmax.tui.browser import merge_paths, pick_files, pick_save_path, render_paths
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from docmax.core.errors import DocMaxError
     from docmax.core.models import ToolResult
     from docmax.core.registry import ToolSpec
@@ -141,7 +147,14 @@ class RunScreen(Screen[None]):
         self._spec: ToolSpec | None = None
         self._fields: list[forms.Field] = []
         self._token: Any = None
-        self._running = False
+        # Not `_running`: `textual.message_pump.MessagePump.__init__` already
+        # owns that name for its own "is this widget's message pump alive"
+        # bookkeeping, and sets it to `True` for the entire time the screen is
+        # mounted — silently clobbering a same-named attribute of ours and
+        # making `_start`'s "already running a tool" guard true from the
+        # moment the screen mounts. That is a shadowing bug, not a shared
+        # concept, so it gets a name Textual does not already use.
+        self._run_in_progress = False
 
     @property
     def spec(self) -> ToolSpec:
@@ -161,18 +174,37 @@ class RunScreen(Screen[None]):
 
             plural = "s, comma-separated" if spec.accepts_multiple_inputs else ""
             yield Label(f"input{plural}")
-            yield Input(placeholder=f"path to the document{plural}", id="field-__inputs__")
+            with Horizontal(classes="input-row"):
+                yield Input(placeholder=f"path to the document{plural}", id="field-__inputs__")
+                yield Button("Browse…", id="browse-inputs")
+            yield Static("", id="input-hint", classes="hint", markup=False)
 
-            yield Label("output")
-            yield Input(
-                placeholder=f"leave empty to derive a {spec.default_suffix} name",
-                id="field-__output__",
-            )
+            yield Label("output (required)")
+            with Horizontal(classes="input-row"):
+                yield Input(
+                    placeholder=f"path to write the {spec.default_suffix} result to",
+                    id="field-__output__",
+                )
+                yield Button("Browse…", id="browse-output")
 
             for field in self._fields:
                 required = " (required)" if field.required else ""
                 yield Label(f"{field.label}{required}")
-                if field.kind == "choice":
+                if field.components:
+                    # A comma-separated value with more than one meaning is
+                    # unguessable blind — one labelled input per part, joined
+                    # back into the single value the tool actually reads.
+                    # See ADR 0032.
+                    with Horizontal(classes="component-row"):
+                        for index, component in enumerate(field.components):
+                            with Vertical(classes="component"):
+                                yield Label(component, classes="component-label")
+                                yield Input(
+                                    value=field.default_component(index),
+                                    placeholder=component,
+                                    id=f"field-{field.name}-{index}",
+                                )
+                elif field.kind == "choice":
                     yield _select(field.choices, default=field.default, id_=f"field-{field.name}")
                 else:
                     yield Input(
@@ -198,7 +230,7 @@ class RunScreen(Screen[None]):
     # -- actions ------------------------------------------------------------
 
     def action_back(self) -> None:
-        if not self._running:
+        if not self._run_in_progress:
             self.app.pop_screen()
 
     def action_run(self) -> None:
@@ -235,10 +267,147 @@ class RunScreen(Screen[None]):
     def _on_cancel(self) -> None:
         self.action_cancel()
 
+    @on(Button.Pressed, "#browse-inputs")
+    def _on_browse_inputs(self) -> None:
+        if self._browsing:
+            return
+        self._browsing = True
+        self.query_one("#browse-inputs", Button).disabled = True
+        self._set_status("Opening the file browser…")
+        self._browse()
+
+    @work(thread=True, exclusive=True)
+    def _browse(self) -> None:
+        """Open the OS's native file dialog off the event loop.
+
+        The dialog blocks the calling thread until it closes, exactly like
+        ``EngineRouter.run`` — so it gets the same treatment: a worker thread,
+        and every result marshalled back through ``call_from_thread``. Nothing
+        here runs the tool; browsing only ever fills in a field, so a failure
+        here is shown and dropped rather than fed into the run machinery.
+
+        ``multiple`` comes straight from the spec — the one thing this method
+        is allowed to know about the tool — so a multi-input tool gets a
+        multi-select dialog and everything else gets a single-select one, with
+        no name of either kind of tool written down anywhere.
+        """
+        from docmax.core.errors import DocMaxError
+
+        try:
+            chosen = pick_files(multiple=self.spec.accepts_multiple_inputs)
+        except DocMaxError as exc:
+            self.app.call_from_thread(self._browse_failed, exc)
+            return
+        self.app.call_from_thread(self._apply_browsed_paths, chosen)
+
+    _browsing = False
+
+    def _browse_failed(self, exc: DocMaxError) -> None:
+        self._browsing = False
+        self.query_one("#browse-inputs", Button).disabled = False
+        self._show(exc)
+
+    def _apply_browsed_paths(self, chosen: list[Path] | None) -> None:
+        """Write what Browse returned into the field.
+
+        A multi-input tool's field is *added to*, not replaced — Browse may be
+        used more than once, one document per trip, and a second trip must not
+        discard the first. A single-input tool keeps the older, simpler
+        behaviour: there is only ever one slot, so a new choice replaces it.
+        Both branches read the same ``accepts_multiple_inputs`` flag that chose
+        the dialog's own single/multi mode, rather than a second decision that
+        could disagree with it.
+
+        Runs even when the dialog was cancelled (``chosen`` is ``None``): the
+        field must stay exactly as it was, and clearing the "opening…" status
+        and re-enabling the button is not conditional on having got a path.
+        """
+        self._browsing = False
+        self.query_one("#browse-inputs", Button).disabled = False
+        if not chosen:
+            self._set_status("")
+            return
+        field = self.query_one("#field-__inputs__", Input)
+        if self.spec.accepts_multiple_inputs:
+            field.value = merge_paths(field.value, chosen)
+        else:
+            field.value = render_paths(chosen)
+        self._update_input_hint()
+        self._set_status("")
+
+    @on(Button.Pressed, "#browse-output")
+    def _on_browse_output(self) -> None:
+        if self._browsing_output:
+            return
+        self._browsing_output = True
+        self.query_one("#browse-output", Button).disabled = True
+        self._set_status("Opening the save dialog…")
+        self._browse_output()
+
+    @work(thread=True, exclusive=True)
+    def _browse_output(self) -> None:
+        """Open the OS's native *save* dialog off the event loop.
+
+        Otherwise identical in shape to ``_browse``: the dialog blocks the
+        calling thread, so it gets a worker and ``call_from_thread`` too. The
+        dialog opens in the first input's own folder when there is one —
+        purely where it starts browsing, never a destination it chooses on
+        the user's behalf; the user still names the file, and
+        ``OutputTarget.resolve`` is exactly as strict about whatever they pick
+        as it is about anything typed by hand.
+        """
+        from docmax.core.errors import DocMaxError
+
+        start = forms.first_input_directory(self.query_one("#field-__inputs__", Input).value)
+        try:
+            chosen = pick_save_path(start=start)
+        except DocMaxError as exc:
+            self.app.call_from_thread(self._browse_output_failed, exc)
+            return
+        self.app.call_from_thread(self._apply_browsed_output, chosen)
+
+    _browsing_output = False
+
+    def _browse_output_failed(self, exc: DocMaxError) -> None:
+        self._browsing_output = False
+        self.query_one("#browse-output", Button).disabled = False
+        self._show(exc)
+
+    def _apply_browsed_output(self, chosen: Path | None) -> None:
+        """Write what the save dialog returned into the output field.
+
+        Runs even when the dialog was cancelled (``chosen`` is ``None``): the
+        field must stay exactly as it was, and clearing the "opening…" status
+        and re-enabling the button is not conditional on having got a path.
+        Always replaces rather than merging — unlike the input field, output
+        is exactly one path for every tool, so there is no multi-input case to
+        distinguish.
+        """
+        self._browsing_output = False
+        self.query_one("#browse-output", Button).disabled = False
+        if chosen is not None:
+            self.query_one("#field-__output__", Input).value = str(chosen)
+        self._set_status("")
+
+    @on(Input.Changed, "#field-__inputs__")
+    def _on_inputs_changed(self) -> None:
+        self._update_input_hint()
+
+    def _update_input_hint(self) -> None:
+        """Flag a typo while the user is still looking at the field.
+
+        Advisory only: ``DocumentRef.from_path`` remains the check that
+        actually gates a run, so a path that is momentarily wrong (mid-edit,
+        or valid only once resolved some other way) never blocks Run — it just
+        looks wrong until it isn't.
+        """
+        raw = self.query_one("#field-__inputs__", Input).value
+        self.query_one("#input-hint", Static).update(forms.describe_missing_paths(raw))
+
     # -- running ------------------------------------------------------------
 
     def _start(self, *, dry_run: bool, force: bool) -> None:
-        if self._running:
+        if self._run_in_progress:
             return
         try:
             request = self._request(dry_run=dry_run, force=force)
@@ -249,14 +418,27 @@ class RunScreen(Screen[None]):
         from docmax.core.cancellation import CancellationToken
 
         self._token = CancellationToken()
-        self._running = True
+        self._run_in_progress = True
         self.query_one("#cancel", Button).disabled = False
         self.query_one("#run", Button).disabled = True
         self._set_status("Running…")
         self._execute(request)
 
     def _request(self, *, dry_run: bool, force: bool) -> runner.RunRequest:
-        """Gather the form into a request, or raise the typed error saying why not."""
+        """Gather the form into a request, or raise the typed error saying why not.
+
+        Output is required, the same as it is for every command the CLI
+        exposes — see ``cli/main.py``'s ``merge`` docstring and ADR 0028's
+        rejection of "let an omitted output default beside the input" as *"the
+        M9 watcher defect in another costume."* ``OutputTarget.resolve`` can
+        derive a destination from the first input, but for any tool whose
+        output shares its input's extension — which is most of them, since
+        DocMax is mostly PDF-to-PDF — that derived path *is* the first input,
+        and the derivation exists only to be refused as
+        ``InPlaceOverwriteError``. Asking here, before a request is even built,
+        tells the user at the boundary instead of after a run that could never
+        have written anything.
+        """
         from pathlib import Path
 
         from docmax.core.errors import InvalidParameterError
@@ -272,6 +454,13 @@ class RunScreen(Screen[None]):
         inputs = tuple(Path(part.strip()) for part in raw.split(",") if part.strip())
 
         output_text = self.query_one("#field-__output__", Input).value.strip()
+        if not output_text:
+            raise InvalidParameterError(
+                "This tool needs an output path.",
+                remedy="Type the path to write the result to.",
+                context={"parameter": "output"},
+            )
+
         engine_value = _selected(self.query_one("#field-__engine__", Select), _ENGINES)
         engine = None if engine_value in ("", "auto") else Engine(engine_value)
 
@@ -280,7 +469,7 @@ class RunScreen(Screen[None]):
         return runner.RunRequest(
             tool=self.tool,
             inputs=inputs,
-            output=Path(output_text) if output_text else None,
+            output=Path(output_text),
             engine=engine,
             force=force,
             dry_run=dry_run,
@@ -288,12 +477,32 @@ class RunScreen(Screen[None]):
         )
 
     def _value_of(self, field: forms.Field) -> str:
+        if field.components:
+            return self._composite_value_of(field)
         widget = self.query_one(f"#field-{field.name}")
         if isinstance(widget, Select):
             return _selected(widget, field.choices)
         if isinstance(widget, Input):
             return widget.value
         return ""
+
+    def _composite_value_of(self, field: forms.Field) -> str:
+        """The comma-joined value of a labelled multi-input field.
+
+        Blank overall — every part still empty — reads as "not supplied",
+        matching ``forms.collect``'s existing rule for a plain field left
+        empty. A value with only *some* parts filled in is joined and handed
+        to the tool's own parser exactly as if it had been typed into a
+        single field: the parser's error already names the missing part,
+        which is a second implementation of that message this need not be.
+        """
+        parts = [
+            self.query_one(f"#field-{field.name}-{index}", Input).value.strip()
+            for index in range(len(field.components))
+        ]
+        if not any(parts):
+            return ""
+        return ",".join(parts)
 
     @work(thread=True, exclusive=True)
     def _execute(self, request: runner.RunRequest) -> None:
@@ -352,7 +561,7 @@ class RunScreen(Screen[None]):
         self.query_one("#progress", ProgressBar).update(progress=0, total=None)
 
     def _finished(self) -> None:
-        self._running = False
+        self._run_in_progress = False
         self._token = None
         self.query_one("#cancel", Button).disabled = True
         self.query_one("#run", Button).disabled = False
@@ -466,6 +675,12 @@ class DocMaxApp(App[None]):
     .remedy { color: $accent; padding: 1 0 0 0; }
     .actions { height: auto; padding: 1 0; }
     .actions Button { margin-right: 1; }
+    .input-row { height: auto; }
+    .input-row Input { width: 1fr; }
+    .input-row Button { margin-left: 1; }
+    .component-row { height: auto; }
+    .component { width: 1fr; margin-right: 1; height: auto; }
+    .component-label { color: $text-muted; text-style: bold; }
     .modal {
         width: 70;
         height: auto;
