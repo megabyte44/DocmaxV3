@@ -1,0 +1,20 @@
+# Dependencies for the Vercel deployment of the Cloud Engine (api/index.py).
+#
+# This is deliberately leaner than the `server` extra in pyproject.toml, which
+# pulls in DocmaxV3[all] (opencv, pandas, textual, ...). Vercel's Python
+# functions have a size ceiling, and those extras exist for local engines that
+# a stateless serverless deployment can't run usefully anyway (see the
+# in-memory storage/job-store caveat in api/index.py). Tools whose local
+# engine needs them will raise the project's normal "dependency missing"
+# error until those extras are added back here.
+#
+# uvicorn is intentionally omitted: Vercel invokes the ASGI `app` object
+# directly and never runs `python -m docmax.server`.
+
+typer>=0.12.0
+rich>=13.7.0
+pypdf>=4.2.0
+platformdirs>=4.2.0
+httpx>=0.27.0
+fastapi>=0.111.0
+python-multipart>=0.0.9
