@@ -393,14 +393,16 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**The roadmap is complete.** M0–M10 are all delivered. What remains is
-[backlog.md](backlog.md), and three items there now carry more weight than they
-did:
+**M0–M10 are all delivered.** M11 — remote MCP — was added to the roadmap with
+its design not yet settled; see
+[phases.md](phases.md#phase-11--remote-mcp-transport-m11) for the ADR it owes
+before any code. What else remains is [backlog.md](backlog.md), and three items
+there now carry more weight than they did:
 
 - **The three `ToolSpec` seams**, which four interfaces have now met and none has
   closed. M10 declined a fourth (`input_suffixes`) on the same grounds M7
   declined `implemented`. This is the most pressed-upon decision in the project.
-- **Phase 11 — contributor experience.** `docs/development/` is still missing,
+- **Phase 12 — contributor experience.** `docs/development/` is still missing,
   and the project now has four interfaces to explain rather than one.
 - **The CI matrix**, unverified since Phase 2 and now covering five packages more
   than it did.

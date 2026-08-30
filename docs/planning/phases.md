@@ -460,7 +460,62 @@ records why it lives at the interface rather than in `OutputTarget`.
 
 ---
 
-## Phase 11 — Contributor experience
+## Phase 11 — Remote MCP transport (M11)
+
+**Goal** Make the MCP tool surface reachable by a client that cannot spawn a
+local process — ChatGPT's connectors and similar — without weakening the M10
+policy boundary for the local, stdio case.
+
+**Status** `not started`. **Depends on** Phase 10. **Decision first**: an ADR
+must settle the open questions below before any code — the same rule ADR 0029
+followed for the local policy boundary, and the standing project rule
+(`CLAUDE.md` "Write the ADR before the code").
+
+**Why this is not "Phase 10 with a different transport"** M10's schema takes
+`inputs` as local filesystem paths, checked against `--root`. A remote caller
+shares no filesystem with the server, so the tool contract itself has to
+change, not just the wire transport. See
+[roadmap.md](roadmap.md#m11--why-it-isnt-just-m10-with-a-different-transport).
+
+**Open questions the ADR must answer**
+
+- **File reference shape.** Does a remote MCP session reuse `docmax.server`'s
+  existing upload → `file_id` → job model, or define its own? Reusing it avoids
+  a second implementation of the same problem; not reusing it avoids coupling
+  two interfaces that are currently independent (see the `independence`
+  import-linter contract between `cli` and `server`).
+- **Whether this is a fourth interface or a transport bridge in front of the
+  third.** `docmax.server` is already network-reachable (ADR 0006). M11 might
+  be "mount an MCP-speaking adapter in front of the existing REST API" rather
+  than a new peer interface with its own dependency on `core`/`tools`.
+- **Auth model.** Who may open a remote MCP session, and with what credential.
+  ADR 0029's policy assumes one trusted local caller; that assumption does not
+  survive the network.
+- **Whether "roots" mean anything remotely.** `--root` confines a local
+  filesystem walk. A remote client has no filesystem to confine — the
+  equivalent guarantee (which uploads a session may reference, whether a
+  session can reach another session's files) needs its own design, not a port
+  of ADR 0029's check.
+- **Consent and offline, remotely.** M10 never lets an agent grant cloud
+  consent on the user's behalf. A remote session raises the same question with
+  a less trustworthy caller — a network client is a program acting on behalf of
+  someone the operator may not know at all.
+
+**Definition of done** (provisional — the ADR may change this list)
+
+- [ ] an ADR is accepted, answering every question above
+- [ ] a remote client can list tools and run one end to end over the chosen
+      transport
+- [ ] the local, stdio path (M10) is unchanged — this phase adds a capability,
+      it does not modify ADR 0029's guarantees
+- [ ] whatever auth model is chosen has a test asserting an unauthenticated or
+      unauthorized session cannot reach a tool
+- [ ] `lint-imports` covers whatever new module this becomes
+- [ ] the roadmap and this phase are updated to `complete` together
+
+---
+
+## Phase 12 — Contributor experience
 
 **Goal** A new contributor can go from clone to merged pull request without
 personal guidance.
