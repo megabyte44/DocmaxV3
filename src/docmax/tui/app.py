@@ -1,9 +1,22 @@
-"""The Textual application: three screens, two modals, and no document logic.
+"""The Textual application: tool screens, cross-cutting screens, and no
+document logic.
 
-Every screen here does the same two things — read a ``ToolSpec`` and call
-``tui/runner.py``. There is no per-tool code, which is what
-:mod:`docmax.tui.forms` exists to make possible and what
-``tests/unit/test_tui.py`` asserts structurally.
+``ToolListScreen`` and ``RunScreen`` do the same two things every time — read
+a ``ToolSpec`` and call ``tui/runner.py``. There is no per-tool code, which is
+what :mod:`docmax.tui.forms` exists to make possible and what
+``tests/unit/test_tui.py`` asserts structurally. See ADR 0021.
+
+``MenuScreen``, ``HelpScreen``, ``SystemCheckScreen`` and
+``CloudStatusScreen`` are a different kind of screen — cross-cutting, not
+per-tool, added for GitHub issue #39 (*"the TUI has no way to reach
+non-tool commands"*). ADR 0021's "no per-tool code" constraint is about tool
+screens specifically and does not forbid these; they still avoid a second
+implementation of anything by reading ``tui/status.py`` (itself a thin read of
+``tools/_binaries.py`` and ``core/config.py`` / ``core/consent.py`` — the same
+sources ``docmax doctor`` and ``docmax cloud status`` render from) rather than
+recomputing that data. Settings — item 4 of the issue — is intentionally not
+here; the issue's own text scopes it separately, pending a design decision
+about whether it is read/write or read-only.
 
 ## The threading rule
 
@@ -43,6 +56,7 @@ from textual.screen import ModalScreen, Screen
 from textual.widget import Widget
 from textual.widgets import (
     Button,
+    DataTable,
     Input,
     Label,
     ProgressBar,
@@ -52,7 +66,7 @@ from textual.widgets import (
 
 from docmax import __version__
 from docmax.core.branding import APP_NAME
-from docmax.tui import catalog, forms, runner
+from docmax.tui import catalog, content, forms, runner, status
 from docmax.tui.browser import (
     merge_paths,
     pick_files,
@@ -238,6 +252,7 @@ class ToolListScreen(Screen[None]):
         Binding("left", "previous_category", "Category", show=True),
         Binding("right", "next_category", "Category", show=False),
         Binding("escape", "clear_search", "Clear search", show=False),
+        Binding("m", "open_menu", "Menu", show=True),
     ]
 
     def __init__(self) -> None:
@@ -266,7 +281,7 @@ class ToolListScreen(Screen[None]):
                     markup=False,
                 )
         yield Static(
-            "↑↓ Navigate   ←→ Category   Enter Open   / Search   Esc Clear   q Quit",
+            "↑↓ Navigate   ←→ Category   Enter Open   / Search   Esc Clear   m Menu   q Quit",
             id="help",
             classes="help-bar",
             markup=False,
@@ -311,6 +326,19 @@ class ToolListScreen(Screen[None]):
                 ]
             )
         )
+
+    # -- nav menu (GitHub #39: help, system check, cloud/account) ----------
+
+    def action_open_menu(self) -> None:
+        """The one persistent way to reach the cross-cutting screens.
+
+        Deliberately one keybinding opening one menu rather than three direct
+        bindings — ``ToolListScreen`` already commits four of the low letters
+        (``q``, arrows aside) to search and navigation, and a menu keeps room
+        for more of these screens later without a fifth top-level binding
+        each time. See GitHub issue #39.
+        """
+        self.app.push_screen(MenuScreen())
 
     # -- search / filter --------------------------------------------------
 
@@ -380,6 +408,208 @@ class ToolListScreen(Screen[None]):
             boundaries.append(index)
             index += len([button for button in column.query(".tool-button") if button.display])
         return boundaries or [0]
+
+
+class MenuScreen(ModalScreen[None]):
+    """The nav affordance GitHub issue #39 asks for.
+
+    One keybinding (``m``, from ``ToolListScreen``) opens this; each button
+    here opens one of the three cross-cutting screens the issue scoped —
+    help, system check, cloud/account — and this modal gets out of the way. A
+    modal rather than a fourth full screen because it does no work of its
+    own: the same shape ``ConsentScreen`` already uses for "ask one question,
+    act on the answer", not the shape ``RunScreen`` uses for "do something".
+
+    Settings (item 4 in the issue) is deliberately not offered here — the
+    issue's own text scopes it separately, pending a design decision about
+    whether it is read/write or read-only.
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("h", "open_help", "Help", show=True),
+        Binding("s", "open_system_check", "System check", show=True),
+        Binding("c", "open_cloud", "Cloud & account", show=True),
+        Binding("escape", "close", "Close", show=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal"):
+            yield Static("Menu", classes="title")
+            yield Static("Cross-cutting screens — not a tool.", classes="hint", markup=False)
+            with Vertical(classes="menu-actions"):
+                yield Button(f"Help — how to use {APP_NAME}", id="menu-help")
+                yield Button("System check", id="menu-system-check")
+                yield Button("Cloud & account", id="menu-cloud")
+                yield Button("Close", id="menu-close")
+
+    @on(Button.Pressed, "#menu-help")
+    def _open_help(self) -> None:
+        self.action_open_help()
+
+    @on(Button.Pressed, "#menu-system-check")
+    def _open_system_check(self) -> None:
+        self.action_open_system_check()
+
+    @on(Button.Pressed, "#menu-cloud")
+    def _open_cloud(self) -> None:
+        self.action_open_cloud()
+
+    @on(Button.Pressed, "#menu-close")
+    def _close(self) -> None:
+        self.action_close()
+
+    def action_open_help(self) -> None:
+        self.dismiss(None)
+        self.app.push_screen(HelpScreen())
+
+    def action_open_system_check(self) -> None:
+        self.dismiss(None)
+        self.app.push_screen(SystemCheckScreen())
+
+    def action_open_cloud(self) -> None:
+        self.dismiss(None)
+        self.app.push_screen(CloudStatusScreen())
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class HelpScreen(Screen[None]):
+    """Item 1 of GitHub #39: how to use DocMax, as static content.
+
+    Explains the concepts a run screen's own field hints have no room for —
+    the local/cloud choice, consent, overwrite, dry run — the way
+    ``docmax --help`` explains them for the CLI. ``tui/content.py`` holds the
+    text; this class only lays it out, which is what the issue meant by
+    *"static content, lowest effort, no new core plumbing."*
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "back", "Back", show=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Brand()
+        with VerticalScroll(id="help-content"), Vertical(classes="panel"):
+            yield Static("Help", classes="title", markup=False)
+            yield Static(
+                "What each part of the TUI means, and how it maps to the CLI.",
+                classes="hint",
+                markup=False,
+            )
+            for section in content.HELP_SECTIONS:
+                yield Static(section.heading, classes="help-heading", markup=False)
+                yield Static(section.body, classes="help-body", markup=False)
+        yield Static("Esc Back", id="help", classes="help-bar", markup=False)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class SystemCheckScreen(Screen[None]):
+    """Item 2 of GitHub #39: ``docmax doctor``'s own data, as a table.
+
+    Reads ``tui/status.binary_statuses``, which calls straight into
+    ``tools/_binaries.py`` — the exact declaration and lookup function
+    ``doctor``'s own table and ``--json`` envelope both read. There is no
+    second list of binaries here, and no re-implementation of ``find()``.
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "back", "Back", show=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Brand()
+        with VerticalScroll(id="system-check-content"), Vertical(classes="panel"):
+            yield Static("System check", classes="title", markup=False)
+            yield Static(
+                "External programs some local engines depend on.",
+                classes="hint",
+                markup=False,
+            )
+            yield DataTable(id="system-check-table")
+            yield Static("", id="system-check-summary", classes="hint", markup=False)
+        yield Static("Esc Back", id="help", classes="help-bar", markup=False)
+
+    def on_mount(self) -> None:
+        table = self.query_one("#system-check-table", DataTable)
+        table.add_columns("Binary", "Status", "Path", "Needed by", "Install hint")
+
+        binaries = status.binary_statuses()
+        missing = 0
+        for binary in binaries:
+            if binary.found:
+                table.add_row(
+                    binary.name, "found", binary.path or "—", ", ".join(binary.used_by), ""
+                )
+            else:
+                missing += 1
+                table.add_row(
+                    binary.name,
+                    "missing",
+                    "—",
+                    ", ".join(binary.used_by),
+                    binary.install_hint,
+                )
+
+        summary = (
+            "All external tools available."
+            if missing == 0
+            else f"{missing} tool(s) missing — see Install hint above, or run "
+            "the Cloud Engine instead where a tool supports it."
+        )
+        self.query_one("#system-check-summary", Static).update(summary)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class CloudStatusScreen(Screen[None]):
+    """Item 3 of GitHub #39: ``docmax cloud status``'s own data.
+
+    Explicitly labelled "API key configuration," not a profile — there is no
+    login/account concept yet, only a bearer key. ``tui/status.cloud_status``
+    reads the same ``Config`` and ``ConsentStore`` the CLI command does, and
+    never returns the key itself, matching ``cli/cloud.py``'s rule that *"the
+    key never appears in output."*
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "back", "Back", show=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Brand()
+        with VerticalScroll(id="cloud-status-content"), Vertical(classes="panel"):
+            yield Static("Cloud & account", classes="title", markup=False)
+            yield Static(
+                f"API key configuration — not a user profile. {APP_NAME} has no "
+                "login or account feature yet.",
+                classes="hint",
+                markup=False,
+            )
+            yield DataTable(id="cloud-status-table")
+            yield Static("", id="cloud-status-consent", classes="hint", markup=False)
+        yield Static("Esc Back", id="help", classes="help-bar", markup=False)
+
+    def on_mount(self) -> None:
+        info = status.cloud_status()
+        table = self.query_one("#cloud-status-table", DataTable)
+        table.add_columns("Setting", "Value")
+        table.add_row("Endpoint", info.endpoint)
+        table.add_row(
+            "API key",
+            f"configured (…{info.api_key_suffix})" if info.api_key_configured else "not configured",
+        )
+        table.add_row("Offline", "yes — cloud is unreachable" if info.offline else "no")
+        table.add_row("Config file", str(info.config_path))
+
+        consented = ", ".join(info.consented_tools) if info.consented_tools else "none"
+        self.query_one("#cloud-status-consent", Static).update(f"Consented tools: {consented}")
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
 
 
 class RunScreen(Screen[None]):
@@ -1215,6 +1445,20 @@ class DocMaxApp(App[None]):
     .modal.error .title { color: $error; padding: 0; }
     .error-message { text-style: bold; padding: 0 0 1 0; }
     ModalScreen { align: center middle; }
+
+    .menu-actions { height: auto; padding: 1 0 0 0; }
+    .menu-actions Button { width: 1fr; margin-bottom: 1; }
+
+    /* -- help, system check, cloud status: static/table content -------- */
+
+    #help-content, #system-check-content, #cloud-status-content { padding: 1 2; }
+    .help-heading {
+        color: $accent;
+        text-style: bold;
+        padding: 1 0 0 0;
+    }
+    .help-body { color: $foreground; padding: 0 0 1 0; }
+    #system-check-table, #cloud-status-table { margin: 1 0; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
@@ -1225,4 +1469,14 @@ class DocMaxApp(App[None]):
         self.push_screen(ToolListScreen())
 
 
-__all__ = ["ConsentScreen", "DocMaxApp", "ErrorScreen", "RunScreen", "ToolListScreen"]
+__all__ = [
+    "CloudStatusScreen",
+    "ConsentScreen",
+    "DocMaxApp",
+    "ErrorScreen",
+    "HelpScreen",
+    "MenuScreen",
+    "RunScreen",
+    "SystemCheckScreen",
+    "ToolListScreen",
+]

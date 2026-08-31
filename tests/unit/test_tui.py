@@ -3241,3 +3241,463 @@ def test_get_info_run_through_the_real_tui_shows_the_answer_it_found(tmp_path: P
     assert "pages: 3" in details
     assert "encrypted: no" in details
     assert f"name: {source.name}" in details
+
+
+# ---------------------------------------------------------------------------
+# tui/status.py — the data behind System check and Cloud & account
+#
+# Pure functions, no textual import: proves each reads the exact source its
+# CLI counterpart (`docmax doctor` / `docmax cloud status`) reads, rather than
+# a second list or a re-implementation of either.
+# ---------------------------------------------------------------------------
+
+
+def test_binary_statuses_matches_the_declaration_doctor_reads() -> None:
+    from docmax.tools import _binaries
+    from docmax.tui import status
+
+    statuses = status.binary_statuses()
+
+    assert [s.name for s in statuses] == [b.name for b in _binaries.EXTERNAL_BINARIES]
+    assert [s.used_by for s in statuses] == [b.used_by for b in _binaries.EXTERNAL_BINARIES]
+
+
+def test_binary_statuses_found_reflects_binaries_find(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No second lookup: `found`/`path` come straight from `_binaries.find`."""
+    from docmax.tools import _binaries
+    from docmax.tui import status
+
+    monkeypatch.setattr(_binaries, "find", lambda name: f"/usr/bin/{name}")
+
+    statuses = status.binary_statuses()
+
+    assert all(s.found for s in statuses)
+    assert all(s.path == f"/usr/bin/{s.name}" for s in statuses)
+
+
+def test_binary_statuses_reports_a_missing_binary_with_an_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from docmax.tools import _binaries
+    from docmax.tui import status
+
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+
+    statuses = status.binary_statuses()
+
+    assert all(not s.found for s in statuses)
+    assert all(s.path is None for s in statuses)
+    assert all(s.install_hint for s in statuses)
+
+
+def test_cloud_status_reports_no_key_and_no_consent_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import docmax.core.config as config_module
+    from docmax.core.config import Config
+    from docmax.tui import status
+
+    monkeypatch.setattr(config_module, "load", lambda: Config(source=None))
+    monkeypatch.setattr(config_module, "config_file", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr(config_module, "consent_file", lambda: tmp_path / "consent.json")
+
+    info = status.cloud_status()
+
+    assert info.api_key_configured is False
+    assert info.api_key_suffix is None
+    assert info.consented_tools == ()
+    assert info.offline is False
+    assert info.config_path == tmp_path / "config.toml"
+
+
+def test_cloud_status_never_returns_the_key_itself(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The rule `cli/cloud.py` states outright: the key never appears in output."""
+    import docmax.core.config as config_module
+    from docmax.core.config import Config
+    from docmax.tui import status
+
+    monkeypatch.setattr(config_module, "load", lambda: Config(api_key="s3cret-token", source=None))
+    monkeypatch.setattr(config_module, "config_file", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr(config_module, "consent_file", lambda: tmp_path / "consent.json")
+
+    info = status.cloud_status()
+
+    assert info.api_key_configured is True
+    assert info.api_key_suffix == "oken"
+    assert "s3cret-token" not in repr(info)
+
+
+# ---------------------------------------------------------------------------
+# tui/content.py — the help screen's static text
+# ---------------------------------------------------------------------------
+
+
+def test_help_sections_cover_the_concepts_the_issue_named() -> None:
+    from docmax.tui.content import HELP_SECTIONS
+
+    headings = {section.heading for section in HELP_SECTIONS}
+    assert {"Local vs. cloud engine", "Consent", "System check"} <= headings
+    assert all(section.body for section in HELP_SECTIONS)
+
+
+# ---------------------------------------------------------------------------
+# The nav menu (GitHub #39): help, system check, cloud & account
+# ---------------------------------------------------------------------------
+
+
+def test_the_help_bar_advertises_the_menu_keybinding() -> None:
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui.app import DocMaxApp
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            return _text_of(app.screen.query_one("#help", Static))
+
+    assert "m Menu" in asyncio.run(scenario())
+
+
+def test_pressing_m_opens_the_menu() -> None:
+    """`m` is a plain (non-priority) screen binding, exactly like `q` — so
+    typing "merge" into search is never hijacked. It opens the menu once
+    focus is off the search box, which is where it normally is once someone
+    has navigated to a tool."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, MenuScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.query(".tool-button").first().focus()
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            assert isinstance(app.screen, MenuScreen)
+
+    asyncio.run(scenario())
+
+
+def test_the_menu_offers_exactly_help_system_check_and_cloud() -> None:
+    """Items 1-3 only. Settings (item 4) is explicitly out of scope for this
+    pass — the issue's own text scopes it separately."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.tui.app import DocMaxApp, MenuScreen
+
+    async def scenario() -> set[str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(MenuScreen())
+            await pilot.pause()
+            return {button.id or "" for button in app.screen.query(Button)}
+
+    ids = asyncio.run(scenario())
+    assert ids == {"menu-help", "menu-system-check", "menu-cloud", "menu-close"}
+
+
+def test_escape_closes_the_menu_without_navigating() -> None:
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, MenuScreen, ToolListScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(MenuScreen())
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert isinstance(app.screen, ToolListScreen)
+
+    asyncio.run(scenario())
+
+
+def test_clicking_help_in_the_menu_opens_the_help_screen() -> None:
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, HelpScreen, MenuScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(MenuScreen())
+            await pilot.pause()
+            await pilot.click("#menu-help")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+
+    asyncio.run(scenario())
+
+
+def test_clicking_system_check_in_the_menu_opens_the_system_check_screen() -> None:
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, MenuScreen, SystemCheckScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(MenuScreen())
+            await pilot.pause()
+            await pilot.click("#menu-system-check")
+            await pilot.pause()
+            assert isinstance(app.screen, SystemCheckScreen)
+
+    asyncio.run(scenario())
+
+
+def test_clicking_cloud_in_the_menu_opens_the_cloud_status_screen() -> None:
+    import asyncio
+
+    from docmax.tui.app import CloudStatusScreen, DocMaxApp, MenuScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(MenuScreen())
+            await pilot.pause()
+            await pilot.click("#menu-cloud")
+            await pilot.pause()
+            assert isinstance(app.screen, CloudStatusScreen)
+
+    asyncio.run(scenario())
+
+
+def test_the_menu_keybindings_open_screens_without_the_mouse() -> None:
+    """`h`/`s`/`c` on the menu itself, not only the mouse."""
+    import asyncio
+
+    from docmax.tui.app import (
+        CloudStatusScreen,
+        DocMaxApp,
+        HelpScreen,
+        MenuScreen,
+        SystemCheckScreen,
+    )
+
+    async def opened_by(key: str) -> type:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(MenuScreen())
+            await pilot.pause()
+            await pilot.press(key)
+            await pilot.pause()
+            return type(app.screen)
+
+    assert asyncio.run(opened_by("h")) is HelpScreen
+    assert asyncio.run(opened_by("s")) is SystemCheckScreen
+    assert asyncio.run(opened_by("c")) is CloudStatusScreen
+
+
+# -- Help screen --------------------------------------------------------
+
+
+def test_the_help_screen_shows_every_section() -> None:
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui.app import DocMaxApp, HelpScreen
+    from docmax.tui.content import HELP_SECTIONS
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(HelpScreen())
+            await pilot.pause()
+            return " ".join(_text_of(widget) for widget in app.screen.query(Static))
+
+    rendered = asyncio.run(scenario())
+    for section in HELP_SECTIONS:
+        assert section.heading in rendered
+        assert section.body in rendered
+
+
+def test_escape_on_the_help_screen_returns_to_the_tool_list() -> None:
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, HelpScreen, ToolListScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(HelpScreen())
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert isinstance(app.screen, ToolListScreen)
+
+    asyncio.run(scenario())
+
+
+# -- System check screen -------------------------------------------------
+
+
+def test_the_system_check_screen_lists_every_known_binary() -> None:
+    import asyncio
+
+    from textual.widgets import DataTable
+
+    from docmax.tools import _binaries
+    from docmax.tui.app import DocMaxApp, SystemCheckScreen
+
+    async def scenario() -> int:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = SystemCheckScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            return screen.query_one("#system-check-table", DataTable).row_count
+
+    assert asyncio.run(scenario()) == len(_binaries.EXTERNAL_BINARIES)
+
+
+def test_the_system_check_screen_shows_a_missing_binarys_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from textual.widgets import DataTable
+
+    from docmax.tools import _binaries
+    from docmax.tui.app import DocMaxApp, SystemCheckScreen
+
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+
+    async def scenario() -> list[list[Any]]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = SystemCheckScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            table = screen.query_one("#system-check-table", DataTable)
+            return [list(table.get_row_at(i)) for i in range(table.row_count)]
+
+    rows = asyncio.run(scenario())
+    assert all(row[1] == "missing" for row in rows)
+    assert all(row[4] for row in rows), "every missing binary carries its install hint"
+
+
+def test_escape_on_the_system_check_screen_returns_to_the_tool_list() -> None:
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, SystemCheckScreen, ToolListScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(SystemCheckScreen())
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert isinstance(app.screen, ToolListScreen)
+
+    asyncio.run(scenario())
+
+
+# -- Cloud & account screen -----------------------------------------------
+
+
+def test_the_cloud_status_screen_shows_the_endpoint_and_is_labelled_not_a_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    from textual.widgets import DataTable, Static
+
+    import docmax.core.config as config_module
+    from docmax.core.config import Config
+    from docmax.tui.app import CloudStatusScreen, DocMaxApp
+
+    monkeypatch.setattr(config_module, "load", lambda: Config(source=None))
+    monkeypatch.setattr(config_module, "config_file", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr(config_module, "consent_file", lambda: tmp_path / "consent.json")
+
+    async def scenario() -> tuple[str, str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = CloudStatusScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            labels = " ".join(_text_of(widget) for widget in app.screen.query(Static))
+            table = screen.query_one("#cloud-status-table", DataTable)
+            cells = " ".join(
+                str(value) for row in range(table.row_count) for value in table.get_row_at(row)
+            )
+            return labels, cells
+
+    labels, cells = asyncio.run(scenario())
+    assert "not a user profile" in labels
+    assert "not configured" in cells
+
+
+def test_the_cloud_status_screen_masks_a_configured_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    from textual.widgets import DataTable
+
+    import docmax.core.config as config_module
+    from docmax.core.config import Config
+    from docmax.tui.app import CloudStatusScreen, DocMaxApp
+
+    monkeypatch.setattr(config_module, "load", lambda: Config(api_key="s3cret-token", source=None))
+    monkeypatch.setattr(config_module, "config_file", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr(config_module, "consent_file", lambda: tmp_path / "consent.json")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = CloudStatusScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            table = screen.query_one("#cloud-status-table", DataTable)
+            rows = [table.get_row_at(i) for i in range(table.row_count)]
+            return " ".join(str(value) for row in rows for value in row)
+
+    rendered = asyncio.run(scenario())
+    assert "s3cret-token" not in rendered
+    assert "oken" in rendered
+
+
+def test_escape_on_the_cloud_status_screen_returns_to_the_tool_list() -> None:
+    import asyncio
+
+    from docmax.tui.app import CloudStatusScreen, DocMaxApp, ToolListScreen
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(CloudStatusScreen())
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert isinstance(app.screen, ToolListScreen)
+
+    asyncio.run(scenario())
