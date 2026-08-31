@@ -52,7 +52,13 @@ from textual.widgets import (
 from docmax import __version__
 from docmax.core.branding import APP_NAME
 from docmax.tui import catalog, forms, runner
-from docmax.tui.browser import merge_paths, pick_files, pick_save_path, render_paths
+from docmax.tui.browser import (
+    merge_paths,
+    pick_files,
+    pick_save_path,
+    remember_directory,
+    render_paths,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -526,6 +532,12 @@ class RunScreen(Screen[None]):
         is allowed to know about the tool — so a multi-input tool gets a
         multi-select dialog and everything else gets a single-select one, with
         no name of either kind of tool written down anywhere.
+
+        A real choice is remembered here, on the worker thread, rather than in
+        ``_apply_browsed_paths`` on the UI thread — the same reasoning that
+        puts the dialog itself on a worker: writing the small state file is
+        disk I/O, and disk I/O does not belong on the thread Textual is
+        redrawing from.
         """
         from docmax.core.errors import DocMaxError
 
@@ -534,6 +546,8 @@ class RunScreen(Screen[None]):
         except DocMaxError as exc:
             self.app.call_from_thread(self._browse_failed, exc)
             return
+        if chosen:
+            remember_directory(chosen[0].parent)
         self.app.call_from_thread(self._apply_browsed_paths, chosen)
 
     _browsing = False
@@ -591,6 +605,9 @@ class RunScreen(Screen[None]):
         the user's behalf; the user still names the file, and
         ``OutputTarget.resolve`` is exactly as strict about whatever they pick
         as it is about anything typed by hand.
+
+        A real choice is remembered here, on the worker thread, for the same
+        reason ``_browse`` does — see its docstring.
         """
         from docmax.core.errors import DocMaxError
 
@@ -600,6 +617,8 @@ class RunScreen(Screen[None]):
         except DocMaxError as exc:
             self.app.call_from_thread(self._browse_output_failed, exc)
             return
+        if chosen is not None:
+            remember_directory(chosen.parent)
         self.app.call_from_thread(self._apply_browsed_output, chosen)
 
     _browsing_output = False
