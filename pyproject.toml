@@ -99,6 +99,9 @@ server = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
+    # For the remote MCP route (M11, ADR 0035) mounted at /v1/mcp -- the same
+    # SDK the `mcp` extra pins, at the same bound, so the two never drift.
+    "mcp>=2.1,<3",
 ]
 # The MCP SDK, for `docmax mcp`. An extra rather than a base dependency: it
 # brings jsonschema, sse-starlette, httpx2, opentelemetry and (on Windows)

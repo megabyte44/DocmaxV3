@@ -9,7 +9,7 @@ When they disagree, one of them is a bug — see [Keeping this honest](#keeping-
 ┌─────────────────────────────────────────────────┐
 │  Interfaces      cli · tui · server · mcp       │  may import everything below
 ├─────────────────────────────────────────────────┤
-│  Support         pickers · runners              │  may import tools, core
+│  Support         mcpschema · pickers · runners  │  may import tools, core
 ├─────────────────────────────────────────────────┤
 │  Application     tools                          │  may import cloud_client, core
 ├─────────────────────────────────────────────────┤
@@ -34,10 +34,10 @@ fails the pull request.
 
 | Contract | Rule |
 |---|---|
-| `layers` | `cli` → `tui` → `server` → `mcp` → `pickers` → `runners` → `tools` → `cloud_client` → `core`, downward only |
+| `layers` | `cli` → `tui` → `server` → `mcp` → `mcpschema` → `pickers` → `runners` → `tools` → `cloud_client` → `core`, downward only |
 | `core-is-ui-free` | `core` may not import `rich`, `textual`, `typer`, `fastapi`, `mcp` |
 | `interfaces-are-independent` | `cli`, `tui`, `server` and `mcp` may not import each other |
-| `core-is-standalone` | `core` may not import `tools`, `cli`, `tui`, `mcp`, `pickers`, `runners`, `cloud_client`, `server` |
+| `core-is-standalone` | `core` may not import `tools`, `cli`, `tui`, `mcp`, `mcpschema`, `pickers`, `runners`, `cloud_client`, `server` |
 | `server-is-not-a-client` | `server` may not import `cloud_client`, `cli` or `tui` |
 
 `cli`, `tui` and `server` appear on separate lines in `layers` only because a
@@ -58,6 +58,15 @@ them. Like `pickers` it never prints and never exits, so it is in
 `LIBRARY_PACKAGES` and the hygiene tests cover it — which matters more here than
 anywhere else, because v2's batch runner died of a `sys.exit` raised beneath it.
 See [ADR 0023](../adr/0023-runners-are-a-package-below-the-interfaces.md).
+
+**`mcpschema` is not an interface either, for the same reason.** M11's remote
+MCP route needs the same registry-to-JSON-Schema mapping the local MCP server
+built at M10, and `interfaces-are-independent` forbids `docmax.server` from
+reaching into `docmax.mcp` to get it. It moved to its own package below both,
+never prints or exits, and is in `LIBRARY_PACKAGES` on the same terms as
+`pickers` and `runners`. `docmax.mcp.schema` re-exports it, so nothing that
+imported the old location broke. See
+[ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md).
 
 **The layers contract is weaker than ADR 0023 for `runners`.** A layers contract
 permits every layer below, so it allows `runners -> tools`; the ADR forbids it,
@@ -81,8 +90,8 @@ Plus two AST-based hygiene tests that enforce related boundaries:
 | Test | Rule |
 |---|---|
 | `test_no_heavy_imports.py` | `docmax` and each `docmax.core` submodule pull in no heavy dependency, no interface framework and no cloud SDK (runs in a subprocess, one probe per module) |
-| `test_no_sys_exit.py` | library packages — including `server`, `pickers`, `runners` and `mcp` — never terminate the process |
-| `test_no_direct_writes.py` | library packages — including `pickers`, `runners` and `mcp` — never write outside `core/atomic.py` |
+| `test_no_sys_exit.py` | library packages — including `server`, `pickers`, `runners`, `mcp` and `mcpschema` — never terminate the process |
+| `test_no_direct_writes.py` | library packages — including `pickers`, `runners`, `mcp` and `mcpschema` — never write outside `core/atomic.py` |
 | `test_wheel_excludes_server.py` | `docmax.server` does not ship in the wheel |
 | `test_tui.py` | the TUI names no tool, imports no other interface, and the CLI reaches only its entry point |
 
@@ -94,9 +103,9 @@ This section is kept deliberately rather than deleted: it is where a rule goes
 when it is written down before it can be enforced, and leaving the heading
 present makes an empty list a visible claim rather than an omission.
 `docmax.tui` and `docmax.pickers` arrived at M7 with their contracts in the same
-change, `docmax.runners` at M9, and `docmax.mcp` at M10 — each with its layer
-entry, its contract membership and its hygiene coverage in the same commit, as
-the architecture requires.
+change, `docmax.runners` at M9, `docmax.mcp` at M10, and `docmax.mcpschema` at
+M11 — each with its layer entry, its contract membership and its hygiene
+coverage in the same commit, as the architecture requires.
 
 ## Interfaces are peers, not a stack
 

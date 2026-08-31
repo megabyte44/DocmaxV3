@@ -35,19 +35,38 @@ def new_file_id() -> str:
 class Storage(Protocol):
     """Somewhere to keep bytes for the lifetime of one job."""
 
-    def reserve(self, *, filename: str, size_bytes: int) -> str:
-        """Claim an id for an upload that has not arrived yet."""
+    def reserve(self, *, filename: str, size_bytes: int, owner: str) -> str:
+        """Claim an id for an upload that has not arrived yet.
+
+        ``owner`` is the caller's own identity — its API key today; see
+        [ADR 0035](../../../docs/adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md)
+        on why a bearer token is the whole identity model for now. Every other
+        method on this protocol checks it against the id's own record, in the
+        same lookup that finds the record — not as a separate call — so there
+        is no window between "does this exist" and "is it mine" for a second
+        request to land in.
+        """
         ...
 
-    def put(self, file_id: str, payload: bytes) -> None: ...
+    def put(self, file_id: str, payload: bytes, *, owner: str) -> None: ...
 
-    def get(self, file_id: str) -> bytes: ...
+    def get(self, file_id: str, *, owner: str | None) -> bytes:
+        """The bytes, if ``owner`` matches the one that reserved this id.
 
-    def filename(self, file_id: str) -> str:
+        ``owner=None`` skips the check. That is not a bypass hatch for a
+        caller who forgot to look one up — it is what
+        ``routes/outputs.py`` deliberately passes, because that route takes no
+        API key at all: the file id's own unguessability is its access
+        control there, by design, and a caller with no key has no owner to
+        compare.
+        """
+        ...
+
+    def filename(self, file_id: str, *, owner: str | None) -> str:
         """The name it was uploaded under. Tools route on the suffix."""
         ...
 
-    def discard(self, file_id: str) -> None:
+    def discard(self, file_id: str, *, owner: str | None) -> None:
         """Delete. Called on completion *and* on failure, never skipped."""
         ...
 
@@ -57,6 +76,7 @@ class _Slot:
     filename: str
     expected_bytes: int
     created_at: float
+    owner: str
     payload: bytes | None = None
 
 
@@ -67,7 +87,7 @@ class InMemoryStorage:
     max_bytes: int = 512 * 1024 * 1024
     _slots: dict[str, _Slot] = field(default_factory=dict)
 
-    def reserve(self, *, filename: str, size_bytes: int) -> str:
+    def reserve(self, *, filename: str, size_bytes: int, owner: str) -> str:
         if size_bytes > self.max_bytes:
             raise CloudPayloadTooLargeError(
                 f"That document is {size_bytes} bytes; this endpoint accepts {self.max_bytes}.",
@@ -78,11 +98,12 @@ class InMemoryStorage:
             filename=filename,
             expected_bytes=size_bytes,
             created_at=time.time(),
+            owner=owner,
         )
         return file_id
 
-    def put(self, file_id: str, payload: bytes) -> None:
-        slot = self._slot(file_id)
+    def put(self, file_id: str, payload: bytes, *, owner: str) -> None:
+        slot = self._slot(file_id, owner=owner)
         if len(payload) > self.max_bytes:
             raise CloudPayloadTooLargeError(
                 f"That upload is {len(payload)} bytes; this endpoint accepts {self.max_bytes}.",
@@ -95,8 +116,8 @@ class InMemoryStorage:
             )
         slot.payload = payload
 
-    def get(self, file_id: str) -> bytes:
-        payload = self._slot(file_id).payload
+    def get(self, file_id: str, *, owner: str | None) -> bytes:
+        payload = self._slot(file_id, owner=owner).payload
         if payload is None:
             raise InputNotFoundError(
                 f"Nothing has been uploaded for {file_id}.",
@@ -105,11 +126,15 @@ class InMemoryStorage:
             )
         return payload
 
-    def filename(self, file_id: str) -> str:
-        return self._slot(file_id).filename
+    def filename(self, file_id: str, *, owner: str | None) -> str:
+        return self._slot(file_id, owner=owner).filename
 
-    def discard(self, file_id: str) -> None:
-        self._slots.pop(file_id, None)
+    def discard(self, file_id: str, *, owner: str | None) -> None:
+        try:
+            self._slot(file_id, owner=owner)
+        except InputNotFoundError:
+            return
+        del self._slots[file_id]
 
     def reap(self, older_than_seconds: float) -> int:
         """Delete anything left behind by a job that never finished."""
@@ -122,15 +147,31 @@ class InMemoryStorage:
     def _in_use(self) -> int:
         return sum(len(slot.payload) for slot in self._slots.values() if slot.payload)
 
-    def _slot(self, file_id: str) -> _Slot:
+    def _slot(self, file_id: str, *, owner: str | None) -> _Slot:
+        """The one lookup every method above goes through.
+
+        The ownership check happens *inside* the same dict access that proves
+        the id exists — one atomic step, not "does it exist" followed by "is
+        it mine" as two calls a second request could land between. A mismatch
+        raises the identical "no such id" error an unknown id raises: a caller
+        who does not own ``file_id`` learns nothing about whether it exists,
+        the same shape ADR 0029 chose for a path outside the local roots.
+        """
         try:
-            return self._slots[file_id]
+            slot = self._slots[file_id]
         except KeyError as exc:
             raise InputNotFoundError(
                 f"No upload is registered as {file_id}.",
                 remedy="Request a new upload URL; tickets expire.",
                 context={"file_id": file_id},
             ) from exc
+        if owner is not None and slot.owner != owner:
+            raise InputNotFoundError(
+                f"No upload is registered as {file_id}.",
+                remedy="Request a new upload URL; tickets expire.",
+                context={"file_id": file_id},
+            )
+        return slot
 
 
 __all__ = ["FILE_ID_PREFIX", "InMemoryStorage", "Storage", "new_file_id"]

@@ -29,7 +29,22 @@ SRC = REPO_ROOT / "src" / "docmax"
 #: protocol server has even less excuse to write a file outside ``core/atomic.py``
 #: than a request handler does. ``cli`` and ``tui`` remain excluded because they
 #: are the layer that is *allowed* to exit. See ADR 0027.
-LIBRARY_PACKAGES = ("core", "tools", "cloud_client", "server", "pickers", "runners", "mcp")
+#:
+#: ``mcpschema`` (M11) is a registry-to-JSON-Schema mapping shared by ``mcp``
+#: and ``server``. It holds no file handle and starts no process, but it is
+#: library code by the same definition as ``pickers``, and the hygiene suite
+#: should not have to special-case the one package that happens not to touch a
+#: path yet. See ADR 0035.
+LIBRARY_PACKAGES = (
+    "core",
+    "tools",
+    "cloud_client",
+    "server",
+    "pickers",
+    "runners",
+    "mcp",
+    "mcpschema",
+)
 
 
 def library_sources() -> list[Path]:

@@ -37,6 +37,7 @@ class Job:
 
     job_id: str
     tool: str
+    owner: str
     status: JobStatus = JobStatus.QUEUED
     file_id: str | None = None
     params: dict[str, Any] = field(default_factory=dict)
@@ -80,20 +81,38 @@ class Job:
 class JobStore(Protocol):
     """Somewhere to keep job records while they are alive."""
 
-    def create(self, tool: str, *, file_id: str | None, params: dict[str, Any]) -> Job: ...
+    def create(
+        self, tool: str, *, file_id: str | None, params: dict[str, Any], owner: str
+    ) -> Job: ...
 
-    def get(self, job_id: str) -> Job: ...
+    def get(self, job_id: str, *, owner: str) -> Job:
+        """The job, if ``owner`` is the caller that created it.
 
-    def find_by_idempotency_key(self, key: str) -> Job | None:
-        """The retry-safety half of the contract.
-
-        Same input, same parameters, same key — so a retry after a dropped
-        connection returns the original job instead of running and billing it a
-        second time.
+        A caller presenting *any* valid API key may reach this method — that
+        much is checked before the request arrives — but a job belongs to
+        whoever created it, not to whoever else can guess or has seen its id.
+        A mismatch raises the identical "no such job" error an unknown id
+        raises, in the same lookup, so a caller polling someone else's job
+        learns nothing about whether it exists. See ADR 0035.
         """
         ...
 
-    def remember_idempotency_key(self, key: str, job: Job) -> None: ...
+    def find_by_idempotency_key(self, key: str, *, owner: str) -> Job | None:
+        """The retry-safety half of the contract, scoped to one caller.
+
+        Same input, same parameters, same key, same caller — so a retry after
+        a dropped connection returns the original job instead of running and
+        billing it a second time. Scoped to ``owner`` because an
+        ``Idempotency-Key`` is a value the *client* chooses: without this, one
+        caller supplying a key another caller already used — by collision or
+        on purpose — would be handed back that other caller's job, including
+        its output's ``file_id``. That is the sharpest form of "possible
+        cross-user data exposure" this module can produce, and it is a
+        property of the lookup, not of the key's own randomness.
+        """
+        ...
+
+    def remember_idempotency_key(self, key: str, job: Job, *, owner: str) -> None: ...
 
 
 @dataclass(slots=True)
@@ -101,29 +120,29 @@ class InMemoryJobStore:
     """The reference store: two dictionaries and no persistence."""
 
     _jobs: dict[str, Job] = field(default_factory=dict)
-    _by_key: dict[str, str] = field(default_factory=dict)
+    _by_key: dict[tuple[str, str], str] = field(default_factory=dict)
 
-    def create(self, tool: str, *, file_id: str | None, params: dict[str, Any]) -> Job:
-        job = Job(job_id=new_job_id(), tool=tool, file_id=file_id, params=dict(params))
+    def create(self, tool: str, *, file_id: str | None, params: dict[str, Any], owner: str) -> Job:
+        job = Job(job_id=new_job_id(), tool=tool, owner=owner, file_id=file_id, params=dict(params))
         self._jobs[job.job_id] = job
         return job
 
-    def get(self, job_id: str) -> Job:
-        try:
-            return self._jobs[job_id]
-        except KeyError as exc:
+    def get(self, job_id: str, *, owner: str) -> Job:
+        job = self._jobs.get(job_id)
+        if job is None or job.owner != owner:
             raise InputNotFoundError(
                 f"No such job: {job_id}",
                 remedy="Job records are kept only while the job is alive.",
                 context={"job_id": job_id},
-            ) from exc
+            )
+        return job
 
-    def find_by_idempotency_key(self, key: str) -> Job | None:
-        job_id = self._by_key.get(key)
+    def find_by_idempotency_key(self, key: str, *, owner: str) -> Job | None:
+        job_id = self._by_key.get((owner, key))
         return self._jobs.get(job_id) if job_id else None
 
-    def remember_idempotency_key(self, key: str, job: Job) -> None:
-        self._by_key[key] = job.job_id
+    def remember_idempotency_key(self, key: str, job: Job, *, owner: str) -> None:
+        self._by_key[(owner, key)] = job.job_id
 
 
 __all__ = [

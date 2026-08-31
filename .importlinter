@@ -19,6 +19,7 @@ layers =
     docmax.tui
     docmax.server
     docmax.mcp
+    docmax.mcpschema
     docmax.pickers
     docmax.runners
     docmax.tools
@@ -27,6 +28,14 @@ layers =
 ; Read bottom-up: core depends on nothing internal; cloud_client may use core;
 ; tools may use both; the server may use tools and core (but not the client —
 ; see below); and the two terminal interfaces may use everything.
+;
+; docmax.mcpschema (M11) sits below both docmax.server and docmax.mcp for the
+; same reason docmax.pickers sits below the CLI and the TUI: two interfaces
+; want the same registry-to-JSON-Schema mapping, and interfaces-are-independent
+; forbids either from reaching into the other's package to get it. It is
+; library code on the same terms as pickers and runners -- it never prints,
+; never exits, and imports docmax.core only -- and docmax.mcp re-exports it so
+; nothing importing docmax.mcp.schema today has to change. See ADR 0035.
 ;
 ; docmax.pickers (M7) sits below every interface and above tools because both
 ; the CLI and the TUI reach for it and neither may import the other. It is not
@@ -127,12 +136,17 @@ forbidden_modules =
     docmax.cloud_client
     docmax.server
     docmax.mcp
+    docmax.mcpschema
 ; The registry resolves tools by lazy metadata, never by importing them. This
 ; is what keeps `import docmax` free of OpenCV.
 ;
 ; docmax.runners joined at M9. ADR 0023's load-bearing claim is that M9 needed
 ; no Core change; listing the package here is what makes "core does not know the
 ; runners exist" a checked fact rather than a sentence in an ADR.
+;
+; docmax.mcpschema joined at M11 for the same reason: core does not know a JSON
+; Schema rendering of the registry exists, any more than it knows about pickers
+; or runners. See ADR 0035.
 
 [importlinter:contract:server-is-not-a-client]
 name = the server never uses the cloud client

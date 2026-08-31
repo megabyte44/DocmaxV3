@@ -252,7 +252,7 @@ nothing is installed for you.
 | **M8** | OCR, done properly | ✅ done |
 | **M9** | Pipelines, batch, folder watch — `--resume` [deferred](#many-documents-several-steps-or-a-folder-that-fills-up) | ✅ |
 | **M10** | Local MCP server — drive DocMax from an AI agent, nothing leaves your machine | ✅ |
-| **M11** | Remote MCP — network-reachable tool server, for clients that can't spawn a local process | 🔜 not started, design not settled |
+| **M11** | Remote MCP — network-reachable tool server, for clients that can't spawn a local process | ✅ |
 
 Benchmarks live in [`benchmarks/`](benchmarks/METHODOLOGY.md) with the method
 written down. Run them with `python -m benchmarks`. No numbers appear in this

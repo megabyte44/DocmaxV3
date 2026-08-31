@@ -52,15 +52,12 @@ make the ADR a justification rather than a decision.
 - [ ] **Observability.** One approach to logging, and the mechanism that keeps
       cloud-api.md's "document contents are never logged" true rather than
       merely stated.
-- [ ] **Remote MCP transport (M11).** M10's tool schema takes local filesystem
-      paths, which only means something when client and server share a
-      filesystem. A network-reachable MCP session (for a client that can't
-      spawn a local process, e.g. ChatGPT's connectors) needs its own file
-      reference shape, its own auth model, and a decision on whether "roots"
-      mean anything remotely — none of which ADR 0029 answers, because it
-      assumed one trusted local caller. See
-      [phases.md](phases.md#phase-11--remote-mcp-transport-m11) for the
-      question list.
+- [x] ~~**Remote MCP transport (M11).**~~ Resolved by
+      [ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md):
+      a route inside `docmax.server` (`POST /v1/mcp`), reusing the existing
+      upload/`file_id`/job model and bearer-token auth rather than a fourth
+      interface. Implemented and enforced per
+      [phases.md](phases.md#phase-11--remote-mcp-transport-m11).
 
 ### Documentation the project promises but does not have
 
@@ -107,6 +104,29 @@ Worth doing, not blocking anything.
       by `.gitignore` but absent.
 - [ ] **Coverage floor in CI.** `--cov` runs; nothing fails on a drop.
 - [x] ~~**Stale `__pycache__` cleanup.**~~ Removed 2026-08-15.
+- [ ] **Rate limiting / quotas per API key on `docmax.server`.** Named in
+      [ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md)
+      as out of scope for M11: a caller with a valid key can call any route,
+      including `/v1/mcp`, as often as it likes. Needs a decision on the
+      mechanism (in-memory token bucket vs. something that survives a
+      restart) before it becomes code, per this file's own rule.
+- [ ] **Automatic reaping of jobs and stored bytes on a timer.**
+      `InMemoryStorage.reap()` exists and `InMemoryJobStore` has no equivalent
+      at all; neither runs on its own. A deployment currently accumulates both
+      until the process restarts. Named in ADR 0035 alongside rate limiting as
+      a gap this milestone did not close.
+- [ ] **TLS-required enforcement across the rest of `docmax.server`, not only
+      `/v1/mcp`.** ADR 0035 §6 added `RequireHTTPSMiddleware` to the one route
+      built for a caller the operator does not control; `docmax`'s own
+      `CloudClient` already refuses plaintext on itself for every other route,
+      but the server does not enforce the same rule if a non-conforming
+      client connects to `/v1/tools` et al. directly.
+- [ ] **Per-key tool authorization, once a real per-user identity exists.**
+      Every accepted API key can currently run every cloud-capable tool.
+      `docmax.server` (REST and `/v1/mcp` alike) has no narrower notion of
+      "this key" than "one of the operator's flat set of bearer tokens" — ADR
+      0035 names this as the boundary of what that flat model can support, not
+      a gap in this milestone specifically.
 
 ---
 

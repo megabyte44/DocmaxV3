@@ -12,9 +12,11 @@ not a patch.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
+from starlette.routing import Route
 
 from docmax import __version__
 from docmax.core.branding import APP_NAME, HOMEPAGE
@@ -23,9 +25,13 @@ from docmax.server.errors import install_error_handlers
 from docmax.server.execution import RegistryRunner
 from docmax.server.jobs import InMemoryJobStore
 from docmax.server.routes import capabilities, jobs, outputs, tools, uploads
+from docmax.server.routes.mcp import MOUNT_PATH as MCP_MOUNT_PATH
+from docmax.server.routes.mcp import build_mcp_asgi_app
 from docmax.server.storage import InMemoryStorage
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from docmax.server.execution import ToolRunner
     from docmax.server.jobs import JobStore
     from docmax.server.storage import Storage
@@ -47,6 +53,22 @@ def create_app(
     store; nothing above this line changes when it does.
     """
     resolved = settings or ServerSettings.from_env()
+    resolved_storage = storage or InMemoryStorage(max_bytes=resolved.max_upload_bytes)
+    resolved_jobs = job_store or InMemoryJobStore()
+    resolved_runner = runner or RegistryRunner()
+
+    mcp = build_mcp_asgi_app(
+        storage=resolved_storage, jobs=resolved_jobs, runner=resolved_runner, settings=resolved
+    )
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # `StreamableHTTPSessionManager.run()` must be entered once for the
+        # process's lifetime before any request reaches it. FastAPI does not
+        # enter a `Mount`-ed sub-app's own `lifespan` automatically -- this is
+        # the one place that has to do it by hand. See `routes/mcp.py::McpAsgiApp`.
+        async with mcp.session_manager.run():
+            yield
 
     app = FastAPI(
         title=f"{APP_NAME} Cloud Engine",
@@ -57,17 +79,28 @@ def create_app(
             f"Every operation it offers also runs locally. See {HOMEPAGE}"
         ),
         openapi_url=f"{API_PREFIX}/openapi.json",
+        lifespan=lifespan,
     )
 
     app.state.settings = resolved
-    app.state.storage = storage or InMemoryStorage(max_bytes=resolved.max_upload_bytes)
-    app.state.jobs = job_store or InMemoryJobStore()
-    app.state.runner = runner or RegistryRunner()
+    app.state.storage = resolved_storage
+    app.state.jobs = resolved_jobs
+    app.state.runner = resolved_runner
 
     install_error_handlers(app)
 
     for router in (capabilities.router, tools.router, uploads.router, jobs.router, outputs.router):
         app.include_router(router, prefix=API_PREFIX)
+
+    # A `Route`, not `app.mount()`: `Mount` matches its path as a directory
+    # prefix and 307-redirects a bare hit on it to add a trailing slash, which
+    # would make the documented endpoint `/v1/mcp/`, not `/v1/mcp`, and would
+    # ask an MCP client to follow a redirect on every call. `chain` is a plain
+    # ASGI callable (an instance, not a function or method), which `Route`
+    # recognises and dispatches to directly, with no prefix matching at all.
+    app.router.routes.append(
+        Route(f"{API_PREFIX}{MCP_MOUNT_PATH}", mcp.app, methods=["GET", "POST", "DELETE"])
+    )
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, Any]:

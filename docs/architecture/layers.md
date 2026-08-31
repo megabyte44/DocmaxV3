@@ -12,9 +12,10 @@ See [current-status.md](../planning/current-status.md) for the live picture.
 ## Interfaces — `cli`, `tui`, `server`, `mcp`
 
 **Status:** `cli` complete · **`tui` implemented** (M7) · **`server` implemented**
-(routes, jobs, storage, auth, and a live tool-execution bridge) · **`mcp`
-implemented** (M10 — stdio JSON-RPC, generated from the registry, inside a
-filesystem-root policy boundary)
+(routes, jobs, storage, auth, a live tool-execution bridge, and — M11 — a
+remote MCP route at the same auth boundary) · **`mcp` implemented** (M10 —
+stdio JSON-RPC, generated from the registry, inside a filesystem-root policy
+boundary)
 
 The entry points. Each turns some external protocol — argv, keystrokes, HTTP,
 JSON-RPC — into a call on the layers below, and turns the result back into
@@ -78,6 +79,15 @@ rather than in a separate gated repository — see
 dependencies installed. That is the whole mechanism: there is one implementation
 of `compress`, and the only question is whose machine it runs on.
 
+**M11's remote MCP route lives here too, not in `docmax.mcp`.** `POST /v1/mcp`
+translates MCP's `tools/call` into the same `RegistryRunner` / `Storage` /
+`JobStore` calls `/v1/tools/{name}` already makes — no second execution path,
+no second file-reference model. It is a route, not a reason for `docmax.mcp`
+and `docmax.server` to import each other; the one piece both needed
+(registry → JSON Schema) moved to `docmax.mcpschema`, a support package below
+both, on the same terms as `pickers` and `runners`. See
+[ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md).
+
 ---
 
 ## Support — `pickers`
@@ -129,6 +139,34 @@ costs the runners nothing.
 framework. The first of those is stricter than the layers contract and is
 enforced by a separate test; see
 [ADR 0023](../adr/0023-runners-are-a-package-below-the-interfaces.md).
+
+---
+
+## Support — `mcpschema`
+
+**Status:** implemented (M11) — `ToolSpec` rendered as JSON Schema, shared by
+both MCP transports.
+
+The third non-interface support package, placed for the same reason as
+`pickers` and `runners`: `docmax.mcp` (M10, stdio) and `docmax.server`'s remote
+MCP route (M11) both need the same registry-to-JSON-Schema mapping, and
+`interfaces-are-independent` forbids either from reaching into the other's
+package to get it. Built inside `docmax.mcp` at M10 and moved here at M11 when
+a second consumer arrived — the same move `pickers` and `runners` made for
+their own second consumers, at M7 and M9 respectively.
+
+**It says nothing about a transport's policy.** What `inputs` and `output`
+*are* differs by caller — a local filesystem path inside a `--root` for stdio,
+a `file_id` from an upload for the remote route — so the wording is a
+parameter the caller supplies, not something this package decides for both.
+`docmax.mcp.schema` re-exports it unchanged, so nothing that imported the old
+location broke.
+
+**May import** — `core`, and the standard library.
+
+**May not import** — `tools`, `cloud_client`, any interface, the MCP SDK, or
+any UI framework. See
+[ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md).
 
 ---
 

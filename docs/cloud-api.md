@@ -179,6 +179,37 @@ nothing installed advertised the one tool it could not perform.
 The example above is a machine with Ghostscript and Pandoc. A different
 deployment answers differently, which is the point.
 
+## MCP, for a client that speaks it instead of this contract directly
+
+`POST /v1/mcp` (M11, [ADR 0035](adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md))
+is the same tools this document describes, reached through the Model Context
+Protocol's streamable-HTTP transport instead of the endpoints above — for a
+client (ChatGPT's connectors, or any MCP-over-HTTP client) that speaks MCP
+rather than this REST contract. It is not a second implementation: `tools/call`
+resolves and runs a tool through the same code every REST call in this
+document runs, so `tools/list` offers exactly the tools `GET /v1/capabilities`
+does, `inputs` is a `file_id` from `POST /v1/uploads` exactly as it is for the
+JSON path of `POST /v1/tools/{name}`, and a result is that call's job payload,
+unmodified.
+
+Three things differ from the REST endpoints above because this route is the
+first one built for a caller the operator does not necessarily control:
+
+- **TLS is required, except from loopback.** Every other endpoint here relies
+  on `CloudClient` refusing plaintext on itself; a third-party MCP client has
+  no reason to have made the same choice, so this route enforces it instead of
+  assuming it.
+- **A session belongs to the key that opened it.** The `Mcp-Session-Id` a
+  handshake returns cannot be reused by a request presenting a different
+  bearer token — a mismatch gets the same "not found" a made-up session id
+  would.
+- **One document per call.** Every tool's job model here carries one `file_id`
+  per job; a tool whose schema allows several inputs still takes exactly one
+  over this route.
+
+Everything else in this document — the API key, the error envelope, the
+"documents are deleted on completion or failure" rule — applies identically.
+
 ## Running the reference server
 
 ```bash

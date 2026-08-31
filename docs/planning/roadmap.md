@@ -19,7 +19,7 @@ The README carries a summary of this table. This file is the canonical version.
 | **M8** | OCR, done properly | ✅ complete |
 | **M9** | Pipelines, resumable batch, folder watch | ✅ complete — except `--resume`, [deferred](#what-m9-did-not-deliver) |
 | **M10** | Local MCP server — drive DocMax from an AI agent | ✅ complete |
-| **M11** | Remote MCP — a network-reachable tool server, for clients that can't spawn a local process | 🔜 not started, design not settled |
+| **M11** | Remote MCP — a network-reachable tool server, for clients that can't spawn a local process | ✅ complete |
 
 ## What the ordering is for
 
@@ -115,9 +115,14 @@ this is not "mount the same server on a port":
   network-reachable (ADR 0006); M11 could be a transport bridge in front of it
   rather than a fourth thing. That choice belongs in the ADR, not this table.
 
-None of this is decided. See [phases.md](phases.md#phase-11--remote-mcp-transport-m11)
-for the task list and [backlog.md](backlog.md#decisions-owed-an-adr) for the ADR
-this owes before any code lands.
+None of this was decided when this section was written.
+[ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md)
+settled it — a route inside `docmax.server`
+(`POST /v1/mcp`), not a fourth thing, reusing the existing upload/`file_id`/job
+model and bearer-token auth. See
+[phases.md](phases.md#phase-11--remote-mcp-transport-m11) for what shipped and
+[backlog.md](backlog.md#decisions-owed-an-adr) — the ADR resolved this item
+there too.
 
 ## What is not on the roadmap
 
