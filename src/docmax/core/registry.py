@@ -103,6 +103,22 @@ class ToolSpec:
     produces_directory: bool = False
     #: Free-form, for ``--help`` grouping and search.
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    #: No destination may ever be *implied* for this tool -- not derived from
+    #: the first input, and not guessed by appending ``default_suffix`` to an
+    #: extensionless ``-o``. Most tools are safe to guess for; a handful are
+    #: not, and guessing anyway would be actively wrong rather than merely
+    #: unhelpful. ``convert``'s real output extension is ``to``, a parameter,
+    #: not a constant -- Pandoc can never write PDF (ADR 0011), so
+    #: ``default_suffix`` (``.pdf``) is never a valid guess for it.
+    #: ``metadata`` only ever writes a *new* document when asked to
+    #: (``--set``/``--clear``); *whether* ``-o`` is required that time still
+    #: has to be decided in ``cli/commands.py``, since it depends on other
+    #: parameters ``ToolSpec`` cannot see -- but "no destination may ever be
+    #: implied" is true of it unconditionally, and is exactly what this field
+    #: records. See ADR 0033. Consumed by ``tui/app.py:RunScreen``, generically,
+    #: to mark the generated output field required and drop the placeholder's
+    #: extension hint where it would mislead.
+    output_required: bool = False
 
     def supports(self, engine: Engine) -> bool:
         return engine in self.supported_engines

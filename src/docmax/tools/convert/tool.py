@@ -27,10 +27,18 @@ SPEC = register(
         # with a LaTeX distribution installed still will not be asked for one.
         supported_engines=frozenset({Engine.LOCAL, Engine.CLOUD}),
         accepts_multiple_inputs=False,
-        # Unused: the CLI requires `-o`, so a destination is never derived. It
-        # stays at the default rather than becoming parameter-dependent, which
-        # would be a change to ToolSpec and OutputTarget -- see ADR 0011.
+        # Never trusted to name a real destination: the true extension is
+        # `to`, a parameter, and Pandoc can never write PDF (ADR 0011) -- so
+        # `.pdf` is not merely a default that might be wrong sometimes, it is
+        # wrong every time. Left at the historical default rather than made
+        # parameter-dependent, which is still the open "output extension
+        # depends on a parameter" seam (docs/planning/current-status.md).
         default_suffix=".pdf",
+        # What *is* decided, narrowly: no destination may ever be implied for
+        # this tool, in any interface. The CLI already enforced that with a
+        # required `-o`; this is what lets `tui/app.py` know it too, instead
+        # of silently diverging the way issue #24 found. See ADR 0033.
+        output_required=True,
         params=(
             Param(
                 name="to",
