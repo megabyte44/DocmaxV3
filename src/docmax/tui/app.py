@@ -155,6 +155,23 @@ def _format_detail_scalar(value: Any) -> str:
     return str(value)
 
 
+def _output_placeholder(spec: ToolSpec) -> str:
+    """The output field's hint text — naming an extension only when one can be trusted.
+
+    Every tool's output is required (see ``RunScreen._request``); this only
+    decides what the placeholder may *imply*. ``spec.output_required`` tools
+    (ADR 0033) have no default worth suggesting — ``convert``'s real extension
+    is ``--to``, a parameter, and ``default_suffix`` would name the one format
+    Pandoc can never write (ADR 0011). That was the bug issue #24 reported:
+    the placeholder claimed a `.pdf` result no run of `convert` can ever
+    produce, because it read `default_suffix` unconditionally rather than
+    asking whether the tool's spec ever intended it to be read that way.
+    """
+    if spec.output_required:
+        return "path to write the result to"
+    return f"path to write the {spec.default_suffix} result to"
+
+
 class Brand(Horizontal):
     """The one-line header every screen shares: mark, subtitle, version.
 
@@ -417,7 +434,7 @@ class RunScreen(Screen[None]):
             yield Label("output (required)")
             with Horizontal(classes="input-row"):
                 yield Input(
-                    placeholder=f"path to write the {spec.default_suffix} result to",
+                    placeholder=_output_placeholder(spec),
                     id="field-__output__",
                 )
                 yield Button("Browse…", id="browse-output")

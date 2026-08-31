@@ -361,6 +361,34 @@ def test_metadata_rejects_an_output_when_reading(
     assert "only used with" in shown(result)
 
 
+def test_metadata_requires_an_output_because_the_spec_says_so(
+    real_router: None, source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0033: the refusal traces back to `ToolSpec.output_required`, not an
+    assumption baked into `cli/commands.py` independently of it.
+
+    `get_tool` is patched to hand back a `metadata` spec with
+    `output_required=False`; if `cli/commands.py` still raised, that would
+    mean the check had stopped reading the spec at all.
+    """
+    import dataclasses
+
+    from docmax.core import registry as registry_module
+
+    real_get_tool = registry_module.get_tool
+
+    def fake_get_tool(name: str) -> Any:
+        spec = real_get_tool(name)
+        return dataclasses.replace(spec, output_required=False) if name == "metadata" else spec
+
+    monkeypatch.setattr(registry_module, "get_tool", fake_get_tool)
+
+    result = runner.invoke(app, ["metadata", str(source), "--set", "Title=X"])
+
+    assert result.exit_code != 2, shown(result)
+    assert "-o is required" not in shown(result)
+
+
 def test_metadata_reports_an_unknown_field(real_router: None, source: Path, tmp_path: Path) -> None:
     result = runner.invoke(
         app, ["metadata", str(source), "--set", "Titel=x", "-o", str(tmp_path / "x.pdf")]

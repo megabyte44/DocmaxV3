@@ -45,6 +45,7 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0030](0030-mcp-cancellation-maps-onto-the-cancellation-token.md) | A cancelled MCP request cancels the DocMax run, through the existing token | Accepted |
 | [0031](0031-toolspec-says-when-output-is-a-directory.md) | `ToolSpec` says when output is a directory, so `OutputTarget` can safely fill in a missing extension | Accepted |
 | [0032](0032-param-gains-component-labels-for-composite-values.md) | `Param` gains `component_labels`, so a composite value gets one labelled field per part | Accepted |
+| [0033](0033-toolspec-says-output-may-never-be-implied.md) | `ToolSpec` says when output may never be implied, so the TUI stops suggesting one that is wrong | Accepted |
 
 ## When to write one
 

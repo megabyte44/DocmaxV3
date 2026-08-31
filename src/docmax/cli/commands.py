@@ -811,6 +811,12 @@ def convert(
 
     Needs Pandoc installed — run `docmax doctor` to check, and it will print the
     install line for your platform. Run `docmax formats` for the full table.
+
+    `-o` names the destination outright rather than defaulting to `Path | None`
+    with a manual check, because there is nothing conditional about it: the
+    real extension depends on `--to`, so no path is ever safe to guess. That is
+    `ToolSpec.output_required` (ADR 0033) for this tool, expressed the plain
+    way a static fact is — a required option, not a runtime branch.
     """
     from docmax.cli import json_output
     from docmax.cli.execution import execute
@@ -948,11 +954,18 @@ def metadata(
     from docmax.cli import json_output
     from docmax.cli.execution import execute, execute_read_only
     from docmax.cli.render import render_metadata, render_result
+    from docmax.core.registry import get_tool
 
     json_output.note(json_out)
 
+    # *Whether* `-o` is required depends on `--set`/`--clear`, which `ToolSpec`
+    # has no way to see — that half stays a per-tool branch here, by
+    # necessity. But *that no destination is ever implied* for a write is
+    # unconditional, and reading it off `get_tool("metadata").output_required`
+    # rather than assuming it inline is what keeps this check from silently
+    # drifting from the fact `tui/app.py` reads off the same spec. ADR 0033.
     writing = bool(set_) or clear
-    if writing and output is None:
+    if writing and output is None and get_tool("metadata").output_required:
         raise typer.BadParameter("-o is required when setting metadata.", param_hint="--output")
     if not writing and output is not None:
         raise typer.BadParameter("-o is only used with --set or --clear.", param_hint="--output")

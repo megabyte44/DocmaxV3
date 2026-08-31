@@ -115,3 +115,27 @@ def test_every_spec_is_renderable() -> None:
         assert spec.module.endswith(spec.name.replace("-", "_"))
         for param in spec.params:
             assert param.description, f"{spec.name}.{param.name} has no description"
+
+
+def test_output_required_is_set_on_exactly_the_tools_that_cannot_derive_one() -> None:
+    """ADR 0033: no destination may ever be implied for `convert` or `metadata`.
+
+    `convert`'s real extension depends on `--to`, and `default_suffix` is
+    Pandoc's one format it can never write (ADR 0011). `metadata` only ever
+    writes a new document when asked, and promises never to edit one in
+    place, so implying a destination for it is exactly as wrong.
+
+    Pinned as an explicit set — a nineteenth tool that needs `True` here and
+    quietly keeps the `False` default would otherwise pass silently, which is
+    the failure mode this test exists to catch.
+    """
+    expected = {"convert", "metadata"}
+    actual = {spec.name for spec in iter_tools() if spec.output_required}
+    assert actual == expected
+
+
+def test_output_required_defaults_to_false() -> None:
+    """The common case: most tools' `default_suffix` is a trustworthy guess."""
+    from docmax.core.registry import ToolSpec
+
+    assert ToolSpec.__dataclass_fields__["output_required"].default is False

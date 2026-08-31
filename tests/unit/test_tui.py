@@ -974,6 +974,36 @@ def test_a_form_with_no_input_is_a_typed_error_not_a_crash(tmp_path: Path) -> No
     asyncio.run(scenario())
 
 
+def test_output_placeholder_names_no_extension_for_a_tool_that_cannot_derive_one() -> None:
+    """ADR 0033 / issue #24: `convert`'s placeholder must not claim a `.pdf`
+    result, since no run of `convert` can ever produce one — Pandoc cannot
+    write PDF (ADR 0011), and the real extension depends on `--to`, a
+    parameter. An ordinary tool (`crop`) keeps naming its extension, since
+    that hint is accurate for it.
+    """
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def placeholder_for(tool: str) -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen(tool)
+            app.push_screen(screen)
+            await pilot.pause()
+            return screen.query_one("#field-__output__", Input).placeholder
+
+    convert_placeholder = asyncio.run(placeholder_for("convert"))
+    crop_placeholder = asyncio.run(placeholder_for("crop"))
+
+    assert convert_placeholder == "path to write the result to"
+    assert ".pdf" not in convert_placeholder
+    assert ".pdf" in crop_placeholder
+
+
 def test_a_form_with_no_output_is_a_typed_error_not_a_crash(tmp_path: Path) -> None:
     """Output is required, the same as every command the CLI exposes.
 

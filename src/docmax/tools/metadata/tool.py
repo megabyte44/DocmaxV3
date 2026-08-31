@@ -21,6 +21,13 @@ SPEC = register(
         supported_engines=frozenset({Engine.LOCAL}),
         accepts_multiple_inputs=False,
         default_suffix=".pdf",
+        # Writes only when asked to (`--set`/`--clear`); `cli/commands.py`
+        # still decides *whether* `-o` is required for a given invocation,
+        # since that depends on other parameters `ToolSpec` cannot see. But no
+        # destination may ever be implied for a write -- editing the source in
+        # place is exactly what this tool promises never to do -- and that
+        # fact is unconditional. See ADR 0033.
+        output_required=True,
         params=(
             Param(
                 name="set",
