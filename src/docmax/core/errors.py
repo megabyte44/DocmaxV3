@@ -258,6 +258,7 @@ class LocalDependencyMissingError(DependencyError):
         *,
         dependency: str,
         install_hint: str | None = None,
+        url: str | None = None,
         remedy: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> None:
@@ -265,6 +266,11 @@ class LocalDependencyMissingError(DependencyError):
         super().__init__(message, remedy=remedy or install_hint, context=ctx)
         self.dependency = dependency
         self.install_hint = install_hint
+        #: The dependency's official install/documentation page, when the
+        #: caller knows one — see ``tools/_binaries.py``'s ``Binary.homepage``
+        #: and ``core.protocols.MissingDependency``. ``None`` means the
+        #: project has not recorded one, not that none exists.
+        self.url = url
 
 
 class ExternalToolFailedError(DependencyError):

@@ -581,17 +581,24 @@ fix (an `implemented` flag on `ToolSpec`) is a Core change deliberately not made
 [phases.md](phases.md) says to treat exactly this as a finding, and it belongs
 with the other three below rather than being decided alone.
 
-**Three seams are still owed one ADR.** `ToolSpec` cannot say "this tool produces
-no output" (`get-info`, a bare `metadata`, `permissions`), cannot say "my output
+**One of the three seams is closed.** [ADR 0036](../adr/0036-toolspec-says-when-a-tool-produces-no-output.md)
+gave `ToolSpec` a `produces_output` field, set `False` on `get-info` and
+`permissions` — the two tools whose `run()` returns `outputs=()`
+unconditionally. `metadata` is deliberately left at the default: its output
+depends on whether `set`/`clear` were given, which a static `bool` cannot
+express, and its TUI form still asks for `-o` unconditionally. That
+remainder is named in the ADR as a follow-up, not silently dropped.
+
+**Two seams are still owed one ADR.** `ToolSpec` cannot say "my output
 extension depends on a parameter" (which is why `convert` requires `-o`), and
 cannot carry configuration to a strategy — so a cloud strategy resolves its own
 through `core.config.load()` rather than receiving the router's
-([ADR 0013](../adr/0013-cloud-config-comes-from-the-resolved-config.md)) — and
-— and the fourth, "declared but not implemented", is gone. All three are the
-same shape: a tool wanting something from `ToolSpec` that it does not carry.
-They should be decided together.
+([ADR 0013](../adr/0013-cloud-config-comes-from-the-resolved-config.md)). Both
+are the same shape: a tool wanting something from `ToolSpec` that it does not
+carry. They should be decided together — ADR 0036 explains, the same way
+ADR 0031 did before it, why "produces no output" was not folded in with them.
 
-The third has a named trigger: **adding an `--endpoint` or `--api-key` flag
+The second has a named trigger: **adding an `--endpoint` or `--api-key` flag
 makes it wrong**, because a runtime override cannot reach a strategy.
 
 **`permissions` reads and does not write, and that was a judgement call.**

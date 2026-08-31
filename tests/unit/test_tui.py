@@ -317,7 +317,11 @@ class FakeRouter:
     evidence of a design failure, exactly as it is for the router's own tests."""
 
     def __init__(
-        self, *, result: ToolResult | None = None, raises: Exception | None = None
+        self,
+        *,
+        result: ToolResult | None = None,
+        raises: Exception | None = None,
+        missing: tuple[Any, ...] = (),
     ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.targets: list[tuple[str, str | None, bool]] = []
@@ -326,6 +330,10 @@ class FakeRouter:
         self._result = result or ToolResult(outputs=(), engine_used=Engine.LOCAL)
         self._raises = raises
         self.resolved: list[str] = []
+        #: What `missing_dependencies` reports — empty unless a test asks for
+        #: the "a strategy can name exactly what's missing" path.
+        self.missing = missing
+        self.missing_dependencies_calls: list[tuple[str, Engine]] = []
 
     def target_for(
         self, tool: str, docs: Sequence[Any], *, requested: str | None = None, force: bool = False
@@ -345,6 +353,10 @@ class FakeRouter:
         from docmax.core.router import Routing
 
         return Routing(Engine.LOCAL, "because this is a fake")
+
+    def missing_dependencies(self, tool: str, engine: Engine) -> tuple[Any, ...]:
+        self.missing_dependencies_calls.append((tool, engine))
+        return self.missing
 
 
 class _FakeConsent:
@@ -3140,8 +3152,10 @@ def test_a_run_whose_result_carries_details_shows_them_generically(
 
             from textual.widgets import Input
 
+            # `get-info` declares `produces_output=False` (ADR 0036), so its
+            # generated form has no output field at all — nothing to fill in
+            # here beyond the input.
             screen.query_one("#field-__inputs__", Input).value = str(source)
-            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
             await pilot.pause()
 
             await pilot.click("#run")
@@ -3237,8 +3251,9 @@ def test_a_dry_run_does_not_show_the_details_panel(
 
             from textual.widgets import Input
 
+            # `get-info` declares `produces_output=False` (ADR 0036): no
+            # output field on this form to fill in.
             screen.query_one("#field-__inputs__", Input).value = str(source)
-            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
             await pilot.pause()
 
             await pilot.click("#dry-run")
@@ -3278,8 +3293,9 @@ def test_the_details_panel_is_cleared_on_a_failed_run(
 
             from textual.widgets import Input
 
+            # `get-info` declares `produces_output=False` (ADR 0036): no
+            # output field on this form to fill in.
             screen.query_one("#field-__inputs__", Input).value = str(source)
-            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
             await pilot.pause()
 
             await pilot.click("#run")
@@ -3305,7 +3321,6 @@ def test_get_info_run_through_the_real_tui_shows_the_answer_it_found(tmp_path: P
     from docmax.tui.app import DocMaxApp, RunScreen
 
     source = _write_pdf(tmp_path / "report.pdf", pages=3)
-    out = tmp_path / "unused.pdf"  # get-info never writes here; only resolved, never used
 
     async def scenario() -> tuple[str, str]:
         app = DocMaxApp()
@@ -3315,8 +3330,10 @@ def test_get_info_run_through_the_real_tui_shows_the_answer_it_found(tmp_path: P
             app.push_screen(screen)
             await pilot.pause()
 
+            # `get-info` declares `produces_output=False` (ADR 0036): its
+            # generated form has no output field at all, so there is nothing
+            # to fill in beyond the input.
             screen.query_one("#field-__inputs__", Input).value = str(source)
-            screen.query_one("#field-__output__", Input).value = str(out)
             await pilot.pause()
 
             await pilot.click("#run")
@@ -3328,7 +3345,6 @@ def test_get_info_run_through_the_real_tui_shows_the_answer_it_found(tmp_path: P
 
     status, details = asyncio.run(scenario())
     assert "Wrote nothing" in status
-    assert not out.exists(), "get-info must never write the output path it was given"
     assert "pages: 3" in details
     assert "encrypted: no" in details
     assert f"name: {source.name}" in details
@@ -3792,3 +3808,465 @@ def test_escape_on_the_cloud_status_screen_returns_to_the_tool_list() -> None:
             assert isinstance(app.screen, ToolListScreen)
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Report-only tools (ADR 0036) — a tool that declares `produces_output=False`
+# has no output field to leave empty in the first place.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("tool", ["get-info", "permissions"])
+def test_report_only_tools_declare_produces_output_false(tool: str) -> None:
+    assert get_tool(tool).produces_output is False
+
+
+@pytest.mark.parametrize("tool", ["get-info", "permissions"])
+def test_a_report_only_tools_form_has_no_output_field(tool: str) -> None:
+    """The generic fix: `RunScreen.compose` reads `spec.produces_output`
+    rather than checking which tool this is."""
+    import asyncio
+
+    from textual.widgets import Button, Input, Label
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> tuple[list[str], list[str], list[str]]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen(tool)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            labels = [_text_of(widget) for widget in screen.query(Label)]
+            output_field_ids = [
+                widget.id or "" for widget in screen.query(Input) if widget.id == "field-__output__"
+            ]
+            button_ids = [widget.id or "" for widget in screen.query(Button)]
+            return labels, output_field_ids, button_ids
+
+    labels, output_field_ids, button_ids = asyncio.run(scenario())
+
+    assert not any("output" in label.lower() for label in labels)
+    assert output_field_ids == []
+    assert "browse-output" not in button_ids
+    assert "force" not in button_ids
+
+
+@pytest.mark.parametrize("tool", ["get-info", "permissions"])
+def test_a_report_only_tools_request_has_no_output(tool: str, tmp_path: Path) -> None:
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> Path | None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen(tool)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+
+            request = screen._request(dry_run=False, force=False)
+            return request.output
+
+    assert asyncio.run(scenario()) is None
+
+
+@pytest.mark.parametrize("tool", ["get-info", "permissions"])
+def test_a_report_only_tool_runs_with_only_an_input(tool: str, tmp_path: Path) -> None:
+    """No output field to fill in, and no `InvalidParameterError` for leaving
+    one empty — the run reaches the router with nothing but the input."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    router = FakeRouter(result=ToolResult(outputs=(), engine_used=Engine.LOCAL, details={"ok": 1}))
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen(tool)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+
+            request = screen._request(dry_run=False, force=False)
+            runner.run(request, router=router)  # type: ignore[arg-type]
+
+    asyncio.run(scenario())
+    (call,) = router.calls
+    assert call["tool"] == tool
+
+
+def test_get_info_via_the_real_tui_reports_without_an_output_path(tmp_path: Path) -> None:
+    """The exact regression this fixes, end to end: the real registry, the
+    real router, the real `get-info` tool, no fakes — clicking Run with only
+    an input filled in succeeds and shows the report."""
+    import asyncio
+
+    from pypdf import PdfWriter
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = tmp_path / "doc.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.add_blank_page(width=200, height=200)
+    with source.open("wb") as handle:
+        writer.write(handle)
+
+    async def scenario() -> tuple[str, str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("get-info")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(1.0)
+
+            status = str(screen.query_one("#status", Static).content)
+            details = _text_of(screen.query_one("#details", Static))
+            return status, details
+
+    status, details = asyncio.run(scenario())
+    assert "Wrote nothing" in status, "get-info correctly writes nothing"
+    assert "pages: 2" in details
+
+
+# ---------------------------------------------------------------------------
+# Missing dependencies — generic across every tool, never `if tool == "ocr"`
+# (ADR 0036).
+# ---------------------------------------------------------------------------
+
+
+def test_dependency_check_reads_a_local_dependency_missing_error_directly() -> None:
+    """A `LocalDependencyMissingError` already names exactly one thing — no
+    need to ask the router anything."""
+    from docmax.core.errors import LocalDependencyMissingError
+    from docmax.tui.app import RunScreen
+
+    screen = RunScreen("ocr")
+    router = FakeRouter()
+    exc = LocalDependencyMissingError(
+        "ocr needs tesseract, which is not installed.",
+        dependency="tesseract",
+        install_hint="apt install tesseract-ocr",
+        url="https://tesseract-ocr.github.io/tessdoc/Installation.html",
+    )
+
+    (dependency,) = screen._dependency_check(exc, router)  # type: ignore[arg-type]
+
+    assert dependency.name == "tesseract"
+    assert dependency.url == "https://tesseract-ocr.github.io/tessdoc/Installation.html"
+    assert router.missing_dependencies_calls == []
+
+
+def test_dependency_check_asks_the_router_for_a_no_engine_available_error() -> None:
+    """The realistic case: `EngineRouter.resolve` checks availability before
+    a strategy ever runs, so what actually reaches the TUI is
+    `NoEngineAvailableError`, not `LocalDependencyMissingError` — the router
+    is asked what the *local* engine specifically is missing, generically."""
+    from docmax.core.errors import NoEngineAvailableError
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui.app import RunScreen
+
+    screen = RunScreen("ocr")
+    reported = (
+        MissingDependency(name="tesseract", reason="OCR needs tesseract.", url="https://x.test"),
+    )
+    router = FakeRouter(missing=reported)
+    exc = NoEngineAvailableError("Cannot run 'ocr': not installed.", context={"tool": "ocr"})
+
+    result = screen._dependency_check(exc, router)  # type: ignore[arg-type]
+
+    assert result == reported
+    assert router.missing_dependencies_calls == [("ocr", Engine.LOCAL)]
+
+
+def test_dependency_check_falls_back_to_nothing_for_an_unrelated_error() -> None:
+    """Every other `DocMaxError` gets the ordinary error modal, unaffected —
+    this is what keeps the mechanism additive rather than a rewrite of every
+    failure path."""
+    from docmax.core.errors import InPlaceOverwriteError
+    from docmax.tui.app import RunScreen
+
+    screen = RunScreen("crop")
+    router = FakeRouter()
+
+    result = screen._dependency_check(InPlaceOverwriteError("boom"), router)  # type: ignore[arg-type]
+
+    assert result == ()
+    assert router.missing_dependencies_calls == []
+
+
+def test_dependency_check_is_empty_when_the_router_has_nothing_structured_to_say() -> None:
+    """Most tools implement no `missing_dependencies` method at all — the
+    router already answers that with an empty tuple, and the TUI must fall
+    back to the ordinary error modal rather than showing an empty dialog."""
+    from docmax.core.errors import NoEngineAvailableError
+    from docmax.tui.app import RunScreen
+
+    screen = RunScreen("crop")
+    router = FakeRouter()
+    exc = NoEngineAvailableError("Cannot run 'crop'.", context={"tool": "crop"})
+
+    assert screen._dependency_check(exc, router) == ()  # type: ignore[arg-type]
+
+
+def test_a_missing_dependency_shows_the_dependency_dialog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The end-to-end flow: Run is clicked, the router raises
+    `NoEngineAvailableError`, and — because the resolved-to-fail engine's
+    strategy can name what is missing — the TUI shows `DependencyMissingScreen`
+    instead of the generic error modal."""
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.core.errors import NoEngineAvailableError
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp, RunScreen
+
+    reported = (
+        MissingDependency(
+            name="Tesseract",
+            reason="OCR cannot run because Tesseract is not installed.",
+            url="https://tesseract-ocr.github.io/tessdoc/Installation.html",
+        ),
+    )
+    router = FakeRouter(
+        raises=NoEngineAvailableError("Cannot run 'ocr': not installed.", context={"tool": "ocr"}),
+        missing=reported,
+    )
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        # `ocr` has more form fields than the fixtures above (lang, dpi,
+        # deskew) — a taller viewport keeps `#run` on screen for `pilot.click`
+        # without needing to scroll it into view first.
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("ocr")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            assert isinstance(app.screen, DependencyMissingScreen)
+            return " ".join(_text_of(widget) for widget in app.screen.query(Static))
+
+    rendered = asyncio.run(scenario())
+    assert "Dependency Required" in rendered
+    assert "Tesseract" in rendered
+    assert "OCR cannot run" in rendered
+
+
+def test_the_dependency_dialog_shows_one_button_per_missing_dependency() -> None:
+    """OCR on a machine with neither Tesseract nor Poppler gets two rows and
+    two buttons, not one arbitrarily chosen page."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp
+
+    dependencies = (
+        MissingDependency(name="tesseract", reason="needs tesseract", url="https://a.test"),
+        MissingDependency(name="pdftoppm", reason="needs pdftoppm", url="https://b.test"),
+    )
+
+    async def scenario() -> list[str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(DependencyMissingScreen("ocr", dependencies))
+            await pilot.pause()
+            return [str(button.label) for button in app.screen.query(Button)]
+
+    labels = asyncio.run(scenario())
+    assert any("tesseract" in label for label in labels)
+    assert any("pdftoppm" in label for label in labels)
+
+
+def test_a_dependency_without_a_url_gets_no_installation_button() -> None:
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp
+
+    dependencies = (MissingDependency(name="mystery", reason="needs mystery", url=None),)
+
+    async def scenario() -> list[str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(DependencyMissingScreen("ocr", dependencies))
+            await pilot.pause()
+            return [widget.id or "" for widget in app.screen.query(Button)]
+
+    button_ids = asyncio.run(scenario())
+    assert not any(identifier.startswith("open-install-") for identifier in button_ids)
+    assert "dependency-back" in button_ids
+
+
+def test_the_open_installation_page_button_opens_the_official_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    import docmax.tui.app as app_module
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp
+
+    opened: list[str] = []
+    monkeypatch.setattr(app_module, "_open_url", opened.append)
+
+    dependencies = (
+        MissingDependency(
+            name="Tesseract",
+            reason="needs tesseract",
+            url="https://tesseract-ocr.github.io/tessdoc/Installation.html",
+        ),
+    )
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(DependencyMissingScreen("ocr", dependencies))
+            await pilot.pause()
+            await pilot.click("#open-install-0")
+            await pilot.pause()
+
+    asyncio.run(scenario())
+    assert opened == ["https://tesseract-ocr.github.io/tessdoc/Installation.html"]
+
+
+def test_the_dependency_dialogs_back_button_returns_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.core.errors import NoEngineAvailableError
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp, RunScreen
+
+    reported = (MissingDependency(name="tesseract", reason="needs tesseract", url=None),)
+    router = FakeRouter(
+        raises=NoEngineAvailableError("Cannot run 'ocr'.", context={"tool": "ocr"}),
+        missing=reported,
+    )
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        # A taller viewport keeps `#run` on screen: `ocr`'s form has more
+        # fields (lang, dpi, deskew) than the fixtures used elsewhere.
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("ocr")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = out
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+            assert isinstance(app.screen, DependencyMissingScreen)
+
+            await pilot.click("#dependency-back")
+            await pilot.pause()
+
+            assert isinstance(app.screen, RunScreen)
+            return str(screen.query_one("#field-__output__", Input).value)
+
+    assert asyncio.run(scenario()) == out
+
+
+def test_escape_from_the_dependency_dialog_also_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.core.errors import NoEngineAvailableError
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp, RunScreen
+
+    reported = (MissingDependency(name="tesseract", reason="needs tesseract", url=None),)
+    router = FakeRouter(
+        raises=NoEngineAvailableError("Cannot run 'ocr'.", context={"tool": "ocr"}),
+        missing=reported,
+    )
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> bool:
+        app = DocMaxApp()
+        # A taller viewport keeps `#run` on screen: `ocr`'s form has more
+        # fields (lang, dpi, deskew) than the fixtures used elsewhere.
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("ocr")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+            assert isinstance(app.screen, DependencyMissingScreen)
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+            return isinstance(app.screen, RunScreen)
+
+    assert asyncio.run(scenario())

@@ -61,12 +61,20 @@ class FakeStrategy:
     raises: BaseException | None = None
     duration_ms: int = 0
     calls: list[dict[str, Any]] = field(default_factory=list)
+    #: What `missing_dependencies()` reports — the optional, duck-typed extra
+    #: `protocols.py` documents. Empty by default, exactly like the eighteen
+    #: real strategies that do not implement anything more specific than
+    #: `unavailable_reason`.
+    missing: tuple[Any, ...] = field(default_factory=tuple)
 
     def is_available(self) -> bool:
         return self.available
 
     def unavailable_reason(self) -> str | None:
         return None if self.available else (self.reason or "unavailable")
+
+    def missing_dependencies(self) -> tuple[Any, ...]:
+        return self.missing
 
     def run(
         self,
@@ -103,6 +111,7 @@ class FakeSpec:
     strategies: dict[Engine, FakeStrategy] = field(default_factory=dict)
     default_suffix: str = ".pdf"
     produces_directory: bool = False
+    produces_output: bool = True
     loads: list[Engine] = field(default_factory=list)
 
     @property
@@ -591,6 +600,108 @@ def test_target_for_still_refuses_an_in_place_overwrite(tmp_path: Path) -> None:
 
     with pytest.raises(InPlaceOverwriteError):
         make_router(dual()).target_for("widget", [document], requested=str(source))
+
+
+def test_target_for_skips_resolution_for_a_tool_that_produces_no_output(tmp_path: Path) -> None:
+    """ADR 0036: a report-only tool's target points at its own first input,
+    unresolved and unchecked — the same throwaway target
+    ``cli/execution.py::execute_read_only`` has always built by hand, now
+    driven by the registry (``widget``, not ``get-info`` or ``permissions``
+    by name) instead of a hand-written list of tool names."""
+    source = tmp_path / "in.pdf"
+    source.write_bytes(b"x")
+    document = DocumentRef.from_path(source)
+    spec = dual()
+    spec.produces_output = False
+
+    target = make_router(spec).target_for("widget", [document])
+
+    assert target.destination == document.path
+    assert target.force is True
+
+
+def test_target_for_ignores_a_requested_path_when_output_is_not_produced(
+    tmp_path: Path,
+) -> None:
+    """Whatever an interface put in an output field for a report-only tool is
+    never even looked at — there is nothing to check it against."""
+    source = tmp_path / "in.pdf"
+    source.write_bytes(b"x")
+    document = DocumentRef.from_path(source)
+    spec = dual()
+    spec.produces_output = False
+
+    target = make_router(spec).target_for(
+        "widget", [document], requested=str(tmp_path / "whatever.pdf")
+    )
+
+    assert target.destination == document.path
+
+
+def test_target_for_still_resolves_normally_when_output_is_produced(tmp_path: Path) -> None:
+    """The default (``produces_output=True``) leaves every other tool's
+    behaviour exactly as it was."""
+    source = tmp_path / "in.pdf"
+    source.write_bytes(b"x")
+    document = DocumentRef.from_path(source)
+
+    target = make_router(dual()).target_for(
+        "widget", [document], requested=str(tmp_path / "out.pdf")
+    )
+
+    assert target.destination == tmp_path / "out.pdf"
+
+
+def test_target_for_needs_a_document_when_output_is_not_produced() -> None:
+    from docmax.core.errors import InvalidParameterError
+
+    spec = dual()
+    spec.produces_output = False
+
+    with pytest.raises(InvalidParameterError):
+        make_router(spec).target_for("widget", [])
+
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+
+
+def test_missing_dependencies_reads_the_strategys_own_report() -> None:
+    """The one generic hook an interface calls to turn "unavailable" into a
+    named, actionable list — read by ``getattr``, never by checking which
+    tool ``widget`` happens to be."""
+    from docmax.core.protocols import MissingDependency
+
+    reported = (MissingDependency(name="Widget Engine", reason="it is not installed"),)
+    spec = local_only(available=False)
+    spec.strategies[Engine.LOCAL].missing = reported
+
+    assert make_router(spec).missing_dependencies("widget", Engine.LOCAL) == reported
+
+
+def test_missing_dependencies_is_empty_for_a_strategy_with_nothing_structured_to_say() -> None:
+    """Most strategies implement nothing beyond `unavailable_reason` — the
+    router must answer "nothing to report" rather than raising."""
+
+    class BareStrategy:
+        def is_available(self) -> bool:
+            return False
+
+        def unavailable_reason(self) -> str | None:
+            return "it is unavailable"
+
+        def run(self, docs: Sequence[DocumentRef], target: OutputTarget, **kwargs: Any) -> Any:
+            raise AssertionError("never reached")
+
+    spec = FakeSpec(strategies={})
+    spec.strategies[Engine.LOCAL] = BareStrategy()  # type: ignore[assignment]
+
+    assert make_router(spec).missing_dependencies("widget", Engine.LOCAL) == ()
+
+
+def test_missing_dependencies_is_empty_for_an_engine_the_tool_does_not_support() -> None:
+    assert make_router(local_only()).missing_dependencies("widget", Engine.CLOUD) == ()
 
 
 # ---------------------------------------------------------------------------

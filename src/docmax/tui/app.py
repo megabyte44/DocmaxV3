@@ -82,7 +82,9 @@ if TYPE_CHECKING:
 
     from docmax.core.errors import DocMaxError
     from docmax.core.models import ToolResult
+    from docmax.core.protocols import MissingDependency
     from docmax.core.registry import ToolSpec
+    from docmax.core.router import EngineRouter
 
 #: The engine choices a run screen offers. ``auto`` is first and is the default,
 #: because the router's ladder is the behaviour a user should get unless they
@@ -187,6 +189,21 @@ def _output_placeholder(spec: ToolSpec) -> str:
     if spec.output_required:
         return "path to write the result to"
     return f"path to write the {spec.default_suffix} result to"
+
+
+def _open_url(url: str) -> None:
+    """Open ``url`` in the user's default browser. Never raises into the UI.
+
+    ``webbrowser`` rather than a hand-rolled per-platform branch — the same
+    stdlib choice ADR 0005 made for the pickers, and for the identical
+    reason: it already knows how to reach the desktop's own opener on every
+    platform DocMax supports, at no dependency cost.
+    """
+    import webbrowser
+    from contextlib import suppress
+
+    with suppress(Exception):
+        webbrowser.open(url)
 
 
 class Brand(Horizontal):
@@ -684,13 +701,19 @@ class RunScreen(Screen[None]):
                 yield Button("Browse…", id="browse-inputs")
             yield Static("", id="input-hint", classes="hint", markup=False)
 
-            yield Label("output (required)")
-            with Horizontal(classes="input-row"):
-                yield Input(
-                    placeholder=_output_placeholder(spec),
-                    id="field-__output__",
-                )
-                yield Button("Browse…", id="browse-output")
+            # A report-only tool (`ToolSpec.produces_output=False`, ADR 0036)
+            # never writes anything, so it has no output field, no label, and
+            # no Browse button to ask for one — the same distinction the CLI
+            # already makes by simply not declaring `-o` for these tools. See
+            # `_request` below for the matching skip of the "required" check.
+            if spec.produces_output:
+                yield Label("output (required)")
+                with Horizontal(classes="input-row"):
+                    yield Input(
+                        placeholder=_output_placeholder(spec),
+                        id="field-__output__",
+                    )
+                    yield Button("Browse…", id="browse-output")
 
             for field in self._fields:
                 required = " (required)" if field.required else ""
@@ -725,7 +748,8 @@ class RunScreen(Screen[None]):
             with Horizontal(classes="actions"):
                 yield Button("Run", variant="primary", id="run")
                 yield Button("Dry run", id="dry-run")
-                yield Button("Overwrite output", id="force")
+                if spec.produces_output:
+                    yield Button("Overwrite output", id="force")
                 yield Button("Cancel run", variant="warning", id="cancel", disabled=True)
 
             yield ProgressBar(id="progress", show_eta=False)
@@ -983,11 +1007,18 @@ class RunScreen(Screen[None]):
         ``InPlaceOverwriteError``. Asking here, before a request is even built,
         tells the user at the boundary instead of after a run that could never
         have written anything.
+
+        A report-only tool (``spec.produces_output=False``, ADR 0036) has no
+        output field on the form at all (see ``compose`` above) — there is
+        nothing here to require, so this reads no ``#field-__output__``
+        widget and leaves the request's ``output`` at its default, ``None``.
         """
         from pathlib import Path
 
         from docmax.core.errors import InvalidParameterError
         from docmax.core.models import Engine
+
+        spec = self.spec
 
         raw = self.query_one("#field-__inputs__", Input).value.strip()
         if not raw:
@@ -998,13 +1029,16 @@ class RunScreen(Screen[None]):
             )
         inputs = tuple(Path(part.strip()) for part in raw.split(",") if part.strip())
 
-        output_text = self.query_one("#field-__output__", Input).value.strip()
-        if not output_text:
-            raise InvalidParameterError(
-                "This tool needs an output path.",
-                remedy="Type the path to write the result to.",
-                context={"parameter": "output"},
-            )
+        output: Path | None = None
+        if spec.produces_output:
+            output_text = self.query_one("#field-__output__", Input).value.strip()
+            if not output_text:
+                raise InvalidParameterError(
+                    "This tool needs an output path.",
+                    remedy="Type the path to write the result to.",
+                    context={"parameter": "output"},
+                )
+            output = Path(output_text)
 
         engine_value = _selected(self.query_one("#field-__engine__", Select), _ENGINES)
         engine = None if engine_value in ("", "auto") else Engine(engine_value)
@@ -1014,7 +1048,7 @@ class RunScreen(Screen[None]):
         return runner.RunRequest(
             tool=self.tool,
             inputs=inputs,
-            output=Path(output_text),
+            output=output,
             engine=engine,
             force=force,
             dry_run=dry_run,
@@ -1085,7 +1119,11 @@ class RunScreen(Screen[None]):
                     request, router=router, progress=progress, cancellation=self._token
                 )
         except DocMaxError as exc:
-            self.app.call_from_thread(self._show, exc)
+            dependencies = self._dependency_check(exc, router)
+            if dependencies:
+                self.app.call_from_thread(self._show_dependency_missing, dependencies)
+            else:
+                self.app.call_from_thread(self._show, exc)
             return
         finally:
             self.app.call_from_thread(self._finished)
@@ -1179,6 +1217,41 @@ class RunScreen(Screen[None]):
 
         tool = exc.tool if isinstance(exc, ConsentRequiredError) else self.tool
         return bool(self.app.push_screen_wait(ConsentScreen(tool, exc.message)))
+
+    def _dependency_check(
+        self, exc: DocMaxError, router: EngineRouter
+    ) -> tuple[MissingDependency, ...]:
+        """Turn "the local engine cannot run" into a named, actionable list.
+
+        Generic across every tool, by construction: a
+        :class:`~docmax.core.errors.LocalDependencyMissingError` already
+        names exactly one thing, directly on the exception. A
+        :class:`~docmax.core.errors.NoEngineAvailableError` — what a router
+        actually raises when a tool's local engine is unavailable, since
+        ``EngineRouter.resolve`` checks availability *before* a strategy ever
+        runs — carries no such structured field, so the router is asked what
+        the *local* engine specifically is missing, the same
+        :meth:`~docmax.core.router.EngineRouter.missing_dependencies` any
+        future caller would use. Neither branch compares ``self.tool``, or
+        any tool name, against a string; a strategy that has nothing
+        structured to report yields an empty tuple either way, and the
+        caller falls back to the ordinary error modal.
+        """
+        from docmax.core.errors import LocalDependencyMissingError, NoEngineAvailableError
+        from docmax.core.models import Engine
+        from docmax.core.protocols import MissingDependency
+
+        if isinstance(exc, LocalDependencyMissingError):
+            return (MissingDependency(name=exc.dependency, reason=exc.message, url=exc.url),)
+        if isinstance(exc, NoEngineAvailableError):
+            return router.missing_dependencies(self.tool, Engine.LOCAL)
+        return ()
+
+    def _show_dependency_missing(self, dependencies: tuple[MissingDependency, ...]) -> None:
+        self._set_status("A dependency is missing.", state="error")
+        self._set_details("")
+        self.app.push_screen(DependencyMissingScreen(self.tool, dependencies))
+        self._flush_repaint()
 
     def _show(self, exc: BaseException) -> None:
         """Display any failure as a message and a remedy. Never a traceback."""
@@ -1343,6 +1416,54 @@ class ErrorScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class DependencyMissingScreen(ModalScreen[str]):
+    """*"Dependency Required"* — one row per :class:`~docmax.core.protocols.MissingDependency`.
+
+    Built entirely from what it is handed: ``RunScreen._dependency_check``
+    resolves a failure into a tuple of these, generically, without either of
+    them ever comparing a tool name against a string. A tool with two missing
+    binaries — OCR, on a machine with neither Tesseract nor Poppler — gets
+    two rows and two buttons rather than one arbitrarily chosen page, because
+    the second one is exactly as necessary as the first. See ADR 0036.
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "back", "Back", show=True)]
+
+    def __init__(self, tool: str, dependencies: tuple[MissingDependency, ...]) -> None:
+        super().__init__()
+        self.tool = tool
+        self.dependencies = dependencies
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal warning"):
+            yield Static("\N{WARNING SIGN} Dependency Required", classes="title")
+            for index, dependency in enumerate(self.dependencies):
+                yield Static(dependency.reason, markup=False)
+                if dependency.url:
+                    yield Button(
+                        f"Open {dependency.name} Installation Page",
+                        variant="primary",
+                        id=f"open-install-{index}",
+                    )
+            with Horizontal(classes="actions"):
+                yield Button("Back", id="dependency-back")
+
+    @on(Button.Pressed)
+    def _pressed(self, event: Button.Pressed) -> None:
+        identifier = event.button.id or ""
+        if identifier == "dependency-back":
+            self.dismiss("back")
+            return
+        if identifier.startswith("open-install-"):
+            index = int(identifier.removeprefix("open-install-"))
+            url = self.dependencies[index].url
+            if url:
+                _open_url(url)
+
+    def action_back(self) -> None:
+        self.dismiss("back")
+
+
 class DocMaxApp(App[None]):
     """The application shell.
 
@@ -1479,6 +1600,11 @@ class DocMaxApp(App[None]):
     }
     .modal.error .title { color: $error; padding: 0; }
     .error-message { text-style: bold; padding: 0 0 1 0; }
+    /* Same weight as `.modal.error`, in `$warning` rather than `$error`:
+       a missing dependency is a stop-and-fix condition, but not a failure
+       this run caused — see `DependencyMissingScreen` (ADR 0036). */
+    .modal.warning { border: heavy $warning; background: $warning 10%; }
+    .modal.warning .title { color: $warning; padding: 0; }
     ModalScreen { align: center middle; }
 
     .menu-actions { height: auto; padding: 1 0 0 0; }
@@ -1507,6 +1633,7 @@ class DocMaxApp(App[None]):
 __all__ = [
     "CloudStatusScreen",
     "ConsentScreen",
+    "DependencyMissingScreen",
     "DocMaxApp",
     "ErrorScreen",
     "HelpScreen",

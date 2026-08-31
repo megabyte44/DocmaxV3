@@ -21,6 +21,7 @@ in tests would then be the one users never hit.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -94,6 +95,28 @@ class Validator(Protocol):
     def __call__(self, produced: Path) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class MissingDependency:
+    """One thing an engine needs and cannot find, named well enough to fix.
+
+    ``unavailable_reason`` has always answered *why not* in one sentence for
+    a person reading a terminal. This answers the same question in a shape an
+    interface can act on: a name to put in a heading, and — when the project
+    knows one — the dependency's own official install page to open, never a
+    third-party mirror or a search result. See ``tools/_binaries.py``'s
+    ``Binary.homepage``.
+    """
+
+    #: What a person would type into a search box — "Tesseract", not
+    #: ``dependency.missing`` or a Python import name.
+    name: str
+    #: One sentence: which tool needs it, and why it cannot run without it.
+    reason: str
+    #: The official documentation or download page, or ``None`` if the
+    #: project has not recorded one for this dependency yet.
+    url: str | None = None
+
+
 class EngineStrategy(Protocol):
     """One way of performing one operation.
 
@@ -103,6 +126,23 @@ class EngineStrategy(Protocol):
 
     ``docs`` is a sequence because assembling tools — ``merge``,
     ``from-images`` — take several inputs. Single-input tools read ``docs[0]``.
+
+    ## An optional, duck-typed extra: ``missing_dependencies``
+
+    Not part of this ``Protocol`` — adding it here would force every one of
+    the twenty-odd existing strategies to implement a method most of them
+    have nothing to say through. A strategy that *can* name exactly what it
+    is missing — a binary, a package — may add::
+
+        def missing_dependencies(self) -> tuple[MissingDependency, ...]: ...
+
+    and :meth:`~docmax.core.router.EngineRouter.missing_dependencies` will
+    read it generically, by ``getattr`` rather than by checking which tool it
+    is, and hand the TUI a proper "Dependency Required" dialog instead of a
+    generic error panel. A strategy that implements nothing is asked the same
+    question and answered with an empty tuple — the same graceful-degradation
+    shape ``tui/forms.py`` already uses for a ``Param`` type it does not
+    recognise. See ADR 0036 and ``tools/ocr/local.py``.
     """
 
     def is_available(self) -> bool:
@@ -150,4 +190,11 @@ class EngineStrategy(Protocol):
 NULL_PROGRESS: ProgressSink = NullProgress()
 
 
-__all__ = ["NULL_PROGRESS", "EngineStrategy", "NullProgress", "ProgressSink", "Validator"]
+__all__ = [
+    "NULL_PROGRESS",
+    "EngineStrategy",
+    "MissingDependency",
+    "NullProgress",
+    "ProgressSink",
+    "Validator",
+]

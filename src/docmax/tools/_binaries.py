@@ -58,6 +58,11 @@ class Binary:
     commands: tuple[str, ...] = ()
     #: What to type, per platform, to get it.
     install: dict[str, str] = field(default_factory=dict)
+    #: The project's own official install or documentation page — never a
+    #: third-party mirror, a search result, or a download aggregator. This is
+    #: what a TUI's "Open Installation Page" opens; see ADR 0036 and
+    #: ``core.protocols.MissingDependency``.
+    homepage: str = ""
 
     def candidates(self) -> tuple[str, ...]:
         return self.commands or (self.name,)
@@ -95,6 +100,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "macos": "brew install ghostscript",
             "windows": "winget install ArtifexSoftware.GhostScript",
         },
+        homepage="https://ghostscript.com/releases/gsdnld.html",
     ),
     Binary(
         name="tesseract",
@@ -104,6 +110,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "macos": "brew install tesseract",
             "windows": "winget install UB-Mannheim.TesseractOCR",
         },
+        homepage="https://tesseract-ocr.github.io/tessdoc/Installation.html",
     ),
     Binary(
         name="pdftoppm",
@@ -113,6 +120,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "macos": "brew install poppler",
             "windows": "winget install oschwartz10612.Poppler",
         },
+        homepage="https://poppler.freedesktop.org/",
     ),
     Binary(
         name="pandoc",
@@ -122,6 +130,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "macos": "brew install pandoc",
             "windows": "winget install JohnMacFarlane.Pandoc",
         },
+        homepage="https://pandoc.org/installing.html",
     ),
 )
 
@@ -162,6 +171,7 @@ def require(name: str, *, tool: str) -> str:
         f"{tool} needs {binary.name}, which is not installed.",
         dependency=binary.name,
         install_hint=binary.install_hint(),
+        url=binary.homepage or None,
         context={"tool": tool, "binary": binary.name},
     )
 

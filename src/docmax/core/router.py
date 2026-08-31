@@ -50,6 +50,7 @@ from docmax.core.errors import (
     DocMaxError,
     EngineNotSupportedError,
     InternalError,
+    InvalidParameterError,
     NoEngineAvailableError,
 )
 from docmax.core.models import Engine, OutputTarget, ToolResult
@@ -62,7 +63,7 @@ if TYPE_CHECKING:
     from docmax.core.cancellation import CancellationToken
     from docmax.core.consent import ConsentStore
     from docmax.core.models import DocumentRef
-    from docmax.core.protocols import EngineStrategy, ProgressSink
+    from docmax.core.protocols import EngineStrategy, MissingDependency, ProgressSink
     from docmax.core.registry import ToolSpec
 
 
@@ -243,8 +244,24 @@ class EngineRouter:
         already-exists checks cannot be skipped by a caller who did not know
         about them — and so ``.pdf`` versus ``.txt`` is the tool's business
         rather than the CLI's.
+
+        A tool that declares ``produces_output=False`` (ADR 0036) never
+        writes, so nothing is resolved or checked: the target it gets back
+        points at its own first input, matching the throwaway target
+        ``cli/execution.py::execute_read_only`` has always built by hand for
+        exactly this reason — ``OutputTarget.resolve`` would otherwise check
+        a destination the tool's own strategy is contractually required to
+        accept but guaranteed to ignore.
         """
         spec = self.lookup(tool_name)
+        if not spec.produces_output:
+            if not docs:
+                raise InvalidParameterError(
+                    f"{spec.name!r} needs a document.",
+                    remedy="Pass the document to inspect.",
+                    context={"tool": spec.name},
+                )
+            return OutputTarget(destination=docs[0].path, force=True)
         return OutputTarget.resolve(
             inputs=docs,
             requested=requested,
@@ -252,6 +269,32 @@ class EngineRouter:
             produces_directory=spec.produces_directory,
             force=force,
         )
+
+    # -- dependencies ---------------------------------------------------------
+
+    def missing_dependencies(self, tool_name: str, engine: Engine) -> tuple[MissingDependency, ...]:
+        """What ``engine``'s strategy for ``tool_name`` is missing, if it can say.
+
+        ``EngineStrategy.missing_dependencies`` is optional and duck-typed —
+        see its docstring in ``protocols.py`` — so this reads it with
+        ``getattr`` rather than requiring every strategy to implement it. A
+        strategy that has nothing structured to report (which is most of
+        them) answers with an empty tuple, the same as one that simply does
+        not exist for this ``engine`` at all.
+
+        This is the one generic hook an interface calls to turn "the local
+        engine is unavailable" into "Dependency Required: Tesseract" instead
+        of a paragraph of prose — without either the interface or this method
+        ever comparing ``tool_name`` against a specific string.
+        """
+        spec = self.lookup(tool_name)
+        if not spec.supports(engine):
+            return ()
+        strategy = spec.load_strategy(engine)
+        report = getattr(strategy, "missing_dependencies", None)
+        if report is None:
+            return ()
+        return tuple(report())
 
     # -- execution ----------------------------------------------------------
 
