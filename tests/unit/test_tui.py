@@ -1172,6 +1172,79 @@ def test_clicking_run_actually_executes_the_worker(
     assert "Wrote" in status
 
 
+def test_a_finished_run_is_repainted_before_the_callback_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GH #36: the run screen stayed on "Running..." past the point a
+    synchronous cloud job (ADR 0016) had actually finished -- the file was
+    already on disk, but nothing repainted the screen until an unrelated
+    later event (Cancel) happened to pump the message loop.
+
+    `Static.update()` only *marks* a widget dirty; the actual paint is
+    deferred to `Screen._update_timer`, a timer that fires on its own
+    throttled schedule. That is invisible whenever something else keeps
+    nudging the screen soon after -- a determinate step's own repeated
+    `on_advance` calls do that for free -- but `_succeeded` (like `_finished`
+    and `_show`) is the *last* thing a synchronous cloud run ever tells this
+    screen, so there is nothing left to drag that deferred paint onto the
+    terminal. This checks the invariant `_flush_repaint` exists to
+    guarantee, at the one point that actually distinguishes "scheduled" from
+    "done": *inside* `_succeeded`, immediately after it updates the status,
+    with no `await` yet having run that could let some other task paint it
+    first. Before the fix this was still `True` here every time.
+    """
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    out = tmp_path / "out.pdf"
+    router = FakeRouter(result=ToolResult(outputs=(out,), engine_used=Engine.CLOUD))
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+    dirty_when_succeeded_returns: list[bool] = []
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(out)
+            _set_box(screen, "10,10,100,100")
+            await pilot.pause()
+
+            original_succeeded = screen._succeeded
+
+            def traced(result: ToolResult) -> None:
+                original_succeeded(result)
+                # No `await` has happened since `original_succeeded` was
+                # entered, so nothing else could have painted the screen in
+                # between -- this is exactly what was left `True` (and so,
+                # unpainted) until Cancel was pressed.
+                dirty_when_succeeded_returns.append(
+                    bool(screen._repaint_required or screen._dirty_widgets)
+                )
+
+            screen._succeeded = traced  # type: ignore[method-assign]
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+    asyncio.run(scenario())
+    assert dirty_when_succeeded_returns == [False], (
+        "the screen must already be fully painted the instant _succeeded "
+        "returns -- leaving it dirty is what let 'Running...' outlive the "
+        "run until an unrelated later event pumped the repaint"
+    )
+
+
 def test_clicking_run_with_a_failing_router_shows_the_error_modal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1215,8 +1288,17 @@ def test_merging_two_pdfs_via_the_real_tui_writes_the_merged_file(tmp_path: Path
     """The exact scenario reported, resolved end-to-end: two PDFs, an explicit
     output, Run clicked for real — the real registry, the real router, the
     real `merge` tool, no fakes. This is the claim the whole fix rests on: the
-    file really gets written where the user said."""
+    file really gets written where the user said.
+
+    Also GH #36's own explicit ask: confirm the write itself isn't gated on
+    Cancel, by checking a real file mtime rather than assuming it from
+    reading the code. `Cancel run` is never clicked anywhere in this
+    scenario, and the output's mtime is checked against a timestamp taken
+    before `Run` -- so a passing assertion here rules out "the write only
+    happens once Cancel is pressed" directly, on disk, not by inference.
+    """
     import asyncio
+    import time
 
     from pypdf import PdfReader, PdfWriter
     from textual.widgets import Input, Static
@@ -1247,8 +1329,17 @@ def test_merging_two_pdfs_via_the_real_tui_writes_the_merged_file(tmp_path: Path
             screen.query_one("#field-__output__", Input).value = str(out)
             await pilot.pause()
 
+            before_run = time.time()
             await pilot.click("#run")
             await pilot.pause(1.0)
+
+            # No Cancel click anywhere in this scenario -- if the write were
+            # really gated on Cancel, `out` would not exist at all here.
+            assert out.is_file(), "the output must exist without Cancel ever being pressed"
+            assert out.stat().st_mtime >= before_run - 1, (
+                "the output's mtime must fall after Run was clicked, proving the write "
+                "happened as part of this run and was not somehow already stale"
+            )
 
             return str(screen.query_one("#status", Static).content)
 
