@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "DocmaxV3"
-version = "3.1.2"
+version = "3.2.0"
 description = "Terminal-native document toolkit. Local-first, dual-engine, no server required."
 readme = "README.md"
 requires-python = ">=3.11"
