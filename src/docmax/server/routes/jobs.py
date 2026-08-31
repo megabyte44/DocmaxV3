@@ -18,9 +18,17 @@ router = APIRouter(prefix="/jobs", tags=["jobs"], dependencies=[Depends(require_
 
 
 @router.get("/{job_id}")
-async def get_job(job_id: str, request: Request) -> dict[str, Any]:
-    """Report one job. Unknown ids are a 404, not an empty record."""
-    job = request.app.state.jobs.get(job_id)
+async def get_job(
+    job_id: str, request: Request, key: str = Depends(require_api_key)
+) -> dict[str, Any]:
+    """Report one job. Unknown ids — and jobs owned by someone else — are a 404.
+
+    ``jobs.get`` checks ``key`` against the job's own record in the same
+    lookup that finds it: a caller holding a valid key for this endpoint, but
+    not the one that created this job, sees the identical "no such job" a
+    made-up id would produce. See ADR 0035.
+    """
+    job = request.app.state.jobs.get(job_id, owner=key)
     payload: dict[str, Any] = job.to_payload()
     return payload
 

@@ -466,10 +466,18 @@ records why it lives at the interface rather than in `OutputTarget`.
 local process — ChatGPT's connectors and similar — without weakening the M10
 policy boundary for the local, stdio case.
 
-**Status** `not started`. **Depends on** Phase 10. **Decision first**: an ADR
-must settle the open questions below before any code — the same rule ADR 0029
-followed for the local policy boundary, and the standing project rule
-(`CLAUDE.md` "Write the ADR before the code").
+**Status** `complete`. **Depended on** Phase 10.
+
+[ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md)
+answers every question below and is **Accepted**: M11 is a route
+(`src/docmax/server/routes/mcp.py`) inside `docmax.server`, not a new
+interface, mounted at `POST /v1/mcp` and reusing the existing
+upload/`file_id`/job model, bearer-token auth, and `RegistryRunner`. A review
+of the initial draft found — and the accepted version closes — two gaps the
+open-questions list below did not anticipate: a TLS requirement for this
+route specifically, and session/auth binding (built on the MCP SDK's own
+`StreamableHTTPSessionManager`, not a hand-rolled mechanism). See the ADR's
+"Amended before acceptance" note and §6.
 
 **Why this is not "Phase 10 with a different transport"** M10's schema takes
 `inputs` as local filesystem paths, checked against `--root`. A remote caller
@@ -501,17 +509,38 @@ change, not just the wire transport. See
   a less trustworthy caller — a network client is a program acting on behalf of
   someone the operator may not know at all.
 
-**Definition of done** (provisional — the ADR may change this list)
+**Definition of done**
 
-- [ ] an ADR is accepted, answering every question above
-- [ ] a remote client can list tools and run one end to end over the chosen
-      transport
-- [ ] the local, stdio path (M10) is unchanged — this phase adds a capability,
-      it does not modify ADR 0029's guarantees
-- [ ] whatever auth model is chosen has a test asserting an unauthenticated or
-      unauthorized session cannot reach a tool
-- [ ] `lint-imports` covers whatever new module this becomes
-- [ ] the roadmap and this phase are updated to `complete` together
+- [x] an ADR is accepted, answering every question above — ADR 0035
+- [x] a remote client can list tools and run one end to end over the chosen
+      transport — `tests/unit/test_m11_mcp.py::test_a_tool_call_over_mcp_runs_through_the_same_registry_runner`
+- [x] the local, stdio path (M10) is unchanged — this phase adds a capability,
+      it does not modify ADR 0029's guarantees — `docmax/mcp/server.py` and
+      `policy.py` are untouched; only `docmax/mcp/schema.py` changed, into a
+      re-export of the relocated `docmax.mcpschema`
+- [x] whatever auth model is chosen has a test asserting an unauthenticated or
+      unauthorized session cannot reach a tool —
+      `test_mcp_route_requires_a_valid_key`,
+      `test_a_session_cannot_be_reused_by_a_different_key`
+- [x] `lint-imports` covers whatever new module this becomes — `docmax.mcpschema`
+      is in `layers` and `core-is-standalone`; `interfaces-are-independent` is
+      unchanged
+- [x] the roadmap and this phase are updated to `complete` together
+
+**Found during review, closed before this phase is called done, not filed for
+later:** job records and idempotency keys were not owner-scoped the way
+uploads were, TLS was not required for a route built for a caller the
+operator does not control, and nothing bound an MCP session to the credential
+that opened it. All three are now enforced — see ADR 0035 §4 and §6 and its
+Enforcement section for the specific tests.
+
+**Named as follow-up, not built here** (`backlog.md`): rate limiting/quotas
+per key, automatic reaping of jobs and stored bytes on a timer rather than a
+manually-invoked `reap()`, and per-key tool authorization beyond the existing
+cloud-engine filter — all three need a real per-user identity model this
+milestone deliberately did not build (a flat bearer token stands in for one),
+named in ADR 0035 as the boundary of what "give each caller its own bearer
+token" can close on its own.
 
 ---
 

@@ -33,7 +33,9 @@ IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 
 @router.post("/{tool_name}")
-async def run_tool(tool_name: str, request: Request) -> JSONResponse:
+async def run_tool(
+    tool_name: str, request: Request, api_key: str = Depends(require_api_key)
+) -> JSONResponse:
     """Start (and possibly finish) one operation.
 
     200 when the work is already done, 202 when the caller should poll — the
@@ -42,17 +44,20 @@ async def run_tool(tool_name: str, request: Request) -> JSONResponse:
     state = request.app.state
     spec = state.runner.resolve(tool_name)
 
-    key = request.headers.get(IDEMPOTENCY_HEADER)
-    if key:
-        existing = state.jobs.find_by_idempotency_key(key)
+    idempotency_key = request.headers.get(IDEMPOTENCY_HEADER)
+    if idempotency_key:
+        # Scoped to `api_key`: an `Idempotency-Key` is a value the *client*
+        # chooses, and without this a colliding value from a different caller
+        # would hand back that caller's job, including its output's file id.
+        existing = state.jobs.find_by_idempotency_key(idempotency_key, owner=api_key)
         if existing is not None:
             return JSONResponse(status_code=200, content=existing.to_payload())
 
-    payload, filename, params, file_id = await _read_submission(request)
+    payload, filename, params, file_id = await _read_submission(request, owner=api_key)
 
-    job = state.jobs.create(spec.name, file_id=file_id, params=params)
-    if key:
-        state.jobs.remember_idempotency_key(key, job)
+    job = state.jobs.create(spec.name, file_id=file_id, params=params, owner=api_key)
+    if idempotency_key:
+        state.jobs.remember_idempotency_key(idempotency_key, job, owner=api_key)
 
     state.runner.start(
         job,
@@ -62,6 +67,7 @@ async def run_tool(tool_name: str, request: Request) -> JSONResponse:
         # each caller a URL on the name they used.
         base_url=str(request.base_url),
         storage=state.storage,
+        owner=api_key,
     )
     return JSONResponse(
         status_code=200 if job.status.is_terminal else 202,
@@ -69,12 +75,14 @@ async def run_tool(tool_name: str, request: Request) -> JSONResponse:
     )
 
 
-async def _read_submission(request: Request) -> tuple[bytes, str, dict[str, Any], str | None]:
+async def _read_submission(
+    request: Request, *, owner: str
+) -> tuple[bytes, str, dict[str, Any], str | None]:
     """Bytes, filename, parameters, and the file id if there was one."""
     content_type = request.headers.get("content-type", "")
     if content_type.startswith("multipart/form-data"):
         return await _from_multipart(request)
-    return await _from_file_id(request)
+    return await _from_file_id(request, owner=owner)
 
 
 async def _from_multipart(request: Request) -> tuple[bytes, str, dict[str, Any], str | None]:
@@ -98,7 +106,9 @@ async def _from_multipart(request: Request) -> tuple[bytes, str, dict[str, Any],
     return payload, upload.filename or "document", parse_params(form.get("params")), None
 
 
-async def _from_file_id(request: Request) -> tuple[bytes, str, dict[str, Any], str | None]:
+async def _from_file_id(
+    request: Request, *, owner: str
+) -> tuple[bytes, str, dict[str, Any], str | None]:
     body = await read_json(request)
     file_id = body.get("file_id")
     if not isinstance(file_id, str) or not file_id:
@@ -106,9 +116,12 @@ async def _from_file_id(request: Request) -> tuple[bytes, str, dict[str, Any], s
             "Send the document as a multipart 'file' part, or name a 'file_id'.",
         )
 
+    # Both calls check `owner` against the id's own reservation, in the same
+    # lookup that finds it: a caller naming a `file_id` it did not upload gets
+    # the identical "no such id" error an unknown id would raise.
     storage = request.app.state.storage
-    payload: bytes = storage.get(file_id)
-    filename: str = storage.filename(file_id)
+    payload: bytes = storage.get(file_id, owner=owner)
+    filename: str = storage.filename(file_id, owner=owner)
     return payload, filename, parse_params(body.get("params")), file_id
 
 

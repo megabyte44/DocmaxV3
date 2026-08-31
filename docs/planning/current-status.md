@@ -393,11 +393,14 @@ and `tools/ocr/` have been removed.
 
 ## Next
 
-**M0–M10 are all delivered.** M11 — remote MCP — was added to the roadmap with
-its design not yet settled; see
-[phases.md](phases.md#phase-11--remote-mcp-transport-m11) for the ADR it owes
-before any code. What else remains is [backlog.md](backlog.md), and three items
-there now carry more weight than they did:
+**M0–M11 are all delivered.** M11 — remote MCP — landed as a route inside
+`docmax.server` rather than a fifth interface; see
+[ADR 0035](../adr/0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md)
+and [phases.md](phases.md#phase-11--remote-mcp-transport-m11) for what shipped
+and what it named as follow-up (rate limiting, automatic reaping, per-key
+authorization — none of which needed an ADR to defer). What else remains is
+[backlog.md](backlog.md), and three items there now carry more weight than
+they did:
 
 - **The three `ToolSpec` seams**, which four interfaces have now met and none has
   closed. M10 declined a fourth (`input_suffixes`) on the same grounds M7

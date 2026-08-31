@@ -36,8 +36,13 @@ async def read_output(file_id: str, request: Request) -> Response:
     reaped or never existed, which the app's exception handler renders as the
     contract's error envelope — so an expired output is a typed 404 rather than
     a stack trace.
+
+    ``owner=None`` because this route takes no API key at all (see the module
+    docstring) — there is no caller identity to check a `file_id` against
+    here, by design. ``Storage`` still records who *produced* it; nothing on
+    this route reads that field, deliberately.
     """
-    payload = request.app.state.storage.get(file_id)
+    payload = request.app.state.storage.get(file_id, owner=None)
     return Response(
         content=payload,
         media_type=_content_type(payload),
@@ -58,7 +63,7 @@ def _content_type(payload: bytes) -> str:
     a mime table that is wrong for a `.docx` the server never saw named.
 
     A zip signature is included because a directory-producing tool's output
-    *is* a zip archive on the wire (ADR 0033) — as opposed to `.docx`/`.odt`/
+    *is* a zip archive on the wire (ADR 0034) — as opposed to `.docx`/`.odt`/
     `.epub`, which are zip containers of something more specific and are left
     to fall through to the generic case, exactly as before.
     """

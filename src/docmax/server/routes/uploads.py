@@ -29,7 +29,7 @@ TICKET_LIFETIME_SECONDS = 900
 
 
 @router.post("")
-async def create_upload(request: Request) -> dict[str, Any]:
+async def create_upload(request: Request, key: str = Depends(require_api_key)) -> dict[str, Any]:
     """Reserve an id and hand back somewhere to put the bytes."""
     body = await read_json(request)
     filename = body.get("filename")
@@ -41,7 +41,7 @@ async def create_upload(request: Request) -> dict[str, Any]:
         raise InvalidParameterError("A non-negative integer 'size_bytes' is required.")
 
     storage = request.app.state.storage
-    file_id = storage.reserve(filename=filename, size_bytes=size_bytes)
+    file_id = storage.reserve(filename=filename, size_bytes=size_bytes, owner=key)
 
     base = str(request.base_url).rstrip("/")
     return {
@@ -52,7 +52,9 @@ async def create_upload(request: Request) -> dict[str, Any]:
 
 
 @router.put("/{file_id}")
-async def receive_upload(file_id: str, request: Request) -> dict[str, Any]:
+async def receive_upload(
+    file_id: str, request: Request, key: str = Depends(require_api_key)
+) -> dict[str, Any]:
     """Accept the bytes for a reserved id.
 
     Reads the body into memory, which is honest about what the reference
@@ -68,7 +70,10 @@ async def receive_upload(file_id: str, request: Request) -> dict[str, Any]:
             context={"size_bytes": len(payload), "limit": settings.max_upload_bytes},
         )
 
-    request.app.state.storage.put(file_id, payload)
+    # `storage.put` checks `key` against the id's own reservation, in the same
+    # lookup that finds it -- a second caller cannot fill in bytes for a
+    # `file_id` it did not reserve, whether or not it could guess one.
+    request.app.state.storage.put(file_id, payload, owner=key)
     return {"ok": True, "file_id": file_id, "size_bytes": len(payload)}
 
 

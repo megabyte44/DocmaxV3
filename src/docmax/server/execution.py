@@ -71,6 +71,7 @@ class ToolRunner(Protocol):
         filename: str,
         base_url: str,
         storage: Storage,
+        owner: str,
     ) -> Job:
         """Begin the work. May finish synchronously or leave the job running.
 
@@ -78,6 +79,10 @@ class ToolRunner(Protocol):
         it belongs to the request — a server reachable by two names must hand
         each caller back a URL on the name they used, not on whichever one
         started the process.
+
+        ``owner`` is the caller's identity (its API key), threaded through so
+        the output this call produces is reserved in storage under the same
+        owner as the job and its input — see ADR 0035.
         """
         ...
 
@@ -108,6 +113,7 @@ class RegistryRunner:
         filename: str,
         base_url: str,
         storage: Storage,
+        owner: str,
     ) -> Job:
         """Stage the payload, run the local engine over it, publish the output."""
         spec = self.resolve(job.tool)
@@ -124,7 +130,7 @@ class RegistryRunner:
             # A directory-producing tool (`ToolSpec.produces_directory`, ADR
             # 0031) writes into `output/` as a real directory -- appending
             # `default_suffix` would turn it into a file-shaped path the local
-            # engine then creates as a directory anyway. See ADR 0033.
+            # engine then creates as a directory anyway. See ADR 0034.
             if spec.produces_directory:
                 destination = root / "output"
             else:
@@ -163,7 +169,7 @@ class RegistryRunner:
                 # The wire contract carries exactly one file per job. A
                 # directory's many outputs travel as a zip archive -- the same
                 # shape the client's `CloudEngine` unpacks on the way back in.
-                # See ADR 0033 and `tools/_archive.py`.
+                # See ADR 0034 and `tools/_archive.py`.
                 from docmax.tools._archive import zip_directory
 
                 output_bytes = zip_directory(destination)
@@ -175,8 +181,8 @@ class RegistryRunner:
 
         # Outside the temp directory: the staged input and the tool's output are
         # both gone by now, and what survives is the copy in storage.
-        file_id = storage.reserve(filename=output_name, size_bytes=len(output_bytes))
-        storage.put(file_id, output_bytes)
+        file_id = storage.reserve(filename=output_name, size_bytes=len(output_bytes), owner=owner)
+        storage.put(file_id, output_bytes, owner=owner)
 
         job.status = JobStatus.SUCCEEDED
         job.duration_ms = result.duration_ms or int((time.monotonic() - started) * 1000)

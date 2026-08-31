@@ -47,6 +47,7 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0032](0032-param-gains-component-labels-for-composite-values.md) | `Param` gains `component_labels`, so a composite value gets one labelled field per part | Accepted |
 | [0033](0033-toolspec-says-output-may-never-be-implied.md) | `ToolSpec` says when output may never be implied, so the TUI stops suggesting one that is wrong | Accepted |
 | [0034](0034-to-images-joins-the-cloud-engines.md) | `to-images` joins the cloud engines, and a directory output travels as a zip | Accepted |
+| [0035](0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md) | Remote MCP is a transport bridge over the Cloud Engine server, not a fifth interface | Accepted |
 
 ## When to write one
 
