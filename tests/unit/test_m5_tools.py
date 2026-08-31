@@ -245,15 +245,22 @@ def test_every_m5_tool_is_discoverable(name: str) -> None:
     assert spec.supports(Engine.LOCAL)
 
 
-@pytest.mark.parametrize("name", ["to-images", "from-images"])
-def test_the_image_tools_have_no_cloud_engine(name: str) -> None:
-    """And never will: ADR 0012 gives cloud only to tools with painful local deps.
-
-    Poppler is a small packaged install and `from-images` is pure Python, so
-    uploading a document to run either would buy nothing. `convert` is the M5
-    tool that *did* get a cloud engine at M6 — covered below.
+def test_from_images_has_no_cloud_engine() -> None:
+    """`from-images` is pure Python (img2pdf + Pillow), so uploading a document
+    to run it would buy nothing — unlike `to-images`, which joined the cloud
+    engines at ADR 0034 for the Poppler dependency it shares with `ocr`.
     """
-    assert not get_tool(name).supports(Engine.CLOUD)
+    assert not get_tool("from-images").supports(Engine.CLOUD)
+
+
+def test_to_images_gained_a_cloud_engine() -> None:
+    """ADR 0034: `to-images` shares `ocr`'s Poppler dependency, so cloud helps it
+    the same way it helps `ocr` — installing Poppler is the pain cloud removes.
+    """
+    spec = get_tool("to-images")
+
+    assert spec.supports(Engine.LOCAL)
+    assert spec.supports(Engine.CLOUD)
 
 
 def test_convert_gained_a_cloud_engine_at_m6() -> None:

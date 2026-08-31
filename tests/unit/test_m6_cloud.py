@@ -56,8 +56,10 @@ M6_CLOUD_TOOLS = ("compress", "convert")
 
 #: Every tool with a working cloud engine. `ocr` joined at M8 — the milestone
 #: ADR 0012 named when it deliberately held OCR back, so this is that ADR being
-#: executed rather than overturned.
-CLOUD_TOOLS = (*M6_CLOUD_TOOLS, "ocr")
+#: executed rather than overturned. `to-images` joined after it, per ADR 0034 —
+#: it shares `ocr`'s Poppler dependency, and is the first cloud tool whose
+#: output is a directory rather than a file.
+CLOUD_TOOLS = (*M6_CLOUD_TOOLS, "ocr", "to-images")
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +212,14 @@ def test_the_tools_the_docs_mention_but_do_not_exist_still_do_not() -> None:
     assert "remove-bg" not in registry
 
 
-@pytest.mark.parametrize("name", ["merge", "split", "watermark", "from-images", "to-images"])
+@pytest.mark.parametrize("name", ["merge", "split", "watermark", "from-images"])
 def test_a_pure_python_tool_has_no_cloud_engine(name: str) -> None:
+    """`to-images` is deliberately absent: ADR 0034 gives it a cloud engine.
+
+    It is the one tool outside this list with a genuinely painful native
+    dependency -- the same Poppler binary `ocr` already uses -- rather than a
+    millisecond-long pure-Python operation.
+    """
     assert not get_tool(name).supports(Engine.CLOUD)
 
 
@@ -475,6 +483,123 @@ def test_a_cloud_ocr_that_loses_a_page_is_refused(source: Path, tmp_path: Path) 
     out = tmp_path / "out.pdf"
 
     with pytest.raises(OutputValidationError, match="page count"):
+        build(client_for()).run(
+            [DocumentRef.from_path(source)],
+            OutputTarget(destination=out, force=True),
+            progress=NULL_PROGRESS,
+            cancellation=NEVER_CANCELLED,
+        )
+
+    assert not out.exists()
+
+
+def zip_of(entries: dict[str, bytes]) -> bytes:
+    """A minimal zip archive, built independently of ``tools/_archive.py``.
+
+    Used both as a stand-in for what the reference server sends back for a
+    directory-producing tool, and to prove ``CloudEngine`` unpacks it rather
+    than merely trusting a shape it produced itself.
+    """
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+#: A real PNG signature -- enough for `renders_images`' header check, nothing more.
+PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+
+
+@respx.mock
+def test_to_images_runs_in_the_cloud_end_to_end(source: Path, tmp_path: Path) -> None:
+    """The directory-shaped case ADR 0034 adds: a zip in, a directory out.
+
+    `source` has three pages, so a default (all-pages) render expects three
+    images back -- the same count `renders_images` would check against a local
+    run's staged directory.
+    """
+    from docmax.tools.to_images.cloud import build
+
+    archive = zip_of(
+        {
+            "page-0001.png": PNG_HEADER + b"one",
+            "page-0002.png": PNG_HEADER + b"two",
+            "page-0003.png": PNG_HEADER + b"three",
+        }
+    )
+    respx.post(f"{ENDPOINT}/v1/tools/to-images").mock(
+        return_value=httpx.Response(200, json=succeeded(engine_version="pdftoppm/24.02.0"))
+    )
+    respx.get(f"{ENDPOINT}/v1/outputs/f_1").mock(return_value=httpx.Response(200, content=archive))
+    out = tmp_path / "pages"
+
+    result = build(client_for()).run(
+        [DocumentRef.from_path(source)],
+        OutputTarget(destination=out, force=True),
+        progress=NULL_PROGRESS,
+        cancellation=NEVER_CANCELLED,
+        format="png",
+    )
+
+    assert result.engine_used is Engine.CLOUD
+    assert result.engine_version == "pdftoppm/24.02.0"
+    assert out.is_dir()
+    assert sorted(p.name for p in out.iterdir()) == [
+        "page-0001.png",
+        "page-0002.png",
+        "page-0003.png",
+    ]
+    assert len(result.outputs) == 3
+
+
+@respx.mock
+def test_a_cloud_to_images_that_loses_a_page_is_refused(source: Path, tmp_path: Path) -> None:
+    """One set of guarantees, not two: a missing image fails on the cloud path too."""
+    from docmax.tools.to_images.cloud import build
+
+    archive = zip_of({"page-0001.png": PNG_HEADER, "page-0002.png": PNG_HEADER})
+    respx.post(f"{ENDPOINT}/v1/tools/to-images").mock(
+        return_value=httpx.Response(200, json=succeeded())
+    )
+    respx.get(f"{ENDPOINT}/v1/outputs/f_1").mock(return_value=httpx.Response(200, content=archive))
+    out = tmp_path / "pages"
+
+    with pytest.raises(OutputValidationError, match="Expected 3"):
+        build(client_for()).run(
+            [DocumentRef.from_path(source)],
+            OutputTarget(destination=out, force=True),
+            progress=NULL_PROGRESS,
+            cancellation=NEVER_CANCELLED,
+        )
+
+    assert not out.exists()
+
+
+@respx.mock
+def test_a_cloud_to_images_result_with_no_real_header_is_refused(
+    source: Path, tmp_path: Path
+) -> None:
+    """The exact v2 bug ``to_images/validators.py`` was written for, on the cloud path."""
+    from docmax.tools.to_images.cloud import build
+
+    archive = zip_of(
+        {
+            "page-0001.png": b"not a real png",
+            "page-0002.png": PNG_HEADER,
+            "page-0003.png": PNG_HEADER,
+        }
+    )
+    respx.post(f"{ENDPOINT}/v1/tools/to-images").mock(
+        return_value=httpx.Response(200, json=succeeded())
+    )
+    respx.get(f"{ENDPOINT}/v1/outputs/f_1").mock(return_value=httpx.Response(200, content=archive))
+    out = tmp_path / "pages"
+
+    with pytest.raises(OutputValidationError, match="no PNG header"):
         build(client_for()).run(
             [DocumentRef.from_path(source)],
             OutputTarget(destination=out, force=True),
@@ -779,6 +904,52 @@ def test_a_repeated_idempotency_key_does_not_run_the_job_twice(
         return body
 
     assert submit()["job_id"] == submit()["job_id"]
+
+
+#: Stands in for `pdftoppm -singlefile`: writes exactly `<root>.png`, the shape
+#: `to_images/local.py` names as `-singlefile`'s whole point.
+PDFTOPPM_FAKE = """
+open(args[-1] + ".png", "wb").write(b"\\x89PNG\\r\\n\\x1a\\n")
+"""
+
+
+def test_the_server_zips_a_directory_producing_tools_output(
+    server: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ADR 0034: a directory-producing tool's job carries one zip, not one file.
+
+    The reference server always runs the *local* engine (`execution.py`'s whole
+    trick), so this drives the real `RegistryRunner.start` directory branch end
+    to end: two pages in, a two-entry zip out, downloadable without a key like
+    every other output.
+    """
+    install_fake(monkeypatch, tmp_path, PDFTOPPM_FAKE)
+    doc = write_pdf(tmp_path / "doc.pdf", 2)
+
+    submitted = server.post(
+        "/v1/tools/to-images",
+        files={"file": (doc.name, doc.read_bytes(), "application/octet-stream")},
+        data={"params": json.dumps({"format": "png"})},
+        headers=AUTH,
+    ).json()
+
+    assert submitted["status"] == "succeeded", submitted
+    assert submitted["output"]["content_type"] == "application/zip"
+
+    path = submitted["output"]["url"].split("testserver", 1)[1]
+    downloaded = server.get(path)
+
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "application/zip"
+
+    import io
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
+        names = archive.namelist()
+
+    assert len(names) == 2
+    assert all(name.endswith(".png") for name in names)
 
 
 def test_the_server_refuses_a_tool_with_no_cloud_engine(server: Any) -> None:

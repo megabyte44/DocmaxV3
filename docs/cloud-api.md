@@ -1,11 +1,13 @@
 # Cloud Engine API contract
 
-**Status:** implemented, for two tools. The client in
+**Status:** implemented, for four tools. The client in
 `src/docmax/cloud_client/` speaks the whole contract; the reference server in
 `src/docmax/server/` implements every endpoint below, including running the
 tool. `compress` and `convert` have cloud engines as of M6 —
 [ADR 0012](adr/0012-cloud-engines-are-compress-and-convert.md) records why those
-two and not the five this document once listed.
+two and not the five this document once listed. `ocr` joined at M8, and
+`to-images` joined after it — [ADR 0034](adr/0034-to-images-joins-the-cloud-engines.md)
+records why that one and not the pure-Python remainder.
 
 This document is the contract, and it has two independent implementations on
 purpose — a client that borrowed the server's parsing (or the reverse) would
@@ -23,10 +25,23 @@ Cloud is not a paid tier and not a capability gate. Every cloud-backed tool has
 a fully functional local engine. Cloud exists so a user can compress a PDF
 without installing Ghostscript, or convert a document without installing Pandoc.
 
-Three tools have it since M8: `compress`, `convert` and `ocr` — the case this
-section always led with, and the one whose local install is genuinely painful.
-`convert` still does not produce PDF on either engine
+Four tools have it: `compress`, `convert`, `ocr` — the case this section always
+led with, and the one whose local install is genuinely painful — and
+`to-images`, which shares `ocr`'s Poppler dependency and joined for the same
+reason. `convert` still does not produce PDF on either engine
 ([ADR 0011](adr/0011-convert-is-pandoc-only.md)).
+
+## Directory-shaped output
+
+Every field above assumes one file. `to-images` writes many — a directory of
+images, one per rendered page — and the wire contract has no second shape for
+that: `output` is still exactly one URL, one size, one content type. For a
+tool whose `ToolSpec` says `produces_directory` (ADR 0031), that one file is a
+**zip archive** of everything the local engine would have written, with
+`content_type: "application/zip"`. The client unpacks it into the destination
+directory before running the tool's own validators against it — see ADR 0034
+and `src/docmax/tools/_archive.py`, used by both the client's unpack and the
+reference server's zip.
 
 ## Endpoint configuration
 

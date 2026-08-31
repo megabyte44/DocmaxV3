@@ -56,9 +56,16 @@ def _content_type(payload: bytes) -> str:
     A client never relies on this: it writes the bytes to the path the *user*
     asked for. So being right about PDF and honest about everything else beats
     a mime table that is wrong for a `.docx` the server never saw named.
+
+    A zip signature is included because a directory-producing tool's output
+    *is* a zip archive on the wire (ADR 0033) — as opposed to `.docx`/`.odt`/
+    `.epub`, which are zip containers of something more specific and are left
+    to fall through to the generic case, exactly as before.
     """
     if payload.startswith(b"%PDF-"):
         return "application/pdf"
+    if payload.startswith(b"PK\x03\x04"):
+        return "application/zip"
     return "application/octet-stream"
 
 

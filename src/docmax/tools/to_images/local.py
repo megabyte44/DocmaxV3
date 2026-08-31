@@ -40,9 +40,9 @@ from typing import TYPE_CHECKING, Any
 
 from docmax.core.errors import InvalidParameterError
 from docmax.core.models import Engine, ToolResult
-from docmax.tools import _binaries, _dpi, _formats, _pagespec
+from docmax.tools import _binaries, _dpi, _pagespec
 from docmax.tools._pdf import open_pdf, page_count
-from docmax.tools.to_images.validators import renders_images
+from docmax.tools.to_images.validators import image_format_for, renders_images
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,7 +51,6 @@ if TYPE_CHECKING:
     from docmax.core.cancellation import CancellationToken
     from docmax.core.models import DocumentRef, OutputTarget
     from docmax.core.protocols import EngineStrategy, ProgressSink
-    from docmax.tools._formats import ImageFormat
 
 #: The name in ``_binaries``, declared there since M0 as
 #: ``used_by=("ocr", "to-images")``. Poppler, not Pillow.
@@ -108,7 +107,7 @@ class ToImagesLocal:
                 remedy="Pass the PDF to render.",
             )
 
-        image_format = _image_format(params)
+        image_format = image_format_for(params)
         dpi = _dpi.parse(params.get("dpi"), default=_DEFAULT_DPI)
 
         document = docs[0]
@@ -182,28 +181,6 @@ class ToImagesLocal:
 # ---------------------------------------------------------------------------
 # Parameters
 # ---------------------------------------------------------------------------
-
-
-def _image_format(params: dict[str, Any]) -> ImageFormat:
-    """The image format to write, or a typed error listing the real ones."""
-    value = params.get("format", "png")
-    if value is None:
-        value = "png"
-    if not isinstance(value, str):
-        raise InvalidParameterError(
-            f"format must be an image format name, not {value!r}.",
-            remedy=f"Use one of: {', '.join(_formats.rasterisable_names())}.",
-            context={"parameter": "format"},
-        )
-
-    chosen = _formats.image(value)
-    if chosen.rasterise_flag is None:
-        raise InvalidParameterError(
-            f"`to-images` cannot write {chosen.label}.",
-            remedy=f"Use one of: {', '.join(_formats.rasterisable_names())}.",
-            context={"parameter": "format", "format": chosen.name},
-        )
-    return chosen
 
 
 def _version(binary: str, cancellation: CancellationToken) -> str:

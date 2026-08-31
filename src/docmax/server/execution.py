@@ -121,7 +121,14 @@ class RegistryRunner:
         with tempfile.TemporaryDirectory(prefix=_TEMP_PREFIX, ignore_cleanup_errors=True) as work:
             root = Path(work)
             source = root / _safe_name(filename)
-            destination = root / f"output{spec.default_suffix}"
+            # A directory-producing tool (`ToolSpec.produces_directory`, ADR
+            # 0031) writes into `output/` as a real directory -- appending
+            # `default_suffix` would turn it into a file-shaped path the local
+            # engine then creates as a directory anyway. See ADR 0033.
+            if spec.produces_directory:
+                destination = root / "output"
+            else:
+                destination = root / f"output{spec.default_suffix}"
             try:
                 # Through `atomic_write` even for a staged input in a temp
                 # directory. `core/atomic.py` is the only module permitted to
@@ -152,12 +159,23 @@ class RegistryRunner:
                     started,
                 )
 
-            produced = Path(result.outputs[0]) if result.outputs else destination
-            output_bytes = produced.read_bytes()
+            if spec.produces_directory:
+                # The wire contract carries exactly one file per job. A
+                # directory's many outputs travel as a zip archive -- the same
+                # shape the client's `CloudEngine` unpacks on the way back in.
+                # See ADR 0033 and `tools/_archive.py`.
+                from docmax.tools._archive import zip_directory
+
+                output_bytes = zip_directory(destination)
+                output_name = f"{destination.name}.zip"
+            else:
+                produced = Path(result.outputs[0]) if result.outputs else destination
+                output_bytes = produced.read_bytes()
+                output_name = produced.name
 
         # Outside the temp directory: the staged input and the tool's output are
         # both gone by now, and what survives is the copy in storage.
-        file_id = storage.reserve(filename=produced.name, size_bytes=len(output_bytes))
+        file_id = storage.reserve(filename=output_name, size_bytes=len(output_bytes))
         storage.put(file_id, output_bytes)
 
         job.status = JobStatus.SUCCEEDED
@@ -165,7 +183,9 @@ class RegistryRunner:
         job.engine_version = result.engine_version
         job.output_url = f"{base_url.rstrip('/')}/v1/outputs/{file_id}"
         job.output_size_bytes = len(output_bytes)
-        job.output_content_type = _content_type(output_bytes)
+        job.output_content_type = (
+            "application/zip" if spec.produces_directory else _content_type(output_bytes)
+        )
         return job
 
 

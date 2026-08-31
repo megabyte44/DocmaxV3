@@ -18,11 +18,13 @@ that promises an image.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from docmax.core.errors import OutputValidationError
+from docmax.core.errors import InvalidParameterError, OutputValidationError
+from docmax.tools import _formats
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from docmax.core.protocols import Validator
@@ -31,6 +33,35 @@ if TYPE_CHECKING:
 #: Enough bytes for the longest signature in the table, with room to spare. Read
 #: per file, so it stays small on purpose.
 _HEADER_BYTES = 16
+
+
+def image_format_for(params: Mapping[str, Any]) -> ImageFormat:
+    """The image format ``to-images`` should write, or a typed error listing the real ones.
+
+    Shared between the local and cloud engines rather than resolved twice, so
+    ``--format nonsense`` is refused the same way regardless of which one runs
+    it -- the cloud engine runs this exact check *before* uploading, and the
+    reference server runs the same local engine this local strategy does, so
+    "can `to-images` write this format" has one answer everywhere.
+    """
+    value = params.get("format", "png")
+    if value is None:
+        value = "png"
+    if not isinstance(value, str):
+        raise InvalidParameterError(
+            f"format must be an image format name, not {value!r}.",
+            remedy=f"Use one of: {', '.join(_formats.rasterisable_names())}.",
+            context={"parameter": "format"},
+        )
+
+    chosen = _formats.image(value)
+    if chosen.rasterise_flag is None:
+        raise InvalidParameterError(
+            f"`to-images` cannot write {chosen.label}.",
+            remedy=f"Use one of: {', '.join(_formats.rasterisable_names())}.",
+            context={"parameter": "format", "format": chosen.name},
+        )
+    return chosen
 
 
 def renders_images(expected: int, image_format: ImageFormat) -> Validator:
@@ -90,4 +121,4 @@ def _has_a_real_header(image: Path, image_format: ImageFormat) -> None:
         )
 
 
-__all__ = ["renders_images"]
+__all__ = ["image_format_for", "renders_images"]
