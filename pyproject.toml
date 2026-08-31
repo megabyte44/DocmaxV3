@@ -203,6 +203,12 @@ ignore = [
 # The benchmark runner is a script whose entire output is a report to a
 # terminal. It is not library code and is not in the wheel.
 "benchmarks/**" = ["T20"]
+# The Colab server notebook is a runbook, not library code: it prints status
+# to a notebook cell by design, shells out to apt/git/cloudflared by their
+# bare names because that is what a Colab VM's PATH already has, needs
+# `shell=True` for the multi-word commands it runs, and binds 0.0.0.0
+# because a Cloudflare tunnel has to reach it from outside localhost.
+"docmax_colab_server.ipynb" = ["T20", "S", "PTH", "SIM115", "B007", "E741"]
 # FastAPI's dependency-injection idiom is a call in an argument default, which
 # B008 exists to catch. It is correct everywhere else.
 "src/docmax/server/**" = ["B008"]
