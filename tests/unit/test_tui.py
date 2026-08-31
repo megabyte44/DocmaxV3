@@ -2365,6 +2365,150 @@ def test_the_input_hint_is_empty_for_a_typed_path_that_exists(tmp_path: Path) ->
     assert asyncio.run(scenario()) == ""
 
 
+def test_a_nonexistent_typed_path_turns_the_input_field_red() -> None:
+    """Issue #25: a message below the field is easy to miss — the field
+    itself (and its hint) must carry the same signal, via the ``invalid`` CSS
+    class rather than a bespoke widget."""
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> tuple[bool, bool]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = "/no/such/file.pdf"
+            await pilot.pause()
+
+            field = screen.query_one("#field-__inputs__", Input)
+            hint = screen.query_one("#input-hint", Static)
+            return field.has_class("invalid"), hint.has_class("invalid")
+
+    field_invalid, hint_invalid = asyncio.run(scenario())
+    assert field_invalid is True
+    assert hint_invalid is True
+
+
+def test_a_typed_path_that_exists_does_not_mark_the_field_invalid(tmp_path: Path) -> None:
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    real = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> tuple[bool, bool]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(real)
+            await pilot.pause()
+
+            field = screen.query_one("#field-__inputs__", Input)
+            hint = screen.query_one("#input-hint", Static)
+            return field.has_class("invalid"), hint.has_class("invalid")
+
+    field_invalid, hint_invalid = asyncio.run(scenario())
+    assert field_invalid is False
+    assert hint_invalid is False
+
+
+def test_fixing_a_bad_path_clears_the_invalid_state(tmp_path: Path) -> None:
+    """The class must come back off, not just never go on — typing a bad path
+    and then correcting it must clear both the field and hint's red state."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    real = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> bool:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            field = screen.query_one("#field-__inputs__", Input)
+            field.value = "/no/such/file.pdf"
+            await pilot.pause()
+            assert field.has_class("invalid")
+
+            field.value = str(real)
+            await pilot.pause()
+            return field.has_class("invalid")
+
+    assert asyncio.run(scenario()) is False
+
+
+def test_the_input_field_starts_without_the_invalid_class() -> None:
+    """An empty, untouched field is not yet wrong — it just has nothing in it
+    — so it must not open in the red state."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> bool:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            return screen.query_one("#field-__inputs__", Input).has_class("invalid")
+
+    assert asyncio.run(scenario()) is False
+
+
+def test_a_browsed_valid_path_does_not_leave_the_field_marked_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Browse fills the field with a real, existing path — the invalid class
+    must reflect that, not linger from whatever the field held before."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    chosen = _touch(tmp_path / "only.pdf")
+    _mock_dialog(monkeypatch, str(chosen))
+
+    async def scenario() -> bool:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            field = screen.query_one("#field-__inputs__", Input)
+            field.value = "/no/such/file.pdf"
+            await pilot.pause()
+            assert field.has_class("invalid")
+
+            await _click_browse(pilot)
+            return field.has_class("invalid")
+
+    assert asyncio.run(scenario()) is False
+
+
 def test_the_consent_modal_answers_yes_and_no() -> None:
     """`errors.py` has said since M0 that the TUI renders this as a modal."""
     import asyncio

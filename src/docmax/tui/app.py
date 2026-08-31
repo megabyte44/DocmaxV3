@@ -636,9 +636,24 @@ class RunScreen(Screen[None]):
         actually gates a run, so a path that is momentarily wrong (mid-edit,
         or valid only once resolved some other way) never blocks Run — it just
         looks wrong until it isn't.
+
+        The message is the primary signal, but a line of text below the field
+        is easy to miss — issue #25 asked for the field itself to say
+        something is wrong, not just the hint underneath it. So the same
+        ``bool(message)`` also toggles an ``invalid`` class on both the input
+        and its hint, which is what ``.input-row Input.invalid`` and
+        ``.hint.invalid`` in ``DocMaxApp.CSS`` turn into a red border and red
+        text — Textual's own pattern for this (a CSS class driven by widget
+        state), not a bespoke widget.
         """
         raw = self.query_one("#field-__inputs__", Input).value
-        self.query_one("#input-hint", Static).update(forms.describe_missing_paths(raw))
+        message = forms.describe_missing_paths(raw)
+        is_invalid = bool(message)
+        input_widget = self.query_one("#field-__inputs__", Input)
+        hint = self.query_one("#input-hint", Static)
+        input_widget.set_class(is_invalid, "invalid")
+        hint.set_class(is_invalid, "invalid")
+        hint.update(message)
 
     # -- running ------------------------------------------------------------
 
@@ -1024,6 +1039,10 @@ class DocMaxApp(App[None]):
     .input-row { height: auto; }
     .input-row Input { width: 1fr; }
     .input-row Button { margin-left: 1; }
+    /* issue #25: a typed path that doesn't resolve says so in the field
+       itself, not only in the hint line underneath it. */
+    .input-row Input.invalid { border: round $error; }
+    .hint.invalid { color: $error; }
     .component-row { height: auto; }
     .component { width: 1fr; margin-right: 1; height: auto; }
     .component-label { color: $text-muted; text-style: bold; }
