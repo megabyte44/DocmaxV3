@@ -1916,10 +1916,13 @@ async def _click_browse(pilot: Any) -> None:
     The dialog runs on a real OS thread (see ``RunScreen._browse``), so
     ``pilot.pause()``'s "wait for cpu idle" is not enough to observe its
     result — the callback arrives from a different thread on its own
-    schedule. A short real-time pause is.
+    schedule. A real-time pause is, matching the ``0.5`` used everywhere
+    else in this file for the same "real worker thread callback" wait (see
+    ``test_clicking_run_actually_executes_the_worker``); ``0.2`` was too
+    short on Windows CI's slower thread scheduling and flaked there.
     """
     await pilot.click("#browse-inputs")
-    await pilot.pause(0.2)
+    await pilot.pause(0.5)
 
 
 def test_the_run_screen_has_a_browse_button() -> None:
@@ -2336,7 +2339,7 @@ async def _click_browse_output(pilot: Any) -> None:
     call back — see ``_click_browse``'s docstring for why a real pause is
     needed rather than ``pilot.pause()``'s "wait for cpu idle"."""
     await pilot.click("#browse-output")
-    await pilot.pause(0.2)
+    await pilot.pause(0.5)
 
 
 def test_the_run_screen_has_a_browse_output_button() -> None:
