@@ -31,6 +31,7 @@ command line.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -62,6 +63,8 @@ from docmax.tui.browser import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from textual.timer import Timer
 
     from docmax.core.errors import DocMaxError
     from docmax.core.models import ToolResult
@@ -392,6 +395,14 @@ class RunScreen(Screen[None]):
         Binding("ctrl+c", "cancel", "Cancel run", show=True, priority=True),
     ]
 
+    #: A braille-dot spinner, cycled once per tick while a run is alive and
+    #: indeterminate. Ten frames at the tick rate below make one full
+    #: rotation take roughly a second — fast enough to read as motion, slow
+    #: enough not to be a distraction next to the status text it replaces
+    #: the static running icon with.
+    _SPINNER_FRAMES: ClassVar[str] = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    _SPINNER_INTERVAL: ClassVar[float] = 1 / 12
+
     def __init__(self, tool: str) -> None:
         super().__init__()
         self.tool = tool
@@ -406,6 +417,18 @@ class RunScreen(Screen[None]):
         # moment the screen mounts. That is a shadowing bug, not a shared
         # concept, so it gets a name Textual does not already use.
         self._run_in_progress = False
+        # The "is anything alive" indicator. `ProgressSink.start`'s own
+        # `total=None` already means "indeterminate" — this reuses that
+        # signal rather than asking a tool or an engine what kind of thing
+        # it is, which is what keeps it generic. `True` until the first
+        # `progress.start` call says otherwise: before that call arrives, a
+        # run is exactly as indeterminate as the cloud case this exists for.
+        self._indeterminate = False
+        self._status_description = ""
+        self._status_state = "idle"
+        self._run_started_at: float | None = None
+        self._spinner_index = 0
+        self._spinner_timer: Timer | None = None
 
     @property
     def spec(self) -> ToolSpec:
@@ -706,6 +729,10 @@ class RunScreen(Screen[None]):
 
         self._token = CancellationToken()
         self._run_in_progress = True
+        self._indeterminate = True
+        self._run_started_at = time.monotonic()
+        self._spinner_index = 0
+        self._start_spinner()
         self.query_one("#cancel", Button).disabled = False
         self.query_one("#run", Button).disabled = True
         self._set_status("Running…", state="running")
@@ -840,6 +867,11 @@ class RunScreen(Screen[None]):
     def _progress_start(self, description: str, total: int | None) -> None:
         bar = self.query_one("#progress", ProgressBar)
         bar.update(total=total, progress=0)
+        # `total=None` is the sink's own spelling of "indeterminate" — see
+        # `ProgressSink.start`. Read here rather than re-decided, so the
+        # spinner+elapsed indicator and the bar it sits beside can never
+        # disagree about which state a step is in.
+        self._indeterminate = total is None
         self._set_status(description, state="running")
 
     def _progress_advance(self, amount: int) -> None:
@@ -851,8 +883,43 @@ class RunScreen(Screen[None]):
     def _finished(self) -> None:
         self._run_in_progress = False
         self._token = None
+        self._indeterminate = False
+        self._run_started_at = None
+        self._stop_spinner()
         self.query_one("#cancel", Button).disabled = True
         self.query_one("#run", Button).disabled = False
+
+    # -- the "alive" indicator -----------------------------------------------
+    #
+    # A bar with no percentage and no motion a viewer can point to reads as
+    # "nothing is happening," even once Textual's own indeterminate animation
+    # is running — a terminal repaints on its own schedule, and a user
+    # watching a cloud call that can sit on one step for a while has no way
+    # to tell a live pulse from a frozen one at a glance. This replaces the
+    # static "running" icon with a spinner glyph that visibly advances, plus
+    # a running elapsed-time count, next to whatever the current step's own
+    # description already says. It only appears while a step is
+    # indeterminate — a determinate one already moves its own bar toward a
+    # known total, which is motion a user can already see.
+
+    def _start_spinner(self) -> None:
+        if self._spinner_timer is None:
+            self._spinner_timer = self.set_interval(self._SPINNER_INTERVAL, self._tick_spinner)
+
+    def _stop_spinner(self) -> None:
+        if self._spinner_timer is not None:
+            self._spinner_timer.stop()
+            self._spinner_timer = None
+
+    def _tick_spinner(self) -> None:
+        self._spinner_index += 1
+        self._render_status()
+
+    def on_unmount(self) -> None:
+        """Belt and braces: `_finished` already stops it on every normal
+        exit, but the app can be quit (`ctrl+q`) while a run is still in
+        progress, which unmounts this screen without ever reaching it."""
+        self._stop_spinner()
 
     def _succeeded(self, result: ToolResult) -> None:
         if result.details.get("dry_run"):
@@ -901,15 +968,39 @@ class RunScreen(Screen[None]):
         """Set the status line's text and its state-driven visual treatment.
 
         ``state`` is one of ``idle`` / ``running`` / ``success`` / ``error``.
-        It selects a CSS class — colour and weight — and a small icon glyph
-        from ``_STATUS_ICONS``, so idle, running, succeeded and failed read as
-        genuinely different states rather than the same plain line with
-        different words in it. Driven entirely by ``state``, never by
+        It selects a CSS class — colour and weight — and (outside the
+        indeterminate-running case ``_render_status`` handles) a small icon
+        glyph from ``_STATUS_ICONS``, so idle, running, succeeded and failed
+        read as genuinely different states rather than the same plain line
+        with different words in it. Driven entirely by ``state``, never by
         anything about a particular tool.
         """
+        self._status_description = text
+        self._status_state = state
+        self._render_status()
+
+    def _render_status(self) -> None:
+        """Paint ``#status`` from the description, state and spinner phase.
+
+        The one seam every source of a status update goes through — a plain
+        ``_set_status`` call, and each spinner tick — so the indeterminate
+        case can never fall out of sync with the icon-and-colour treatment
+        every other state already gets.
+        """
         widget = self.query_one("#status", Static)
-        widget.set_classes(f"status-{state}")
-        icon = _STATUS_ICONS.get(state, "")
+        widget.set_classes(f"status-{self._status_state}")
+        text = self._status_description
+        if (
+            self._status_state == "running"
+            and self._run_in_progress
+            and self._indeterminate
+            and self._run_started_at is not None
+        ):
+            glyph = self._SPINNER_FRAMES[self._spinner_index % len(self._SPINNER_FRAMES)]
+            elapsed = int(time.monotonic() - self._run_started_at)
+            widget.update(f"{glyph}  {text}  ({elapsed}s)" if text else f"{glyph}  ({elapsed}s)")
+            return
+        icon = _STATUS_ICONS.get(self._status_state, "")
         widget.update(f"{icon}  {text}" if icon and text else text)
 
     def _set_details(self, text: str) -> None:
@@ -1082,7 +1173,15 @@ class DocMaxApp(App[None]):
     .component-row { height: auto; }
     .component { width: 1fr; margin-right: 1; height: auto; }
     .component-label { color: $text-muted; text-style: bold; }
-    #progress { padding: 1 0; }
+    /* `padding` here (rather than `margin`) ate the widget's own content
+       box: `ProgressBar`'s DEFAULT_CSS sets a fixed `height: 1`, and 1 row
+       of *inner* padding top and bottom left zero rows for the bar itself
+       to render into — so it occupied space in the layout but painted
+       nothing, which is why a run in progress showed no bar at all between
+       the button row and the status line. `margin` gets the same visual
+       breathing room from *outside* the box instead, leaving the bar's own
+       one row intact. See issue #38. */
+    #progress { margin: 1 0; }
     #details { color: $text-muted; padding: 1 0 0 0; height: auto; }
 
     /* Status line: idle / running / succeeded / failed read as distinct

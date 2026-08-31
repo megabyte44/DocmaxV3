@@ -1336,6 +1336,173 @@ def test_cancelling_a_run_cancels_the_token() -> None:
 
 
 # ---------------------------------------------------------------------------
+# The "is it alive" indicator (issue #38)
+#
+# `ProgressBar(total=None)` on the run screen used to render nothing at all:
+# `#progress { padding: 1 0 }` padded the *inside* of a widget whose own
+# `DEFAULT_CSS` fixes `height: 1`, leaving zero rows for its content — so it
+# occupied space in the layout but painted no bar, determinate or not. Fixed
+# by using `margin` (outside the box) instead of `padding` (inside it).
+#
+# Separately, even a correctly-rendering indeterminate bar has no percentage
+# and nothing a user can point to as motion between two glances at a static
+# terminal. `_progress_start`'s own `total=None` — the sink's existing
+# spelling of "indeterminate" — now drives a spinner glyph and a running
+# elapsed-time count next to the status text, replacing the static "running"
+# icon issue #26 added, with no tool name involved in the decision.
+# ---------------------------------------------------------------------------
+
+
+def test_the_progress_bar_renders_with_nonzero_height() -> None:
+    """Regression for the CSS bug: `#progress` must leave room for its own
+    content, not squeeze it to zero rows with inward padding."""
+    import asyncio
+
+    from textual.widgets import ProgressBar
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> int:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            bar = screen.query_one("#progress", ProgressBar)
+            return bar.content_size.height
+
+    assert asyncio.run(scenario()) > 0
+
+
+def test_an_indeterminate_step_shows_a_spinner_and_elapsed_time() -> None:
+    """The exact case the issue names: a cloud call's one indeterminate step
+    (`progress.start(..., total=None)`) must make the status line say
+    something unambiguous is alive — a spinner glyph plus a running elapsed
+    count — next to the step's own description, not just an unmoving bar."""
+    import asyncio
+    import time
+
+    from textual.widgets import Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen._run_in_progress = True
+            screen._run_started_at = time.monotonic()
+            screen._progress_start("Running ocr on https://api.example.com", None)
+            await pilot.pause()
+
+            return str(screen.query_one("#status", Static).content)
+
+    status = asyncio.run(scenario())
+    assert "Running ocr on https://api.example.com" in status
+    assert "(0s)" in status
+    assert any(glyph in status for glyph in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
+
+def test_a_determinate_step_shows_no_animated_spinner_or_elapsed_time() -> None:
+    """A step with a known total already moves its own bar — the animated
+    spinner and elapsed count exist for the case a bar cannot show motion
+    toward anything, not as a permanent decoration on every running status."""
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen._run_in_progress = True
+            screen._progress_start("Rendering 3 of 5 page(s)", 5)
+            await pilot.pause()
+
+            return str(screen.query_one("#status", Static).content)
+
+    status = asyncio.run(scenario())
+    assert "Rendering 3 of 5 page(s)" in status
+    assert not any(glyph in status for glyph in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+    assert not any(f"({n}s)" in status for n in range(5))
+
+
+def test_the_spinner_timer_stops_when_the_run_finishes() -> None:
+    """`_finished` must stop the interval driving the spinner, or a screen
+    left mounted after a run completes keeps re-rendering `#status` forever
+    against an elapsed time that no longer means anything."""
+    import asyncio
+    import time
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> tuple[bool, bool]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen._run_in_progress = True
+            screen._run_started_at = time.monotonic()
+            screen._start_spinner()
+            await pilot.pause()
+            running = screen._spinner_timer is not None
+
+            screen._finished()
+            await pilot.pause()
+            return running, screen._spinner_timer is None
+
+    was_running, stopped_after_finish = asyncio.run(scenario())
+    assert was_running
+    assert stopped_after_finish
+
+
+def test_the_final_status_carries_no_leftover_spinner_or_elapsed_suffix() -> None:
+    """`_finished` runs before `_succeeded`/`_show` set the last word on a
+    run, so a completed message must be exactly what they gave it — not
+    prefixed with a stale spinner frame or trailing elapsed count from the
+    step that just ended."""
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen._run_in_progress = True
+            screen._progress_start("Running ocr on https://api.example.com", None)
+            await pilot.pause()
+
+            screen._finished()
+            screen._set_status("Wrote out.pdf  ·  local engine", state="success")
+            await pilot.pause()
+
+            return str(screen.query_one("#status", Static).content)
+
+    assert asyncio.run(scenario()) == "✔  Wrote out.pdf  ·  local engine"
+
+
+# ---------------------------------------------------------------------------
 # Browsing for input files — pure helpers
 # ---------------------------------------------------------------------------
 
