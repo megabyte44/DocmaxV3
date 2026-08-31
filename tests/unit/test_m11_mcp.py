@@ -34,6 +34,9 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import httpx2
 import pytest
+
+pytest.importorskip("fastapi", reason="the server extra is not installed")
+
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
@@ -46,8 +49,6 @@ from tests.paths import SRC, relative
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
-
-pytest.importorskip("fastapi", reason="the server extra is not installed")
 pytest.importorskip("mcp", reason="the mcp extra is not installed")
 
 MCP_ROUTE_SOURCES = (
