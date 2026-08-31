@@ -9,6 +9,11 @@ validators to run over what comes back. So the flow lives here and a tool's
 ``cloud.py`` supplies those two, exactly as ``_pagespec``, ``_position``,
 ``_permissions`` and ``_formats`` own the vocabularies their tools share.
 
+A directory-producing tool (``ToolSpec.produces_directory``, ADR 0031 —
+``to-images`` is the first cloud tool shaped this way) supplies a third: it says
+so, and "fetch, validate, write" becomes "fetch, unzip, validate, write" —
+``tools/_archive.py`` owns the zip shape, this module still owns when it runs.
+
 ## What this module is not allowed to decide
 
 **Whether to use cloud at all.** That is ``EngineRouter``'s, and it is settled
@@ -78,6 +83,7 @@ class CloudEngine:
         *,
         validators: ValidatorFactory | None = None,
         client: CloudClient | None = None,
+        produces_directory: bool = False,
     ) -> None:
         self._tool = tool
         self._validators = validators
@@ -85,6 +91,14 @@ class CloudEngine:
         #: transport. Left alone, it is built on first use from the user's
         #: resolved configuration.
         self._client = client
+        #: Mirrors ``ToolSpec.produces_directory`` (ADR 0031) -- the tool's own
+        #: ``cloud.py`` sets this because it already knows the shape of its
+        #: output, the same way it already supplies ``validators``. When set,
+        #: the job's output bytes are a zip archive (``tools/_archive.py``)
+        #: rather than the file itself, because the wire contract carries
+        #: exactly one file per job and a directory of many has no single file
+        #: to be.
+        self._produces_directory = produces_directory
 
     # -- availability ------------------------------------------------------
 
@@ -137,7 +151,7 @@ class CloudEngine:
         already paid to upload while making ``engine_used`` a guess rather than
         a fact. See ADR 0012.
         """
-        from docmax.core.atomic import atomic_write
+        from docmax.core.atomic import atomic_dir, atomic_write
 
         if not docs:
             raise InvalidParameterError(
@@ -166,11 +180,19 @@ class CloudEngine:
         output = self.client.fetch_output(job)
         progress.advance()
 
-        with atomic_write(target, validators=checks) as handle:
-            handle.write(output)
+        if self._produces_directory:
+            from docmax.tools._archive import unzip_into
+
+            with atomic_dir(target, validators=checks) as staged:
+                unzip_into(output, staged)
+            outputs = tuple(sorted(target.destination.iterdir()))
+        else:
+            with atomic_write(target, validators=checks) as handle:
+                handle.write(output)
+            outputs = (target.destination,)
 
         return ToolResult(
-            outputs=(target.destination,),
+            outputs=outputs,
             engine_used=Engine.CLOUD,
             duration_ms=job.duration_ms or int((time.monotonic() - started) * 1000),
             engine_version=job.engine_version,

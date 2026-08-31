@@ -2,7 +2,7 @@
 
 Imported during discovery -- on every ``--help`` -- so it imports nothing but
 ``core`` and the format table, and does no work at import time. Poppler is not
-looked for here; that happens in ``local.py``.
+looked for here; that happens in ``local.py`` and ``cloud.py``.
 """
 
 from __future__ import annotations
@@ -17,10 +17,11 @@ SPEC = register(
         summary="Render each page of a PDF as an image.",
         category="convert",
         module=__name__.rpartition(".")[0],
-        # No cloud engine. Poppler is a small, packaged install on every
-        # platform -- nothing like the pain Tesseract or a LaTeX distribution
-        # is -- so uploading a document to rasterise it would buy nothing.
-        supported_engines=frozenset({Engine.LOCAL}),
+        # Cloud engine since ADR 0034: `to-images` needs the exact binary `ocr`
+        # does -- Poppler's `pdftoppm`, `used_by=("ocr", "to-images")` in
+        # `tools/_binaries.py` -- and cloud already exists to remove that
+        # install for one of the two tools that need it.
+        supported_engines=frozenset({Engine.LOCAL, Engine.CLOUD}),
         accepts_multiple_inputs=False,
         # `default_suffix` is otherwise unused: the CLI requires `-o`, so a
         # destination is never derived. `-o` itself names a directory the
