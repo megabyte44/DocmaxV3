@@ -2387,3 +2387,315 @@ def test_the_consent_modal_answers_yes_and_no() -> None:
                 assert answers[-1] is expected
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# The details panel (issue #28)
+#
+# `get-info` is read-only: `outputs` is always empty and the answer travels in
+# `ToolResult.details`. Before this fix, `RunScreen._succeeded` rendered only
+# `result.outputs`, so a successful `get-info` run reduced to "Wrote nothing"
+# with the page count, size and encryption flag silently dropped. The fix is
+# `format_details`, a pure function generic over whatever `details` holds, and
+# a `#details` panel that renders it — no branch anywhere names `get-info`.
+# ---------------------------------------------------------------------------
+
+
+def test_format_details_renders_flat_key_value_pairs() -> None:
+    from docmax.tui.app import format_details
+
+    rendered = format_details({"pages": 3, "size_bytes": 1024})
+    assert rendered == "pages: 3\nsize bytes: 1024"
+
+
+def test_format_details_formats_booleans_as_yes_no() -> None:
+    from docmax.tui.app import format_details
+
+    assert format_details({"encrypted": True}) == "encrypted: yes"
+    assert format_details({"encrypted": False}) == "encrypted: no"
+
+
+def test_format_details_formats_none_as_an_em_dash() -> None:
+    from docmax.tui.app import format_details
+
+    assert format_details({"pages": None}) == "pages: —"
+
+
+def test_format_details_indents_a_nested_mapping() -> None:
+    """`get-info`'s own `metadata` value is exactly this shape: a dict inside
+    `details`. Nothing here knows that key's name — any nested mapping is
+    indented the same way."""
+    from docmax.tui.app import format_details
+
+    rendered = format_details({"metadata": {"Title": "Report", "Author": "A"}})
+    assert rendered == "metadata:\n  Title: Report\n  Author: A"
+
+
+def test_format_details_shows_an_em_dash_for_an_empty_nested_mapping() -> None:
+    from docmax.tui.app import format_details
+
+    assert format_details({"metadata": {}}) == "metadata: —"
+
+
+def test_format_details_omits_the_keys_the_dry_run_status_line_already_shows() -> None:
+    """`_succeeded`'s dry-run branch already renders `reason` and
+    `destination` into the status line; repeating them in the details panel
+    underneath would just be noise."""
+    from docmax.tui.app import format_details
+
+    rendered = format_details(
+        {"dry_run": True, "reason": "offline", "destination": "/tmp/out.pdf", "pages": 3}
+    )
+    assert rendered == "pages: 3"
+
+
+def test_format_details_is_empty_for_empty_details() -> None:
+    from docmax.tui.app import format_details
+
+    assert format_details({}) == ""
+
+
+def test_the_details_panel_exists_and_starts_empty() -> None:
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("get-info")
+            app.push_screen(screen)
+            await pilot.pause()
+            return _text_of(screen.query_one("#details", Static))
+
+    assert asyncio.run(scenario()) == ""
+
+
+def test_a_run_whose_result_carries_details_shows_them_generically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The regression itself, against a fake router so it is exercised without
+    a real document: a tool that writes nothing but reports `details` must not
+    be reduced to "Wrote nothing" with everything else dropped."""
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    result = ToolResult(
+        outputs=(),
+        engine_used=Engine.LOCAL,
+        details={"pages": 3, "size_bytes": 2048, "encrypted": False},
+    )
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> tuple[str, str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("get-info")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            from textual.widgets import Input
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            status = str(screen.query_one("#status", Static).content)
+            details = _text_of(screen.query_one("#details", Static))
+            return status, details
+
+    status, details = asyncio.run(scenario())
+    assert "Wrote nothing" in status
+    assert "pages: 3" in details
+    assert "size bytes: 2048" in details
+    assert "encrypted: no" in details
+
+
+def test_details_are_shown_alongside_a_written_file_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The panel is not exclusive to read-only tools: a tool that both writes
+    a file and reports extra `details` gets both shown, not one or the other."""
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    written = tmp_path / "out.pdf"
+    result = ToolResult(outputs=(written,), engine_used=Engine.LOCAL, details={"pages": 5})
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> tuple[str, str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            from textual.widgets import Input
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(written)
+            _set_box(screen, "10,10,100,100")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            status = str(screen.query_one("#status", Static).content)
+            details = _text_of(screen.query_one("#details", Static))
+            return status, details
+
+    status, details = asyncio.run(scenario())
+    assert "Wrote" in status
+    assert "nothing" not in status
+    assert "pages: 5" in details
+
+
+def test_a_dry_run_does_not_show_the_details_panel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dry-run status line already carries `reason` and `destination`;
+    the panel underneath must stay empty rather than repeating them."""
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    result = ToolResult(
+        outputs=(),
+        engine_used=Engine.LOCAL,
+        details={"dry_run": True, "reason": "offline", "destination": str(tmp_path / "out.pdf")},
+    )
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("get-info")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            from textual.widgets import Input
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            await pilot.pause()
+
+            await pilot.click("#dry-run")
+            await pilot.pause(0.5)
+
+            return _text_of(screen.query_one("#details", Static))
+
+    assert asyncio.run(scenario()) == ""
+
+
+def test_the_details_panel_is_cleared_on_a_failed_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stale panel from a previous success must not linger under a new
+    run's error modal."""
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.core.errors import InPlaceOverwriteError
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, ErrorScreen, RunScreen
+
+    router = FakeRouter(raises=InPlaceOverwriteError("boom", context={"path": "x"}))
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("get-info")
+            app.push_screen(screen)
+            await pilot.pause()
+            screen._set_details("stale details from a previous run")
+
+            from textual.widgets import Input
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            assert isinstance(app.screen, ErrorScreen)
+            return _text_of(screen.query_one("#details", Static))
+
+    assert asyncio.run(scenario()) == ""
+
+
+def test_get_info_run_through_the_real_tui_shows_the_answer_it_found(tmp_path: Path) -> None:
+    """The exact scenario issue #28 reported, resolved end-to-end: the real
+    registry, the real router, the real `get-info` local strategy, Run
+    clicked for real — no fakes. `get-info` writes nothing, so before this
+    fix the status line read "Wrote nothing" and the page count, size and
+    encryption flag were never shown anywhere. This is the claim the fix
+    rests on: they are visible after a real run."""
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _write_pdf(tmp_path / "report.pdf", pages=3)
+    out = tmp_path / "unused.pdf"  # get-info never writes here; only resolved, never used
+
+    async def scenario() -> tuple[str, str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("get-info")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(out)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(1.0)
+
+            status = str(screen.query_one("#status", Static).content)
+            details = _text_of(screen.query_one("#details", Static))
+            return status, details
+
+    status, details = asyncio.run(scenario())
+    assert "Wrote nothing" in status
+    assert not out.exists(), "get-info must never write the output path it was given"
+    assert "pages: 3" in details
+    assert "encrypted: no" in details
+    assert f"name: {source.name}" in details

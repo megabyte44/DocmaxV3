@@ -31,6 +31,7 @@ command line.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from textual import events, on, work
@@ -100,6 +101,52 @@ def _selected(widget: Select[str], choices: tuple[str, ...]) -> str:
     """The chosen string, or ``""`` for no selection. Version-independent."""
     value = widget.value
     return value if isinstance(value, str) and value in choices else ""
+
+
+#: Rendered into the status line by `RunScreen._succeeded`'s dry-run branch
+#: already, so `format_details` leaves them out rather than showing them twice.
+_DRY_RUN_KEYS = frozenset({"dry_run", "reason", "destination"})
+
+
+def format_details(details: Mapping[str, Any]) -> str:
+    """Render a tool's ``ToolResult.details`` as key/value lines.
+
+    ``get-info`` is read-only — its whole answer is in ``details``, and
+    ``outputs`` is always empty (issue #28). Rather than a get-info-specific
+    panel, this renders *any* tool's ``details`` generically: whatever keys
+    are there become lines, a nested mapping (``get-info``'s ``metadata``,
+    say) is indented one level, and nothing here knows a tool's name. A tool
+    that writes files and reports nothing extra in ``details`` simply gets no
+    panel, since there is nothing to show.
+    """
+    lines: list[str] = []
+    for key, value in details.items():
+        if key in _DRY_RUN_KEYS:
+            continue
+        _format_detail_entry(lines, str(key), value, indent=0)
+    return "\n".join(lines)
+
+
+def _format_detail_entry(lines: list[str], key: str, value: Any, *, indent: int) -> None:
+    prefix = "  " * indent
+    label = key.replace("_", " ")
+    if isinstance(value, Mapping):
+        if not value:
+            lines.append(f"{prefix}{label}: —")
+            return
+        lines.append(f"{prefix}{label}:")
+        for sub_key, sub_value in value.items():
+            _format_detail_entry(lines, str(sub_key), sub_value, indent=indent + 1)
+        return
+    lines.append(f"{prefix}{label}: {_format_detail_scalar(value)}")
+
+
+def _format_detail_scalar(value: Any) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
 
 
 class Brand(Horizontal):
@@ -407,6 +454,7 @@ class RunScreen(Screen[None]):
 
             yield ProgressBar(id="progress", show_eta=False)
             yield Static("", id="status", classes="status-idle", markup=False)
+            yield Static("", id="details", classes="details", markup=False)
         yield Static(
             "Ctrl+R Run   Ctrl+C Cancel   Esc Back   Tab Next field",
             id="help",
@@ -610,6 +658,7 @@ class RunScreen(Screen[None]):
         self.query_one("#cancel", Button).disabled = False
         self.query_one("#run", Button).disabled = True
         self._set_status("Running…", state="running")
+        self._set_details("")
         self._execute(request)
 
     def _request(self, *, dry_run: bool, force: bool) -> runner.RunRequest:
@@ -765,6 +814,14 @@ class RunScreen(Screen[None]):
             return
         written = ", ".join(str(path) for path in result.outputs) or "nothing"
         self._set_status(f"Wrote {written}  ·  {result.engine_used.value} engine", state="success")
+        # `outputs` is a written file, if any; `details` is everything else a
+        # tool reported. A read-only tool like `get-info` writes nothing and
+        # carries its entire answer in `details` — rendering it here, always
+        # and generically, is issue #28's fix: no branch names `get-info`, so
+        # any current or future tool that answers through `details` is shown
+        # the same way, and a tool with nothing beyond a written path gets no
+        # panel at all, since `format_details` returns "" for empty details.
+        self._set_details(format_details(result.details))
 
     def _ask_consent(self, exc: DocMaxError) -> bool:
         from docmax.core.errors import ConsentRequiredError
@@ -786,6 +843,7 @@ class RunScreen(Screen[None]):
             # anticipated, and an unanticipated one becomes a bug report.
             exc = InternalError(str(exc) or exc.__class__.__name__)
         self._set_status(exc.message, state="error")
+        self._set_details("")
         self.app.push_screen(ErrorScreen(exc))
 
     def _set_status(self, text: str, *, state: str = "idle") -> None:
@@ -802,6 +860,9 @@ class RunScreen(Screen[None]):
         widget.set_classes(f"status-{state}")
         icon = _STATUS_ICONS.get(state, "")
         widget.update(f"{icon}  {text}" if icon and text else text)
+
+    def _set_details(self, text: str) -> None:
+        self.query_one("#details", Static).update(text)
 
 
 class ConsentScreen(ModalScreen[bool]):
@@ -967,6 +1028,7 @@ class DocMaxApp(App[None]):
     .component { width: 1fr; margin-right: 1; height: auto; }
     .component-label { color: $text-muted; text-style: bold; }
     #progress { padding: 1 0; }
+    #details { color: $text-muted; padding: 1 0 0 0; height: auto; }
 
     /* Status line: idle / running / succeeded / failed read as distinct
        states — colour and weight driven by ``RunScreen._set_status``'s
