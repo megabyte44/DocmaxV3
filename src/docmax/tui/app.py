@@ -1118,6 +1118,7 @@ class RunScreen(Screen[None]):
         self._stop_spinner()
         self.query_one("#cancel", Button).disabled = True
         self.query_one("#run", Button).disabled = False
+        self._flush_repaint()
 
     # -- the "alive" indicator -----------------------------------------------
     #
@@ -1159,6 +1160,7 @@ class RunScreen(Screen[None]):
                 f"writing {result.details.get('destination', '—')}.",
                 state="success",
             )
+            self._flush_repaint()
             return
         written = ", ".join(str(path) for path in result.outputs) or "nothing"
         self._set_status(f"Wrote {written}  ·  {result.engine_used.value} engine", state="success")
@@ -1170,6 +1172,7 @@ class RunScreen(Screen[None]):
         # the same way, and a tool with nothing beyond a written path gets no
         # panel at all, since `format_details` returns "" for empty details.
         self._set_details(format_details(result.details))
+        self._flush_repaint()
 
     def _ask_consent(self, exc: DocMaxError) -> bool:
         from docmax.core.errors import ConsentRequiredError
@@ -1183,6 +1186,7 @@ class RunScreen(Screen[None]):
 
         if isinstance(exc, CancelledError):
             self._set_status(f"{exc.message} Nothing was written.", state="error")
+            self._flush_repaint()
             return
         if not isinstance(exc, DocMaxError):
             # The router wraps anything escaping a tool, so reaching here means
@@ -1193,6 +1197,7 @@ class RunScreen(Screen[None]):
         self._set_status(exc.message, state="error")
         self._set_details("")
         self.app.push_screen(ErrorScreen(exc))
+        self._flush_repaint()
 
     def _set_status(self, text: str, *, state: str = "idle") -> None:
         """Set the status line's text and its state-driven visual treatment.
@@ -1235,6 +1240,36 @@ class RunScreen(Screen[None]):
 
     def _set_details(self, text: str) -> None:
         self.query_one("#details", Static).update(text)
+
+    def _flush_repaint(self) -> None:
+        """Force the screen to paint right now, instead of on its own time.
+
+        ``Widget.update()``/``refresh()`` only *mark* a widget dirty --
+        Textual's own docstring says the repaint "will be done on the next
+        idle event," which in practice means ``Screen._on_idle`` defers to
+        ``Screen._update_timer``: a timer paused between frames, resumed on
+        idle, that fires on its own schedule. That is invisible while
+        something keeps nudging the screen soon after -- a determinate
+        step's own repeated ``on_advance`` calls do that for free. A
+        synchronous cloud run (ADR 0016) is the opposite case: it reports
+        exactly one indeterminate step and then finishes, so `_finished`,
+        `_succeeded` and `_show` are the *last* things this screen is ever
+        told. Whatever they change is the only thing left queued, with
+        nothing left to drag it onto the screen -- so it sits there until
+        some unrelated later event (Cancel, a keypress, a resize) happens to
+        pump the message loop and pull the paint along with it. That is
+        GitHub issue #36: "Running..." outliving the run itself, on a run
+        screen that never again does anything to shake the dust off.
+
+        ``Screen._on_timer_update`` is what that timer calls when it does
+        fire, and ``RunScreen`` already *is* a ``Screen`` -- calling it here
+        collapses "eventually" into "now" without reimplementing the
+        compositor logic it already owns. This is not a novel trick:
+        Textual's own test harness (``Pilot.pause``) calls the identical
+        method for the identical reason, to make a pending repaint
+        deterministic rather than timing-dependent.
+        """
+        self._on_timer_update()
 
 
 class ConsentScreen(ModalScreen[bool]):
