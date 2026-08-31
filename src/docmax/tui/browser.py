@@ -71,7 +71,7 @@ latter.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -130,6 +130,41 @@ def default_start() -> Path:
         return Path.home()
     except RuntimeError:
         return Path.cwd()
+
+
+def remembered_start() -> Path | None:
+    """The folder a file was last chosen from or saved to, if there is one.
+
+    Backs the fallback ``pick_files`` and ``pick_save_path`` use when a caller
+    passes no ``start`` of its own (issue #29) — one folder, shared by both,
+    scoped to the app rather than any one tool; see ``core/ui_state.py`` for
+    why. ``None`` on a fresh install, a cleared state file, or a remembered
+    directory that no longer exists, in which case the caller falls further
+    back to :func:`default_start`.
+    """
+    from docmax.core.config import ui_state_file
+    from docmax.core.ui_state import load_last_directory
+
+    return load_last_directory(ui_state_file())
+
+
+def remember_directory(directory: Path) -> None:
+    """Record ``directory`` as the folder to open dialogs in next time.
+
+    Called only after a dialog returns a real choice — see ``tui/app.py``'s
+    ``_browse`` and ``_browse_output`` — never from inside this module's own
+    dialog wrappers, so a cancelled dialog leaves the remembered folder
+    untouched. Best-effort: remembering the folder is a convenience, not the
+    reason the user opened the dialog, so a failure to persist it (a full
+    disk, an unwritable config directory) is swallowed here rather than
+    turning a successful file choice into a reported error.
+    """
+    from docmax.core.config import ui_state_file
+    from docmax.core.errors import DocMaxError
+    from docmax.core.ui_state import save_last_directory
+
+    with suppress(DocMaxError):
+        save_last_directory(ui_state_file(), directory)
 
 
 @contextmanager
@@ -223,8 +258,14 @@ def pick_files(*, multiple: bool, start: Path | None = None) -> list[Path] | Non
 
     Never opens, reads or writes the chosen file itself: it only asks the
     dialog for paths and hands them back as :class:`~pathlib.Path` objects.
+
+    With no ``start``, opens where a file was last chosen from or saved to —
+    see :func:`remembered_start` — falling back to :func:`default_start` the
+    first time there is nothing remembered.
     """
-    root_dir = start if start is not None and start.is_dir() else default_start()
+    root_dir = (
+        start if start is not None and start.is_dir() else remembered_start() or default_start()
+    )
     chosen = _native_dialog(multiple=multiple, start=root_dir)
 
     if not chosen:
@@ -245,10 +286,24 @@ def pick_save_path(*, start: Path | None = None) -> Path | None:
     dialog exactly where the worked example in the feature request expects
     it — the folder the inputs already live in), but the choice of directory
     is never itself a destination: the user still names the file.
+
+    With no ``start`` and no first input to anchor to, opens where a file was
+    last chosen from or saved to — see :func:`remembered_start` — falling
+    back to :func:`default_start` the first time there is nothing remembered.
     """
-    root_dir = start if start is not None and start.is_dir() else default_start()
+    root_dir = (
+        start if start is not None and start.is_dir() else remembered_start() or default_start()
+    )
     chosen = _native_save_dialog(start=root_dir)
     return Path(chosen) if chosen else None
 
 
-__all__ = ["default_start", "merge_paths", "pick_files", "pick_save_path", "render_paths"]
+__all__ = [
+    "default_start",
+    "merge_paths",
+    "pick_files",
+    "pick_save_path",
+    "remember_directory",
+    "remembered_start",
+    "render_paths",
+]

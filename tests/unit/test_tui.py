@@ -1430,9 +1430,12 @@ def test_pick_files_wraps_a_multi_result_in_order(
 
 
 def test_pick_files_defaults_to_the_users_home_directory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No `start=` override reaches the dialog as the platform's home."""
+    """No `start=` override and nothing remembered reaches the dialog as the
+    platform's home — the fallback issue #29 must preserve on a fresh
+    install or a cleared state file."""
     import docmax.tui.browser as browser_module
 
+    monkeypatch.setattr(browser_module, "remembered_start", lambda: None)
     seen: list[Path] = []
 
     def fake(*, multiple: bool, start: Path) -> str:
@@ -1443,6 +1446,51 @@ def test_pick_files_defaults_to_the_users_home_directory(monkeypatch: pytest.Mon
     browser_module.pick_files(multiple=False)
 
     assert seen == [Path.home()]
+
+
+def test_pick_files_opens_at_the_remembered_directory_when_no_start_is_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Issue #29: with no explicit `start=`, the dialog opens where a file was
+    last chosen from or saved to, rather than always at home."""
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "remembered_start", lambda: tmp_path)
+    seen: list[Path] = []
+
+    def fake(*, multiple: bool, start: Path) -> str:
+        seen.append(start)
+        return ""
+
+    monkeypatch.setattr(browser_module, "_native_dialog", fake)
+    browser_module.pick_files(multiple=False)
+
+    assert seen == [tmp_path]
+
+
+def test_an_explicit_start_beats_the_remembered_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A caller-supplied `start=` still wins over whatever was last
+    remembered — `RunScreen` relies on this to anchor the save dialog to the
+    first input's own folder ahead of anything remembered globally."""
+    import docmax.tui.browser as browser_module
+
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+    remembered = tmp_path / "remembered"
+    remembered.mkdir()
+    monkeypatch.setattr(browser_module, "remembered_start", lambda: remembered)
+    seen: list[Path] = []
+
+    def fake(*, multiple: bool, start: Path) -> str:
+        seen.append(start)
+        return ""
+
+    monkeypatch.setattr(browser_module, "_native_dialog", fake)
+    browser_module.pick_files(multiple=False, start=explicit)
+
+    assert seen == [explicit]
 
 
 def test_native_dialog_raises_a_typed_error_when_there_is_no_display(
@@ -1463,6 +1511,71 @@ def test_native_dialog_raises_a_typed_error_when_there_is_no_display(
 
     with pytest.raises(LocalDependencyMissingError):
         _native_dialog(multiple=False, start=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# remembered_start / remember_directory — the app-local "last folder" state
+# behind issue #29, at the seam `pick_files`/`pick_save_path` actually use.
+# `tests/unit/test_ui_state.py` covers the on-disk record itself in detail;
+# these confirm `tui/browser.py` reaches it correctly, isolated from whatever
+# real state happens to exist on the machine running the suite.
+# ---------------------------------------------------------------------------
+
+
+def _isolate_ui_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Point `core.config.ui_state_file()` at an isolated location.
+
+    Without this, `remember_directory`/`remembered_start` would read and
+    write the real developer machine's config directory during a test run —
+    the same reasoning `test_config.py::test_locating_the_config_creates_nothing`
+    applies to `config_dir()` itself, by patching `platformdirs` rather than
+    an environment variable so it holds on Windows and macOS too.
+    """
+    monkeypatch.setattr(
+        "docmax.core.config.platformdirs.user_config_dir", lambda *a, **k: str(tmp_path / "config")
+    )
+
+
+def test_remembered_start_is_none_with_nothing_remembered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _isolate_ui_state(monkeypatch, tmp_path)
+    from docmax.tui.browser import remembered_start
+
+    assert remembered_start() is None
+
+
+def test_remember_directory_round_trips_through_remembered_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _isolate_ui_state(monkeypatch, tmp_path)
+    from docmax.tui.browser import remember_directory, remembered_start
+
+    folder = tmp_path / "documents"
+    folder.mkdir()
+
+    remember_directory(folder)
+
+    assert remembered_start() == folder
+
+
+def test_remember_directory_is_best_effort_and_never_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Remembering the folder is a convenience picked up automatically, not
+    the reason the user opened the dialog — a failure to persist it (a full
+    disk, an unwritable config directory) must not turn a successful file
+    choice into a reported error."""
+    import docmax.core.ui_state as ui_state_module
+    from docmax.core.errors import OutputNotWritableError
+    from docmax.tui.browser import remember_directory
+
+    def boom(path: Path, directory: Path) -> None:
+        raise OutputNotWritableError(f"Could not write to {path}", context={"path": str(path)})
+
+    monkeypatch.setattr(ui_state_module, "save_last_directory", boom)
+
+    remember_directory(tmp_path)  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -1633,6 +1746,38 @@ def test_selecting_several_files_populates_the_multi_input_field(
             return screen.query_one("#field-__inputs__", Input).value
 
     assert asyncio.run(scenario()) == f"{first}, {second}"
+
+
+def test_choosing_a_file_remembers_its_folder_for_the_next_browse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #29: a file chosen from one folder is offered as the *next*
+    dialog's starting point, with no `start=` passed by the caller — proven
+    end to end through `RunScreen._browse`, not just at `pick_files` itself."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    _isolate_ui_state(monkeypatch, tmp_path)
+    folder = tmp_path / "documents"
+    folder.mkdir()
+    chosen = _touch(folder / "a.pdf")
+    calls = _mock_dialog(monkeypatch, str(chosen))
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse(pilot)  # nothing remembered yet
+            await _click_browse(pilot)  # should now open in `folder`
+
+    asyncio.run(scenario())
+
+    assert calls[0]["start"] == Path.home(), "nothing was remembered before the first pick"
+    assert calls[1]["start"] == folder, "the folder just chosen from is offered next"
 
 
 def test_cancelling_the_dialog_leaves_the_form_unchanged(
@@ -1961,6 +2106,38 @@ def test_selecting_an_output_path_populates_the_output_field(
     assert asyncio.run(scenario()) == str(chosen)
 
 
+def test_a_browsed_output_folder_is_remembered_for_the_next_save_dialog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #29, the save-dialog half: a folder saved to once is offered as
+    the *next* save dialog's starting point — proven end to end through
+    `RunScreen._browse_output`. The inputs field stays empty throughout, so
+    `first_input_directory` cannot be what is supplying the folder."""
+    import asyncio
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    _isolate_ui_state(monkeypatch, tmp_path)
+    folder = tmp_path / "results"
+    folder.mkdir()
+    calls = _mock_save_dialog(monkeypatch, str(folder / "out.pdf"))
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("crop")
+            app.push_screen(screen)
+            await pilot.pause()
+            await _click_browse_output(pilot)  # nothing remembered yet
+            await _click_browse_output(pilot)  # should now open in `folder`
+
+    asyncio.run(scenario())
+
+    assert calls[0] == Path.home(), "nothing was remembered before the first pick"
+    assert calls[1] == folder, "the folder just saved to is offered next"
+
+
 def test_the_save_dialog_opens_in_the_first_inputs_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2070,8 +2247,12 @@ def test_pick_save_path_wraps_the_chosen_path(
 def test_pick_save_path_defaults_to_the_users_home_directory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """No `start=` override and nothing remembered reaches the dialog as the
+    platform's home — the fallback issue #29 must preserve on a fresh
+    install or a cleared state file."""
     import docmax.tui.browser as browser_module
 
+    monkeypatch.setattr(browser_module, "remembered_start", lambda: None)
     seen: list[Path] = []
 
     def fake(*, start: Path) -> str:
@@ -2082,6 +2263,26 @@ def test_pick_save_path_defaults_to_the_users_home_directory(
     browser_module.pick_save_path()
 
     assert seen == [Path.home()]
+
+
+def test_pick_save_path_opens_at_the_remembered_directory_when_no_start_is_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Issue #29: with no explicit `start=`, the save dialog opens where a
+    file was last chosen from or saved to, rather than always at home."""
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "remembered_start", lambda: tmp_path)
+    seen: list[Path] = []
+
+    def fake(*, start: Path) -> str:
+        seen.append(start)
+        return ""
+
+    monkeypatch.setattr(browser_module, "_native_save_dialog", fake)
+    browser_module.pick_save_path()
+
+    assert seen == [tmp_path]
 
 
 def test_first_input_directory_is_none_for_an_empty_field() -> None:

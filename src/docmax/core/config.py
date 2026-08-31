@@ -51,6 +51,13 @@ CONFIG_FILENAME: Final = "config.toml"
 #: The file DocMax maintains. Separate owner, separate format. See ADR 0008.
 CONSENT_FILENAME: Final = "consent.json"
 
+#: The file DocMax maintains for small pieces of app-local interface state —
+#: currently just the file browser's last-used folder (issue #29). Neither
+#: user-edited like ``config.toml`` nor privacy-relevant like ``consent.json``:
+#: losing it costs nothing worse than one extra trip back to the home
+#: directory, so it gets its own file rather than a new key on either of those.
+UI_STATE_FILENAME: Final = "ui_state.json"
+
 #: ``DOCMAX_OFFLINE``, ``DOCMAX_CLOUD_ENDPOINT``, ``DOCMAX_API_KEY``.
 ENV_OFFLINE: Final = f"{ENV_PREFIX}OFFLINE"
 ENV_ENDPOINT: Final = f"{ENV_PREFIX}CLOUD_ENDPOINT"
@@ -83,6 +90,10 @@ def config_file() -> Path:
 
 def consent_file() -> Path:
     return config_dir() / CONSENT_FILENAME
+
+
+def ui_state_file() -> Path:
+    return config_dir() / UI_STATE_FILENAME
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,9 +367,11 @@ def load(
 __all__ = [
     "CONFIG_FILENAME",
     "CONSENT_FILENAME",
+    "UI_STATE_FILENAME",
     "Config",
     "config_dir",
     "config_file",
     "consent_file",
     "load",
+    "ui_state_file",
 ]
