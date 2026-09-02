@@ -594,7 +594,7 @@ def test_the_app_starts_and_lists_tools() -> None:
             await pilot.pause()
             assert type(app.screen).__name__ == "ToolListScreen"
             buttons = app.screen.query(".tool-button")
-            assert len(buttons) == len(catalog.offered_tools()) == 19
+            assert len(buttons) == len(catalog.offered_tools()) == 21
             ids = {button.id for button in buttons}
             assert "tool-crop" in ids
             # `ocr` was the one name `UNIMPLEMENTED` ever held, and M8 shipped

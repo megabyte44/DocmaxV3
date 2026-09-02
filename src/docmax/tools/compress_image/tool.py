@@ -18,10 +18,6 @@ SPEC = register(
         module=__name__.rpartition(".")[0],
         supported_engines=frozenset({Engine.LOCAL}),
         accepts_multiple_inputs=False,
-        # Format preservation requires an explicit destination: a fixed suffix
-        # would silently mislabel outputs that are not JPEG. `output_required`
-        # forces ``-o`` always. See ADR 0033.
-        output_required=True,
         default_suffix=".jpg",
         params=(
             Param(
