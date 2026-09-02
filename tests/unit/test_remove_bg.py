@@ -137,6 +137,7 @@ def test_missing_dependencies_duck_type(monkeypatch: pytest.MonkeyPatch) -> None
 # ---------------------------------------------------------------------------
 
 
+@needs_rembg
 def test_destination_must_be_png(router: EngineRouter, small_jpeg: Path, tmp_path: Path) -> None:
     """The output must always be PNG (for alpha channel transparency)."""
     out = tmp_path / "out.jpg"
@@ -148,6 +149,7 @@ def test_destination_must_be_png(router: EngineRouter, small_jpeg: Path, tmp_pat
     assert ".png" in (caught.value.remedy or "").lower()
 
 
+@needs_rembg
 def test_docs_empty_rejected(router: EngineRouter, tmp_path: Path) -> None:
     """An empty document list is rejected."""
     from docmax.core.models import OutputTarget
