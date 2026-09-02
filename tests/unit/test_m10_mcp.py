@@ -23,9 +23,6 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
-
-pytest.importorskip("mcp")
-
 from mcp import ClientSession, types
 from mcp.shared.memory import create_client_server_memory_streams
 
