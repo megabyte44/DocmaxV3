@@ -1441,41 +1441,17 @@ def test_cancelling_a_run_cancels_the_token() -> None:
 # ---------------------------------------------------------------------------
 # The "is it alive" indicator (issue #38)
 #
-# `ProgressBar(total=None)` on the run screen used to render nothing at all:
-# `#progress { padding: 1 0 }` padded the *inside* of a widget whose own
-# `DEFAULT_CSS` fixes `height: 1`, leaving zero rows for its content — so it
-# occupied space in the layout but painted no bar, determinate or not. Fixed
-# by using `margin` (outside the box) instead of `padding` (inside it).
-#
-# Separately, even a correctly-rendering indeterminate bar has no percentage
-# and nothing a user can point to as motion between two glances at a static
-# terminal. `_progress_start`'s own `total=None` — the sink's existing
-# spelling of "indeterminate" — now drives a spinner glyph and a running
-# elapsed-time count next to the status text, replacing the static "running"
-# icon issue #26 added, with no tool name involved in the decision.
+# An indeterminate bar has no percentage and nothing a user can point to as
+# motion between two glances at a static terminal — and a determinate one
+# still says nothing about a step it hasn't started moving toward yet.
+# `_progress_start`'s own `total=None` — the sink's existing spelling of
+# "indeterminate" — drives a spinner glyph and a running elapsed-time count
+# next to the status text instead, replacing the static "running" icon issue
+# #26 added, with no tool name involved in the decision. The bar widget
+# itself was later removed outright (it never showed real percentages for
+# most tools, and the spinner already said "alive"); this section is about
+# what took its place, not the bar.
 # ---------------------------------------------------------------------------
-
-
-def test_the_progress_bar_renders_with_nonzero_height() -> None:
-    """Regression for the CSS bug: `#progress` must leave room for its own
-    content, not squeeze it to zero rows with inward padding."""
-    import asyncio
-
-    from textual.widgets import ProgressBar
-
-    from docmax.tui.app import DocMaxApp, RunScreen
-
-    async def scenario() -> int:
-        app = DocMaxApp()
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = RunScreen("crop")
-            app.push_screen(screen)
-            await pilot.pause()
-            bar = screen.query_one("#progress", ProgressBar)
-            return bar.content_size.height
-
-    assert asyncio.run(scenario()) > 0
 
 
 def test_an_indeterminate_step_shows_a_spinner_and_elapsed_time() -> None:
@@ -4273,3 +4249,380 @@ def test_escape_from_the_dependency_dialog_also_returns(
             return isinstance(app.screen, RunScreen)
 
     assert asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# The result card: "Open" and "Re-run" after a successful run.
+#
+# Generic over `ToolResult.outputs`, the same value `_succeeded` already reads
+# for the status line and `format_details` already reads for the details
+# panel — no branch here names a tool. "Open" opens the single written file,
+# or the folder holding them when there is more than one (`split`'s many
+# pages); it is hidden whenever there is nothing written at all (a dry run,
+# or a report-only tool per ADR 0036). "Re-run" repeats whatever request just
+# ran, using the router a test supplies rather than a real one.
+# ---------------------------------------------------------------------------
+
+
+def test_the_result_card_is_hidden_before_the_first_run() -> None:
+    import asyncio
+
+    from textual.containers import Horizontal
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    async def scenario() -> bool:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+            return screen.query_one("#result-actions", Horizontal).display
+
+    assert asyncio.run(scenario()) is False
+
+
+def test_a_successful_run_reveals_open_file_and_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from textual.containers import Horizontal
+    from textual.widgets import Button, Input
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    written = tmp_path / "out.pdf"
+    result = ToolResult(outputs=(written,), engine_used=Engine.LOCAL)
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    a = _touch(tmp_path / "a.pdf")
+    b = _touch(tmp_path / "b.pdf")
+
+    async def scenario() -> tuple[bool, bool, str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            screen.query_one("#field-__output__", Input).value = str(written)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            card_visible = screen.query_one("#result-actions", Horizontal).display
+            open_button = screen.query_one("#open-output", Button)
+            return card_visible, bool(open_button.display), str(open_button.label)
+
+    card_visible, open_visible, label = asyncio.run(scenario())
+    assert card_visible is True
+    assert open_visible is True
+    assert label == "Open file"
+
+
+def test_a_run_with_multiple_outputs_offers_to_open_the_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`split` and `to-images` can write more than one file at once — opening
+    several files as one action doesn't mean anything, so the button opens
+    what they share: the folder."""
+    import asyncio
+
+    from textual.widgets import Button, Input
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    outputs = (tmp_path / "page-1.pdf", tmp_path / "page-2.pdf")
+    result = ToolResult(outputs=outputs, engine_used=Engine.LOCAL)
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("split")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "page.pdf")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            return str(screen.query_one("#open-output", Button).label)
+
+    assert asyncio.run(scenario()) == "Open folder"
+
+
+def test_a_dry_run_shows_rerun_but_not_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing was written, so there is nothing to open -- but the card still
+    appears, so switching to a real run is one click away."""
+    import asyncio
+
+    from textual.widgets import Button, Input
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    result = ToolResult(
+        outputs=(),
+        engine_used=Engine.LOCAL,
+        details={"dry_run": True, "reason": "offline", "destination": str(tmp_path / "out.pdf")},
+    )
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    a = _touch(tmp_path / "a.pdf")
+    b = _touch(tmp_path / "b.pdf")
+
+    async def scenario() -> tuple[bool, bool]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.pdf")
+            await pilot.pause()
+
+            await pilot.click("#dry-run")
+            await pilot.pause(0.5)
+
+            open_visible = bool(screen.query_one("#open-output", Button).display)
+            rerun_visible = bool(screen.query_one("#rerun", Button).display)
+            return open_visible, rerun_visible
+
+    open_visible, rerun_visible = asyncio.run(scenario())
+    assert open_visible is False
+    assert rerun_visible is True
+
+
+def test_a_report_only_tool_shows_rerun_but_not_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`get-info` declares `produces_output=False` (ADR 0036) and its result
+    always has an empty `outputs` -- the same case a dry run hits, reached a
+    different way."""
+    import asyncio
+
+    from textual.widgets import Button, Input
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    result = ToolResult(outputs=(), engine_used=Engine.LOCAL, details={"pages": 3})
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> tuple[bool, bool]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("get-info")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            open_visible = bool(screen.query_one("#open-output", Button).display)
+            rerun_visible = bool(screen.query_one("#rerun", Button).display)
+            return open_visible, rerun_visible
+
+    open_visible, rerun_visible = asyncio.run(scenario())
+    assert open_visible is False
+    assert rerun_visible is True
+
+
+def test_starting_a_new_run_hides_the_result_card_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The card must never point at a stale result once another run is under
+    way -- `_start` hides it before the new run even reaches the router."""
+    import asyncio
+
+    from textual.containers import Horizontal
+    from textual.widgets import Input
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    written = tmp_path / "out.pdf"
+    result = ToolResult(outputs=(written,), engine_used=Engine.LOCAL)
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    a = _touch(tmp_path / "a.pdf")
+    b = _touch(tmp_path / "b.pdf")
+
+    async def scenario() -> bool:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            screen.query_one("#field-__output__", Input).value = str(written)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+            assert screen.query_one("#result-actions", Horizontal).display is True
+
+            screen._start(dry_run=False, force=False)
+            return screen.query_one("#result-actions", Horizontal).display
+
+    assert asyncio.run(scenario()) is False
+
+
+def test_open_file_opens_the_single_written_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui import app as app_module
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    written = tmp_path / "out.pdf"
+    result = ToolResult(outputs=(written,), engine_used=Engine.LOCAL)
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    opened: list[Path] = []
+    monkeypatch.setattr(app_module, "_open_path", opened.append)
+
+    a = _touch(tmp_path / "a.pdf")
+    b = _touch(tmp_path / "b.pdf")
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        # Taller than the default fixture size: the result card sits below
+        # the progress bar, status, and details panel, off the (120, 40)
+        # viewport other tests here use.
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            screen.query_one("#field-__output__", Input).value = str(written)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            await pilot.click("#open-output")
+            await pilot.pause()
+
+    asyncio.run(scenario())
+    assert opened == [written]
+
+
+def test_open_folder_opens_the_shared_parent_of_multiple_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui import app as app_module
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    outputs = (tmp_path / "page-1.pdf", tmp_path / "page-2.pdf")
+    result = ToolResult(outputs=outputs, engine_used=Engine.LOCAL)
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    opened: list[Path] = []
+    monkeypatch.setattr(app_module, "_open_path", opened.append)
+
+    source = _touch(tmp_path / "in.pdf")
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("split")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "page.pdf")
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            await pilot.click("#open-output")
+            await pilot.pause()
+
+    asyncio.run(scenario())
+    assert opened == [tmp_path]
+
+
+def test_rerun_repeats_the_same_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui import runner as runner_module
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    written = tmp_path / "out.pdf"
+    result = ToolResult(outputs=(written,), engine_used=Engine.LOCAL)
+    router = FakeRouter(result=result)
+    monkeypatch.setattr(runner_module, "build_router", lambda: router)
+
+    a = _touch(tmp_path / "a.pdf")
+    b = _touch(tmp_path / "b.pdf")
+
+    async def scenario() -> int:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("merge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = f"{a}, {b}"
+            screen.query_one("#field-__output__", Input).value = str(written)
+            await pilot.pause()
+
+            await pilot.click("#run")
+            await pilot.pause(0.5)
+
+            await pilot.click("#rerun")
+            await pilot.pause(0.5)
+
+            return len(router.calls)
+
+    assert asyncio.run(scenario()) == 2
