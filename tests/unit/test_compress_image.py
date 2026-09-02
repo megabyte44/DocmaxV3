@@ -113,7 +113,7 @@ def test_unavailable_when_pillow_missing(monkeypatch: pytest.MonkeyPatch) -> Non
     from docmax.tools.compress_image import local
 
     # Mock find_spec to return None for PIL
-    def mock_find_spec(name: str) -> None:
+    def mock_find_spec(name: str):  # type: ignore[no-untyped-def]
         if name == "PIL":
             return None
         return importlib.util.find_spec(name)
@@ -152,7 +152,7 @@ def test_destination_format_must_match_input(tmp_path: Path) -> None:
     assert "jpeg" in str(error).lower()
     assert "png" in str(error).lower()
     # Should suggest using convert
-    assert "convert" in error.remedy.lower()
+    assert "convert" in (error.remedy or "").lower()
 
 
 # ---------------------------------------------------------------------------

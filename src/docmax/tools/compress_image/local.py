@@ -131,7 +131,7 @@ class CompressImageLocal:
                         background.paste(
                             image, mask=image.split()[-1] if len(image.split()) > 3 else None
                         )
-                    image = background
+                    image = background  # type: ignore[assignment]
                 image.save(handle, format="JPEG", quality=quality, optimize=True, progressive=True)
             elif input_format.name == "png":
                 # PNG is lossless; ignore quality param
