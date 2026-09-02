@@ -786,13 +786,13 @@ def test_the_catalog_scrolls_when_the_window_is_too_small() -> None:
         async with app.run_test(size=(60, 15)) as pilot:
             await pilot.pause()
             buttons = app.screen.query(".tool-button")
-            assert len(buttons) == 19, "every tool stays reachable, just off-screen"
+            assert len(buttons) == 21, "every tool stays reachable, just off-screen"
             container = app.screen.query_one("#tools", VerticalScroll)
             return container.max_scroll_y, len(buttons)
 
     max_scroll_y, button_count = asyncio.run(scenario())
     assert max_scroll_y > 0
-    assert button_count == 19
+    assert button_count == 21
 
 
 def test_every_offered_tool_opens_a_form() -> None:
