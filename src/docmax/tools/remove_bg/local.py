@@ -17,6 +17,7 @@ import importlib.util
 import time
 from typing import TYPE_CHECKING, Any
 
+from docmax.core.branding import DIST_NAME
 from docmax.core.errors import ExternalToolFailedError, InvalidParameterError
 from docmax.core.models import Engine, ToolResult
 
@@ -49,7 +50,7 @@ def unavailable_reason() -> str | None:
     """Why not, including how to fix it."""
     if is_available():
         return None
-    return 'rembg is not installed. Install it with: pip install "DocmaxV3[remove-bg]"'
+    return f'rembg is not installed. Install it with: pip install "{DIST_NAME}[remove-bg]"'
 
 
 class RemoveBgLocal:
