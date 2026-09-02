@@ -59,7 +59,6 @@ from textual.widgets import (
     DataTable,
     Input,
     Label,
-    ProgressBar,
     Select,
     Static,
 )
@@ -204,6 +203,43 @@ def _open_url(url: str) -> None:
 
     with suppress(Exception):
         webbrowser.open(url)
+
+
+def _open_path(path: Path) -> None:
+    """Open ``path`` in the OS's registered default application. Never raises
+    into the UI.
+
+    Not ``_open_url``/``webbrowser``: a produced result is as likely to be a
+    ``.docx`` or a ``.png`` as anything a browser renders, and the point is
+    to reach whatever application the OS already associates with that file
+    type, not a browser tab. ``os.startfile`` / ``open`` / ``xdg-open`` are
+    each already how that platform's own file manager does the same thing,
+    at no dependency cost — the same reasoning ADR 0005 gave for
+    ``webbrowser`` itself, applied to the platform's file opener instead of
+    its browser.
+    """
+    import shutil
+    import subprocess
+    import sys
+    from contextlib import suppress
+
+    with suppress(Exception):
+        if sys.platform == "win32":
+            import os
+
+            # S606: this is Windows' own ShellExecute-based file-association
+            # opener -- the OS mechanism this function exists to reach, not a
+            # shell command line built from a string.
+            os.startfile(str(path))  # noqa: S606
+        else:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            resolved = shutil.which(opener)
+            if resolved is None:
+                return
+            # S603/S607: `resolved` is an absolute path from `shutil.which`,
+            # not a partial one, and argv is never a shell string -- the same
+            # shape `_binaries.py` already runs subprocess calls in.
+            subprocess.Popen([resolved, str(path)])  # noqa: S603
 
 
 class Brand(Horizontal):
@@ -676,6 +712,11 @@ class RunScreen(Screen[None]):
         self._run_started_at: float | None = None
         self._spinner_index = 0
         self._spinner_timer: Timer | None = None
+        #: The paths a successful run just wrote, kept only so the result
+        #: card's "Open" button (below) knows what to open — never read for
+        #: anything the run itself needed, so a run that produced nothing
+        #: (a dry run, a report-only tool) simply leaves this empty.
+        self._last_outputs: tuple[Path, ...] = ()
 
     @property
     def spec(self) -> ToolSpec:
@@ -752,15 +793,28 @@ class RunScreen(Screen[None]):
                     yield Button("Overwrite output", id="force")
                 yield Button("Cancel run", variant="warning", id="cancel", disabled=True)
 
-            yield ProgressBar(id="progress", show_eta=False)
             yield Static("", id="status", classes="status-idle", markup=False)
             yield Static("", id="details", classes="details", markup=False)
+            # The result card: appears only once a run has actually succeeded
+            # (`_show_result_actions`, below), and hidden again the moment
+            # another run starts (`_start`) so it can never point at a stale
+            # or half-overwritten output. "Open" is itself hidden whenever
+            # there is nothing to open — a dry run or a report-only tool
+            # (`ToolSpec.produces_output=False`, ADR 0036) — which is the
+            # same `bool(outputs)` check `_succeeded` already makes for the
+            # status line.
+            with Horizontal(id="result-actions", classes="result-actions"):
+                yield Button("Open file", id="open-output")
+                yield Button("Re-run", id="rerun")
         yield Static(
             "Ctrl+R Run   Ctrl+C Cancel   Esc Back   Tab Next field",
             id="help",
             classes="help-bar",
             markup=False,
         )
+
+    def on_mount(self) -> None:
+        self.query_one("#result-actions", Horizontal).display = False
 
     # -- actions ------------------------------------------------------------
 
@@ -802,6 +856,25 @@ class RunScreen(Screen[None]):
     @on(Button.Pressed, "#cancel")
     def _on_cancel(self) -> None:
         self.action_cancel()
+
+    @on(Button.Pressed, "#open-output")
+    def _on_open_output(self) -> None:
+        """Open the file a successful run just wrote — or, when it wrote more
+        than one (``split``'s many pages, ``to-images``'s many frames), the
+        folder holding them, since opening several files at once is not one
+        action. Generic over `_last_outputs`, so no branch here names a
+        tool.
+        """
+        if not self._last_outputs:
+            return
+        target = self._last_outputs[0]
+        _open_path(target if len(self._last_outputs) == 1 else target.parent)
+
+    @on(Button.Pressed, "#rerun")
+    def _on_rerun(self) -> None:
+        """Same request, run again — the form still holds every value the
+        first run used, so this is exactly what pressing "Run" does."""
+        self._start(dry_run=False, force=self._force)
 
     @on(Button.Pressed, "#browse-inputs")
     def _on_browse_inputs(self) -> None:
@@ -991,6 +1064,7 @@ class RunScreen(Screen[None]):
         self.query_one("#run", Button).disabled = True
         self._set_status("Running…", state="running")
         self._set_details("")
+        self.query_one("#result-actions", Horizontal).display = False
         self._execute(request)
 
     def _request(self, *, dry_run: bool, force: bool) -> runner.RunRequest:
@@ -1093,12 +1167,14 @@ class RunScreen(Screen[None]):
         """
         from docmax.core.errors import ConsentRequiredError, DocMaxError
 
+        # No `on_advance`/`on_finish`: with the progress bar gone, nothing
+        # visual consumes a per-step advance any more — the spinner and
+        # elapsed-time indicator `_progress_start` drives are read off the
+        # wall clock (`_tick_spinner`), not off step counts.
         progress = runner.CallbackProgress(
             on_start=lambda description, total: self.app.call_from_thread(
                 self._progress_start, description, total
             ),
-            on_advance=lambda amount: self.app.call_from_thread(self._progress_advance, amount),
-            on_finish=lambda: self.app.call_from_thread(self._progress_finish),
         )
 
         router = runner.build_router()
@@ -1133,20 +1209,12 @@ class RunScreen(Screen[None]):
     # -- callbacks, all on the UI thread ------------------------------------
 
     def _progress_start(self, description: str, total: int | None) -> None:
-        bar = self.query_one("#progress", ProgressBar)
-        bar.update(total=total, progress=0)
         # `total=None` is the sink's own spelling of "indeterminate" — see
         # `ProgressSink.start`. Read here rather than re-decided, so the
-        # spinner+elapsed indicator and the bar it sits beside can never
-        # disagree about which state a step is in.
+        # spinner+elapsed indicator this drives always agrees with which
+        # state a step is actually in.
         self._indeterminate = total is None
         self._set_status(description, state="running")
-
-    def _progress_advance(self, amount: int) -> None:
-        self.query_one("#progress", ProgressBar).advance(amount)
-
-    def _progress_finish(self) -> None:
-        self.query_one("#progress", ProgressBar).update(progress=0, total=None)
 
     def _finished(self) -> None:
         self._run_in_progress = False
@@ -1198,6 +1266,10 @@ class RunScreen(Screen[None]):
                 f"writing {result.details.get('destination', '—')}.",
                 state="success",
             )
+            # Nothing was written, so there is nothing to open — the card
+            # still appears, with only "Re-run" live, so switching from a
+            # dry run to the real thing is one click either way.
+            self._show_result_actions(())
             self._flush_repaint()
             return
         written = ", ".join(str(path) for path in result.outputs) or "nothing"
@@ -1210,7 +1282,18 @@ class RunScreen(Screen[None]):
         # the same way, and a tool with nothing beyond a written path gets no
         # panel at all, since `format_details` returns "" for empty details.
         self._set_details(format_details(result.details))
+        self._show_result_actions(result.outputs)
         self._flush_repaint()
+
+    def _show_result_actions(self, outputs: tuple[Path, ...]) -> None:
+        """Reveal the result card after a successful run. ``outputs`` decides
+        only whether "Open" is worth showing — "Re-run" always is, once
+        there has been a run to repeat."""
+        self._last_outputs = outputs
+        open_button = self.query_one("#open-output", Button)
+        open_button.display = bool(outputs)
+        open_button.label = "Open file" if len(outputs) == 1 else "Open folder"
+        self.query_one("#result-actions", Horizontal).display = True
 
     def _ask_consent(self, exc: DocMaxError) -> bool:
         from docmax.core.errors import ConsentRequiredError
@@ -1549,6 +1632,11 @@ class DocMaxApp(App[None]):
     }
     .actions { height: auto; padding: 1 0; }
     .actions Button { margin-right: 1; }
+    /* Hidden by default (`RunScreen.on_mount`); shown by `_show_result_actions`
+       once a run has actually succeeded, hidden again by `_start` the moment
+       the next one begins. */
+    .result-actions { height: auto; padding: 1 0 0 0; }
+    .result-actions Button { margin-right: 1; }
     .input-row { height: auto; }
     .input-row Input { width: 1fr; }
     .input-row Button { margin-left: 1; }
@@ -1559,15 +1647,6 @@ class DocMaxApp(App[None]):
     .component-row { height: auto; }
     .component { width: 1fr; margin-right: 1; height: auto; }
     .component-label { color: $text-muted; text-style: bold; }
-    /* `padding` here (rather than `margin`) ate the widget's own content
-       box: `ProgressBar`'s DEFAULT_CSS sets a fixed `height: 1`, and 1 row
-       of *inner* padding top and bottom left zero rows for the bar itself
-       to render into — so it occupied space in the layout but painted
-       nothing, which is why a run in progress showed no bar at all between
-       the button row and the status line. `margin` gets the same visual
-       breathing room from *outside* the box instead, leaving the bar's own
-       one row intact. See issue #38. */
-    #progress { margin: 1 0; }
     #details { color: $text-muted; padding: 1 0 0 0; height: auto; }
 
     /* Status line: idle / running / succeeded / failed read as distinct
