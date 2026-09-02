@@ -72,6 +72,9 @@ images = [
     "Pillow>=10.3.0",
     "img2pdf>=0.5.0",
 ]
+"remove-bg" = [
+    "rembg[cpu]>=2.0.0",
+]
 # Textual moves its own API faster than this project moves. The floor was
 # 0.60 and was never exercised: Select's "nothing chosen" sentinel alone has
 # been renamed since, and 0.60-era Textual has no `push_screen_wait`. M7 was
@@ -127,7 +130,7 @@ mcp = [
 # resolve to that external package instead of self-referencing, shadowing the
 # local editable install with v2's incompatible module layout.
 all = [
-    "DocmaxV3[ocr,tables,images,tui,crypto]",
+    "DocmaxV3[ocr,tables,images,tui,crypto,remove-bg]",
 ]
 dev = [
     "pytest>=8.2.0",

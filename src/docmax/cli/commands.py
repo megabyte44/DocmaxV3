@@ -651,6 +651,82 @@ def compress(
 
 
 @app_commands.command()
+def remove_bg(
+    source: Annotated[Path, typer.Argument(help="The image to process.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    model: Annotated[
+        str, typer.Option("--model", help="ONNX model: u2net, u2netp, or isnet-general-use.")
+    ] = "u2net",
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
+) -> None:
+    """Remove the background from an image, leaving a transparent PNG.
+
+    Outputs always use PNG to preserve transparency. Requires rembg — run
+    `docmax doctor` to check, or install with `pip install "DocmaxV3[remove-bg]"`.
+    The ONNX model is downloaded on first use to ~/.u2net/.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    json_output.note(json_out)
+
+    result = execute(
+        "remove-bg",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        model=model,
+    )
+    render_result(result, dry_run=dry_run, tool="remove-bg")
+
+
+@app_commands.command()
+def compress_image(
+    source: Annotated[Path, typer.Argument(help="The image to compress.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    quality: Annotated[
+        int, typer.Option("--quality", help="JPEG/WEBP quality 1-95 (PNG: lossless).")
+    ] = 80,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
+) -> None:
+    """Shrink an image file while preserving its format.
+
+    Compresses JPEG/WEBP using the quality parameter, PNG using lossless
+    optimization. Format is never changed — use `convert` to change formats.
+    Requires Pillow — install with `pip install "DocmaxV3[images]"`.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    json_output.note(json_out)
+
+    result = execute(
+        "compress-image",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        quality=quality,
+    )
+    render_result(result, dry_run=dry_run, tool="compress-image")
+
+
+@app_commands.command()
 def protect(
     source: Annotated[Path, typer.Argument(help="The PDF to encrypt.", show_default=False)],
     output: Annotated[
