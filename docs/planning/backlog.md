@@ -110,11 +110,14 @@ Worth doing, not blocking anything.
       including `/v1/mcp`, as often as it likes. Needs a decision on the
       mechanism (in-memory token bucket vs. something that survives a
       restart) before it becomes code, per this file's own rule.
-- [ ] **Automatic reaping of jobs and stored bytes on a timer.**
-      `InMemoryStorage.reap()` exists and `InMemoryJobStore` has no equivalent
-      at all; neither runs on its own. A deployment currently accumulates both
-      until the process restarts. Named in ADR 0035 alongside rate limiting as
-      a gap this milestone did not close.
+- [ ] **Automatic reaping of jobs, stored bytes, and now revoked tokens, on a
+      timer.** `InMemoryStorage.reap()` exists and `InMemoryJobStore` has no
+      equivalent at all; neither runs on its own. A deployment currently
+      accumulates both until the process restarts. Named in ADR 0035 alongside
+      rate limiting as a gap this milestone did not close. ADR 0037 adds a
+      third: `identity.db`'s revoked-token rows are never deleted, only
+      flagged — unlike the other two, this one does not even reset on a
+      restart, since the store is durable by design.
 - [ ] **TLS-required enforcement across the rest of `docmax.server`, not only
       `/v1/mcp`.** ADR 0035 §6 added `RequireHTTPSMiddleware` to the one route
       built for a caller the operator does not control; `docmax`'s own
@@ -126,7 +129,10 @@ Worth doing, not blocking anything.
       `docmax.server` (REST and `/v1/mcp` alike) has no narrower notion of
       "this key" than "one of the operator's flat set of bearer tokens" — ADR
       0035 names this as the boundary of what that flat model can support, not
-      a gap in this milestone specifically.
+      a gap in this milestone specifically. [ADR 0037](../adr/0037-server-token-identity.md)
+      (accepted and implemented — `server/identity.py`, `identity_cli.py`)
+      builds the per-user identity this item needs; it does not itself add
+      scopes.
 
 ---
 

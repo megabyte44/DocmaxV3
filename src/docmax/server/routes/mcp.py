@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from docmax.core.registry import ToolSpec
     from docmax.server.config import ServerSettings
     from docmax.server.execution import ToolRunner
+    from docmax.server.identity import IdentityStore
     from docmax.server.jobs import Job, JobStore
     from docmax.server.storage import Storage
 
@@ -367,7 +368,12 @@ class McpAsgiApp:
 
 
 def build_mcp_asgi_app(
-    *, storage: Storage, jobs: JobStore, runner: ToolRunner, settings: ServerSettings
+    *,
+    storage: Storage,
+    jobs: JobStore,
+    runner: ToolRunner,
+    settings: ServerSettings,
+    identity: IdentityStore | None = None,
 ) -> McpAsgiApp:
     """Wire the Cloud Engine into an MCP-over-HTTP app, mountable at `/v1/mcp`."""
     facade = DocMaxCloudMCP(storage=storage, jobs=jobs, runner=runner)
@@ -383,7 +389,7 @@ def build_mcp_asgi_app(
     )
 
     session_manager = StreamableHTTPSessionManager(app=lowlevel, json_response=True)
-    verifier = ApiKeyVerifier(accepted=settings.api_keys)
+    verifier = ApiKeyVerifier(accepted=settings.api_keys, identity=identity)
 
     # Built as a plain chain of ASGI callables, innermost first, rather than a
     # `Starlette(routes=[...])` wrapper: there is exactly one endpoint here,

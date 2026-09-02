@@ -66,6 +66,31 @@ User-Agent: docmax/3.0.0 (python/3.12; linux)
 An API key is required from day one. Anonymous access would make cost and abuse
 unbounded for a single-maintainer service.
 
+**A self-hosted deployment accepts a token from either of two backends** — see
+[ADR 0037](adr/0037-server-token-identity.md) and
+[implementation/identity.md](implementation/identity.md). One or both may be
+configured; a token is checked against the static set first, then the durable
+store if one is configured, so adding the store never requires retiring the
+env var.
+
+- **`DOCMAX_SERVER_API_KEYS`** — a flat, comma-separated allowlist, unchanged
+  since M6. A key from this set resolves to a caller identity equal to the key
+  itself. Zero setup; still the whole story for a single-operator deployment
+  that never needs to revoke one caller without affecting the others.
+- **A durable, per-user token store** — set `DOCMAX_SERVER_IDENTITY_DB` to a
+  file path to enable it. A token is `dmx_live_` followed by random hex —
+  literally the format this section has always shown as an example — issued
+  and revoked with `python -m docmax.server.identity_cli`, and belongs to a
+  user rather than standing alone: a user may hold more than one token (a
+  laptop, a CI job), and every token for one user shares that user's identity
+  for upload and job ownership. Revoking one token does not touch the user's
+  others. Only a token's hash is ever stored; the raw value is shown once, at
+  creation, and cannot be recovered afterward.
+
+Both backends resolve to the identical `owner` value threaded through
+`Storage` and `JobStore` — one identity model, for REST and for `/v1/mcp`
+alike, described further below.
+
 ## Small files — synchronous
 
 For payloads under 10 MB:

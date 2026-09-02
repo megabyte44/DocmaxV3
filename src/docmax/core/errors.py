@@ -80,6 +80,10 @@ class ErrorCode(StrEnum):
     CLOUD_SERVER = "cloud.server_error"
     CLOUD_PROTOCOL = "cloud.protocol_error"
 
+    # -- identity --------------------------------------------------------------
+    IDENTITY = "identity"
+    IDENTITY_NOT_FOUND = "identity.not_found"
+
     # -- misc ----------------------------------------------------------------
     LICENSE_REQUIRED = "license.required"
     CANCELLED = "cancelled"
@@ -407,6 +411,36 @@ class CloudProtocolError(CloudEngineUnavailableError):
 
 
 # ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+
+
+class IdentityError(DocMaxError):
+    """Something is wrong with a caller identity — a user or a token.
+
+    Raised by ``server/identity.py`` (ADR 0037) and by the CLI administration
+    commands built on it. Never raised by ``core`` or ``tools`` -- a document
+    engine has no notion of who called it, only ``owner`` strings it never
+    inspects.
+    """
+
+    code = ErrorCode.IDENTITY
+
+
+class IdentityNotFoundError(IdentityError):
+    """No such user, or no such active token.
+
+    The same message for "never existed" and "already revoked" -- a caller
+    administering tokens learns that an id is not currently valid, not which
+    of the two reasons made it so, mirroring the shape
+    ``storage.py::InMemoryStorage._slot`` already uses for a caller who does
+    not own a ``file_id``.
+    """
+
+    code = ErrorCode.IDENTITY_NOT_FOUND
+
+
+# ---------------------------------------------------------------------------
 # Misc
 # ---------------------------------------------------------------------------
 
@@ -460,6 +494,8 @@ __all__ = [
     "ErrorCode",
     "ExternalToolFailedError",
     "ExternalToolTimeoutError",
+    "IdentityError",
+    "IdentityNotFoundError",
     "InPlaceOverwriteError",
     "InputError",
     "InputNotFoundError",

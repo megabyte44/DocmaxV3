@@ -49,6 +49,7 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0034](0034-to-images-joins-the-cloud-engines.md) | `to-images` joins the cloud engines, and a directory output travels as a zip | Accepted |
 | [0035](0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md) | Remote MCP is a transport bridge over the Cloud Engine server, not a fifth interface | Accepted |
 | [0036](0036-toolspec-says-when-a-tool-produces-no-output.md) | `ToolSpec` says when a tool produces no output, so an interface can stop asking for one | Accepted |
+| [0037](0037-server-token-identity.md) | Tokens are durable, hashed, and belong to a user; the env-var allowlist becomes the bootstrap path | Accepted |
 
 ## When to write one
 

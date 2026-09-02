@@ -23,6 +23,7 @@ from docmax.core.branding import APP_NAME, HOMEPAGE
 from docmax.server.config import API_VERSION, ServerSettings
 from docmax.server.errors import install_error_handlers
 from docmax.server.execution import RegistryRunner
+from docmax.server.identity import SqliteIdentityStore
 from docmax.server.jobs import InMemoryJobStore
 from docmax.server.routes import capabilities, jobs, outputs, tools, uploads
 from docmax.server.routes.mcp import MOUNT_PATH as MCP_MOUNT_PATH
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from docmax.server.execution import ToolRunner
+    from docmax.server.identity import IdentityStore
     from docmax.server.jobs import JobStore
     from docmax.server.storage import Storage
 
@@ -45,20 +47,35 @@ def create_app(
     storage: Storage | None = None,
     job_store: JobStore | None = None,
     runner: ToolRunner | None = None,
+    identity: IdentityStore | None = None,
 ) -> FastAPI:
     """Build one server.
 
     The backends are parameters because the reference ones are in-memory and
     single-process. A real deployment passes object storage and a shared job
     store; nothing above this line changes when it does.
+
+    ``identity`` follows the same pattern as the others, with one difference:
+    its *absence* is a normal, supported deployment shape
+    ([ADR 0037](../../../docs/adr/0037-server-token-identity.md)), not
+    something every caller must supply a stub for. Passing nothing here and
+    setting nothing in ``settings.identity_db_path`` leaves the server on
+    ``api_keys`` alone, exactly as it behaved before this parameter existed.
     """
     resolved = settings or ServerSettings.from_env()
     resolved_storage = storage or InMemoryStorage(max_bytes=resolved.max_upload_bytes)
     resolved_jobs = job_store or InMemoryJobStore()
     resolved_runner = runner or RegistryRunner()
+    resolved_identity = identity or (
+        SqliteIdentityStore(resolved.identity_db_path) if resolved.identity_db_path else None
+    )
 
     mcp = build_mcp_asgi_app(
-        storage=resolved_storage, jobs=resolved_jobs, runner=resolved_runner, settings=resolved
+        storage=resolved_storage,
+        jobs=resolved_jobs,
+        runner=resolved_runner,
+        settings=resolved,
+        identity=resolved_identity,
     )
 
     @contextlib.asynccontextmanager
@@ -86,6 +103,7 @@ def create_app(
     app.state.storage = resolved_storage
     app.state.jobs = resolved_jobs
     app.state.runner = resolved_runner
+    app.state.identity = resolved_identity
 
     install_error_handlers(app)
 
