@@ -32,6 +32,13 @@ if TYPE_CHECKING:
 _REMBG_AVAILABLE = importlib.util.find_spec("rembg") is not None
 needs_rembg = pytest.mark.skipif(not _REMBG_AVAILABLE, reason="rembg is not installed")
 
+#: Pillow is the `images` extra, not a base dependency, and the open-core CI job
+#: installs `[dev]` alone to prove the free half stands up without the optional
+#: ones (ADR 0004). The validator reaches for `PIL` the moment it is called, so
+#: every test that touches it needs this — not only the ones that import it here.
+_PILLOW_AVAILABLE = importlib.util.find_spec("PIL") is not None
+needs_pillow = pytest.mark.skipif(not _PILLOW_AVAILABLE, reason="Pillow is not installed")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -171,6 +178,7 @@ def test_docs_empty_rejected(router: EngineRouter, tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@needs_pillow
 def test_is_readable_png_accepts_a_valid_png(tmp_path: Path) -> None:
     """A valid PNG with alpha is accepted."""
     from PIL import Image
@@ -185,6 +193,7 @@ def test_is_readable_png_accepts_a_valid_png(tmp_path: Path) -> None:
     is_readable_png(path)
 
 
+@needs_pillow
 def test_is_readable_png_rejects_non_rgba_png(tmp_path: Path) -> None:
     """A PNG without alpha channel is rejected."""
     from PIL import Image
@@ -201,6 +210,7 @@ def test_is_readable_png_rejects_non_rgba_png(tmp_path: Path) -> None:
     assert "alpha" in str(caught.value).lower()
 
 
+@needs_pillow
 def test_is_readable_png_rejects_garbage(tmp_path: Path) -> None:
     """A file that is not a readable image is rejected."""
     from docmax.tools.remove_bg.validators import is_readable_png
@@ -212,6 +222,7 @@ def test_is_readable_png_rejects_garbage(tmp_path: Path) -> None:
         is_readable_png(bad)
 
 
+@needs_pillow
 def test_is_readable_png_rejects_zero_dimensions(tmp_path: Path) -> None:
     """An image with zero dimensions is rejected."""
     from PIL import Image
