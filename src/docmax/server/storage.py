@@ -156,7 +156,27 @@ class InMemoryStorage:
         raises the identical "no such id" error an unknown id raises: a caller
         who does not own ``file_id`` learns nothing about whether it exists,
         the same shape ADR 0029 chose for a path outside the local roots.
+
+        The prefix check ahead of the dict lookup is a pure format check, not
+        a lookup — it reveals nothing about what any *particular* id maps to,
+        so it is safe to answer more specifically than "no such id" without
+        weakening that guarantee. It exists because a filesystem path is the
+        one wrong input this shape can't tell apart from a typo without help:
+        remote MCP has no shared filesystem with the caller (ADR 0035), but a
+        caller confused about which MCP surface it is talking to sends one
+        anyway, and lands on this exact "no such id" message with nothing in
+        it pointing at the fix. See GH #52.
         """
+        if not file_id.startswith(FILE_ID_PREFIX):
+            raise InputNotFoundError(
+                f"{file_id!r} is not a file_id.",
+                remedy=(
+                    "This endpoint takes a file_id returned by POST /v1/uploads, "
+                    "not a filesystem path — upload the document first, then pass "
+                    "the file_id it returns here."
+                ),
+                context={"file_id": file_id},
+            )
         try:
             slot = self._slots[file_id]
         except KeyError as exc:

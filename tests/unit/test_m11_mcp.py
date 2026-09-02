@@ -44,6 +44,7 @@ from docmax.core.models import Engine
 from docmax.core.registry import iter_tools
 from docmax.server.app import create_app
 from docmax.server.config import ServerSettings
+from docmax.server.identity import SqliteIdentityStore
 from tests.paths import SRC, relative
 
 if TYPE_CHECKING:
@@ -283,6 +284,176 @@ def test_outputs_stay_reachable_with_no_key_by_design(
     downloaded = client.get(path)
 
     assert downloaded.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# ADR 0037 — a durable, issued token authenticates identically to a static
+# key, over REST and over MCP, and two tokens for one user share ownership.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def identity_store(tmp_path: Path) -> SqliteIdentityStore:
+    return SqliteIdentityStore(tmp_path / "identity.db")
+
+
+@pytest.fixture
+def identity_app(identity_store: SqliteIdentityStore) -> Any:
+    """A deployment with no static keys at all -- issued tokens are the whole
+    identity model here, proving the identity backend works standalone and
+    not merely as a fallback behind `api_keys`.
+    """
+    return create_app(settings=ServerSettings(), identity=identity_store)
+
+
+@pytest.fixture
+def identity_client(identity_app: Any) -> Any:
+    from fastapi.testclient import TestClient
+
+    return TestClient(identity_app)
+
+
+def test_an_issued_token_authenticates_over_rest(
+    identity_client: Any, identity_store: SqliteIdentityStore
+) -> None:
+    user_id = identity_store.create_user()
+    token = identity_store.create_token(user_id=user_id)
+
+    response = identity_client.post(
+        "/v1/uploads",
+        json={"filename": "a.pdf", "size_bytes": 5},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_never_issued_token_is_refused_over_rest(identity_client: Any) -> None:
+    response = identity_client.post(
+        "/v1/uploads",
+        json={"filename": "a.pdf", "size_bytes": 5},
+        headers={"Authorization": "Bearer dmx_live_" + "0" * 64},
+    )
+
+    assert response.status_code == 401
+
+
+def test_a_revoked_token_is_refused_identically_to_an_unknown_one(
+    identity_client: Any, identity_store: SqliteIdentityStore
+) -> None:
+    user_id = identity_store.create_user()
+    token = identity_store.create_token(user_id=user_id)
+    token_id = identity_store.list_tokens(user_id)[0].token_id
+    identity_store.revoke(token_id)
+
+    revoked = identity_client.post(
+        "/v1/uploads",
+        json={"filename": "a.pdf", "size_bytes": 5},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    unknown = identity_client.post(
+        "/v1/uploads",
+        json={"filename": "a.pdf", "size_bytes": 5},
+        headers={"Authorization": "Bearer dmx_live_" + "1" * 64},
+    )
+
+    assert revoked.status_code == unknown.status_code == 401
+    assert revoked.json() == unknown.json()
+
+
+def test_two_tokens_for_the_same_user_share_upload_ownership(
+    identity_client: Any, identity_store: SqliteIdentityStore
+) -> None:
+    """The concrete new capability ADR 0037 promised: "who is calling" can now
+    be one person across more than one credential, where a raw-token-as-owner
+    model could only ever see two unrelated callers.
+    """
+    user_id = identity_store.create_user()
+    laptop = identity_store.create_token(user_id=user_id, label="laptop")
+    phone = identity_store.create_token(user_id=user_id, label="phone")
+
+    reserved = identity_client.post(
+        "/v1/uploads",
+        json={"filename": "a.pdf", "size_bytes": 5},
+        headers={"Authorization": f"Bearer {laptop}"},
+    ).json()
+
+    # PUT-ing the bytes and then reading the upload back, both with the
+    # *other* token for the same user -- refused for two different tokens of
+    # two different users in `test_a_caller_cannot_fill_in_bytes_for_a_file_id_it_did_not_reserve`
+    # above; allowed here because both tokens resolve to one owner.
+    put_response = identity_client.put(
+        reserved["upload_url"].split("testserver", 1)[-1],
+        content=b"%PDF-",
+        headers={"Authorization": f"Bearer {phone}"},
+    )
+
+    assert put_response.status_code == 200
+
+
+def test_two_tokens_for_different_users_stay_isolated(
+    identity_client: Any, identity_store: SqliteIdentityStore
+) -> None:
+    alice = identity_store.create_token(user_id=identity_store.create_user())
+    bob = identity_store.create_token(user_id=identity_store.create_user())
+
+    reserved = identity_client.post(
+        "/v1/uploads",
+        json={"filename": "a.pdf", "size_bytes": 5},
+        headers={"Authorization": f"Bearer {alice}"},
+    ).json()
+
+    put_response = identity_client.put(
+        reserved["upload_url"].split("testserver", 1)[-1],
+        content=b"%PDF-",
+        headers={"Authorization": f"Bearer {bob}"},
+    )
+
+    assert put_response.status_code == 404
+    assert put_response.json()["error"]["code"] == "input.not_found"
+
+
+def test_a_static_key_and_an_issued_token_authenticate_side_by_side(
+    tmp_path: Path, identity_store: SqliteIdentityStore
+) -> None:
+    """ADR 0037 §5: the env-var allowlist is additive, not replaced."""
+    app = create_app(settings=ServerSettings(api_keys=frozenset({KEY_A})), identity=identity_store)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    user_id = identity_store.create_user()
+    issued = identity_store.create_token(user_id=user_id)
+
+    static_response = client.post(
+        "/v1/uploads", json={"filename": "a.pdf", "size_bytes": 5}, headers=AUTH_A
+    )
+    issued_response = client.post(
+        "/v1/uploads",
+        json={"filename": "a.pdf", "size_bytes": 5},
+        headers={"Authorization": f"Bearer {issued}"},
+    )
+
+    assert static_response.status_code == issued_response.status_code == 200
+
+
+def test_an_issued_token_authenticates_over_mcp(
+    identity_app: Any, identity_store: SqliteIdentityStore
+) -> None:
+    user_id = identity_store.create_user()
+    token = identity_store.create_token(user_id=user_id)
+
+    async def scenario() -> set[str]:
+        async with (
+            _LifespanManager(identity_app),
+            mcp_session(identity_app, key=token) as (
+                session,
+                _captured,
+            ),
+        ):
+            result = await session.list_tools()
+            return {tool.name for tool in result.tools}
+
+    assert anyio.run(scenario) == CLOUD_TOOL_NAMES
 
 
 # ---------------------------------------------------------------------------

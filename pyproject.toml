@@ -200,6 +200,11 @@ ignore = [
 "tests/**" = ["S", "T20", "ARG", "PLR2004"]
 # The CLI layer is the one place that legitimately writes to stdout.
 "src/docmax/cli/**" = ["T20"]
+# A standalone administration script (ADR 0037), not library code reached
+# through any interface: it is its own terminal-facing entry point, the same
+# role cli/ plays for everything else, forced to live under server/ because it
+# is the only place permitted to import docmax.server.identity.
+"src/docmax/server/identity_cli.py" = ["T20"]
 # The benchmark runner is a script whose entire output is a report to a
 # terminal. It is not library code and is not in the wheel.
 "benchmarks/**" = ["T20"]

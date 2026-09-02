@@ -291,6 +291,13 @@ for _command in workflows.workflow_commands.registered_commands:
 # `docmax merge` as though they were the same kind of thing.
 app.add_typer(cloud.cloud_app)
 
+# Token administration for a docmax.server deployment (ADR 0037) is
+# deliberately *not* a subcommand here: docmax.server is excluded from the
+# wheel (ADR 0006) and this package -- the one the base install ships -- may
+# never import it (tests/hygiene/test_wheel_excludes_server.py). It lives at
+# `python -m docmax.server.identity_cli`, run the same way the server itself
+# is: from a checkout, with the `server` extra installed.
+
 
 @app.command()
 def formats(json_out: commands.JsonOption = False) -> None:
