@@ -4493,6 +4493,21 @@ def test_starting_a_new_run_hides_the_result_card_again(
             await pilot.pause(0.5)
             assert screen.query_one("#result-actions", Horizontal).display is True
 
+            # `_execute` is a real `@work(thread=True)` worker -- irrelevant
+            # to what this test checks (that `_start` hides the card before
+            # a run even reaches the router) and, left unmocked for a second
+            # run, a source of exactly the flakiness this replaces: a
+            # background thread still marshaling `call_from_thread`
+            # callbacks into this screen after the `async with` block below
+            # has already started tearing it down. That race showed up as
+            # `NoMatches` on whatever widget a callback queried next --
+            # `#cancel` on the slower macOS CI runner, `#result-actions` in
+            # a cold-cache local repro -- never the same one twice, because
+            # it was never really about either widget.
+            def no_op(request: runner.RunRequest) -> None:
+                return None
+
+            screen._execute = no_op  # type: ignore[method-assign,assignment]
             screen._start(dry_run=False, force=False)
             return screen.query_one("#result-actions", Horizontal).display
 
