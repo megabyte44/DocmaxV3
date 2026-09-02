@@ -38,6 +38,7 @@ def is_available() -> bool:
     # Double-check: actually try to import rembg to see if it initializes
     try:
         import rembg  # noqa: F401
+
         return True
     except (SystemExit, Exception):
         # If rembg fails to initialize, report unavailable
@@ -115,6 +116,7 @@ class RemoveBgLocal:
             import rembg
         except SystemExit as exc:
             import traceback
+
             tb_str = traceback.format_exc()
             raise ExternalToolFailedError(
                 "rembg initialization failed during import. This usually means onnxruntime or a model is missing or incompatible.",

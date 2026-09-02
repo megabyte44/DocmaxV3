@@ -128,7 +128,9 @@ class CompressImageLocal:
                     if image.mode == "RGBA":
                         background.paste(image, mask=image.split()[-1])
                     else:
-                        background.paste(image, mask=image.split()[-1] if len(image.split()) > 3 else None)
+                        background.paste(
+                            image, mask=image.split()[-1] if len(image.split()) > 3 else None
+                        )
                     image = background
                 image.save(handle, format="JPEG", quality=quality, optimize=True, progressive=True)
             elif input_format.name == "png":

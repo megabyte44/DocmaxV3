@@ -232,7 +232,9 @@ def test_is_readable_png_rejects_zero_dimensions(tmp_path: Path) -> None:
 
 
 @needs_rembg
-def test_real_remove_bg_produces_output(router: EngineRouter, small_jpeg: Path, tmp_path: Path) -> None:
+def test_real_remove_bg_produces_output(
+    router: EngineRouter, small_jpeg: Path, tmp_path: Path
+) -> None:
     """The tool produces an output PNG with alpha channel."""
     out = tmp_path / "transparent.png"
 
@@ -251,7 +253,9 @@ def test_real_remove_bg_produces_output(router: EngineRouter, small_jpeg: Path, 
 
 
 @needs_rembg
-def test_real_remove_bg_details_are_reported(router: EngineRouter, small_jpeg: Path, tmp_path: Path) -> None:
+def test_real_remove_bg_details_are_reported(
+    router: EngineRouter, small_jpeg: Path, tmp_path: Path
+) -> None:
     """The result includes model name and output size."""
     out = tmp_path / "transparent.png"
 
@@ -266,7 +270,9 @@ def test_real_remove_bg_details_are_reported(router: EngineRouter, small_jpeg: P
 
 
 @needs_rembg
-def test_real_remove_bg_accepts_all_models(router: EngineRouter, small_jpeg: Path, tmp_path: Path) -> None:
+def test_real_remove_bg_accepts_all_models(
+    router: EngineRouter, small_jpeg: Path, tmp_path: Path
+) -> None:
     """Each declared model is accepted (though download will take time)."""
     for model in ("u2net", "u2netp", "isnet-general-use"):
         out = tmp_path / f"{model}.png"
