@@ -12,7 +12,6 @@ and re-raised as a typed error, so network failures do not escape raw.
 from __future__ import annotations
 
 import importlib.util
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 

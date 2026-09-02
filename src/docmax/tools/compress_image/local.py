@@ -68,8 +68,9 @@ class CompressImageLocal:
         """Compress ``docs[0]`` into ``target``, preserving format."""
         import time
 
-        from docmax.core.atomic import atomic_write
+        from PIL import Image
 
+        from docmax.core.atomic import atomic_write
         from docmax.tools.compress_image.validators import is_readable_image
 
         if not docs:
@@ -112,8 +113,6 @@ class CompressImageLocal:
         document = docs[0]
         original_bytes = document.size_bytes
         started = time.monotonic()
-
-        from PIL import Image
 
         image = Image.open(str(document.path))
 

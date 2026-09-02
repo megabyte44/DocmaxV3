@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from docmax.core.cancellation import NEVER_CANCELLED, CancellationToken
+from docmax.core.cancellation import NEVER_CANCELLED
 from docmax.core.config import Config
-from docmax.core.errors import InvalidParameterError, NoEngineAvailableError
+from docmax.core.errors import InvalidParameterError
 from docmax.core.models import DocumentRef, Engine, OutputTarget
 from docmax.core.protocols import NULL_PROGRESS
 from docmax.core.registry import get_tool
@@ -173,7 +173,8 @@ def test_quality_too_low(tmp_path: Path) -> None:
 
     error = exc_info.value
     assert "quality" in error.context.get("parameter", "").lower()
-    assert "1" in str(error) and "95" in str(error)
+    assert "1" in str(error)
+    assert "95" in str(error)
 
 
 def test_quality_too_high(tmp_path: Path) -> None:
@@ -189,7 +190,8 @@ def test_quality_too_high(tmp_path: Path) -> None:
 
     error = exc_info.value
     assert "quality" in error.context.get("parameter", "").lower()
-    assert "1" in str(error) and "95" in str(error)
+    assert "1" in str(error)
+    assert "95" in str(error)
 
 
 def test_quality_not_integer(tmp_path: Path) -> None:

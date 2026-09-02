@@ -48,7 +48,7 @@ def unavailable_reason() -> str | None:
     """Why not, including how to fix it."""
     if is_available():
         return None
-    return f'rembg is not installed. Install it with: pip install "DocmaxV3[remove-bg]"'
+    return 'rembg is not installed. Install it with: pip install "DocmaxV3[remove-bg]"'
 
 
 class RemoveBgLocal:
@@ -107,7 +107,6 @@ class RemoveBgLocal:
 
         from docmax.core.atomic import atomic_write
         from docmax.core.errors import CorruptDocumentError
-
         from docmax.tools.remove_bg.validators import is_readable_png
 
         # Import rembg carefully: it calls sys.exit(1) on some errors,
@@ -129,7 +128,6 @@ class RemoveBgLocal:
                 context={"error": str(exc)},
             ) from exc
 
-        original_bytes = docs[0].size_bytes
         started = time.monotonic()
 
         # Validate cancellation before starting work.
