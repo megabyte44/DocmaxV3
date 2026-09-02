@@ -203,13 +203,12 @@ def test_only_the_intended_tools_have_a_working_cloud_engine() -> None:
 
 
 def test_the_tools_the_docs_mention_but_do_not_exist_still_do_not() -> None:
-    """`pdfa` and `remove-bg` are named in the architecture docs and on no roadmap row."""
+    """`pdfa` is named in the architecture docs and on no roadmap row. `remove-bg` exists (local-only)."""
     from docmax.core.registry import build_registry
 
     registry = build_registry()
 
     assert "pdfa" not in registry
-    assert "remove-bg" not in registry
 
 
 @pytest.mark.parametrize("name", ["merge", "split", "watermark", "from-images"])

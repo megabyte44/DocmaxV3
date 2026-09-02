@@ -96,12 +96,14 @@ eliminate install pain and nothing else:
 | `compress` | Ghostscript | ✅ M6 |
 | `convert` | Pandoc | ✅ M6 |
 | `ocr` | Tesseract + language packs + Poppler | ✅ M8 |
+| `remove-bg` | an ONNX model download | ✅ local-only |
 | `pdfa` | Ghostscript | not built |
-| `remove-bg` | an ONNX model download | not built |
 
-**The last two rows describe an end state, not the present.** `pdfa` and
-`remove-bg` do not exist as tools at all and are on no roadmap row. `ocr`
-joined the working set at M8 — OpenCV is no longer among its requirements
+**The last row describes an end state, not the present.** `pdfa` does not exist
+as a tool at all and is on no roadmap row. `remove-bg` ships local-only per ADR
+0012's ordering rule — a cloud engine will not be added until the local engine
+is proven, and its ONNX-download pain is confirmed "genuinely painful" (ADR 0034).
+`ocr` joined the working set at M8 — OpenCV is no longer among its requirements
 except for `--deskew`, see
 [ADR 0022](../adr/0022-ocr-runs-tesseract-directly-and-skips-pages-that-have-text.md).
 [ADR 0012](../adr/0012-cloud-engines-are-compress-and-convert.md) records why M6

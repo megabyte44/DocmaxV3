@@ -191,7 +191,7 @@ jobs:
       # OpenCV. The open-core job below deliberately stays on `[dev]` alone,
       # which is what exercises the other path — that a machine without them
       # still gets a typed error rather than an ImportError.
-      - run: python -m pip install -e ".[dev,tui,ocr]"
+      - run: python -m pip install -e ".[dev,tui,ocr,images]"
 
       # No external binaries needed — these must pass on a bare machine, which
       # is the whole point of the light base install.

@@ -206,9 +206,9 @@ cannot be driven by an HTTP server.
 Only a handful of tools have a cloud engine, because cloud exists to eliminate
 install pain and nothing else. Two do today — `compress` and `convert`, since
 M6, and `ocr` joined them at M8 — the tool the Cloud Engine's whole
-justification names. `pdfa` and `remove-bg` are named in
-[overview.md](overview.md#the-dual-engine-model)'s end-state table and do not
-exist.
+justification names. `remove-bg` exists local-only per ADR 0012's ordering rule.
+`pdfa` is named in [overview.md](overview.md#the-dual-engine-model)'s end-state
+table and does not exist.
 
 Everything pypdf-only sets `cloud = None`: uploading a document to perform a
 millisecond-long pure-Python operation is slower, less private, and needs a
