@@ -91,7 +91,11 @@ def test_spec_shape() -> None:
     assert spec.name == "compress-image"
     assert spec.category == "image"
     assert spec.accepts_multiple_inputs is False
-    assert spec.output_required is True
+    # ADR 0033 pins `output_required` to `convert` and `metadata` alone
+    # (test_registry.py). compress-image stays False: the CLI already makes
+    # `-o` mandatory, and a derived destination that disagrees with the input's
+    # format is refused by `run()` rather than written mislabelled.
+    assert spec.output_required is False
     assert Engine.LOCAL in spec.supported_engines
     assert Engine.CLOUD not in spec.supported_engines
 
