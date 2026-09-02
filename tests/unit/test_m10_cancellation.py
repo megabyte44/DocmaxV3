@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import pytest
 
+pytest.importorskip("mcp")
+
 from docmax.core.errors import CancelledError
 from docmax.core.models import Engine, ToolResult
 from docmax.mcp.policy import Policy
