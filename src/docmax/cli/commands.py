@@ -650,7 +650,7 @@ def compress(
     render_result(result, dry_run=dry_run, tool="compress")
 
 
-@app_commands.command()
+@app_commands.command(name="remove-bg")
 def remove_bg(
     source: Annotated[Path, typer.Argument(help="The image to process.", show_default=False)],
     output: Annotated[
@@ -688,7 +688,7 @@ def remove_bg(
     render_result(result, dry_run=dry_run, tool="remove-bg")
 
 
-@app_commands.command()
+@app_commands.command(name="compress-image")
 def compress_image(
     source: Annotated[Path, typer.Argument(help="The image to compress.", show_default=False)],
     output: Annotated[
