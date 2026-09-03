@@ -28,7 +28,7 @@ from docmax.core.registry import Param
 from docmax.core.router import EngineRouter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from docmax.core.cancellation import CancellationToken
@@ -100,6 +100,10 @@ class FakeSpec:
     accepts_multiple_inputs: bool = False
     produces_directory: bool = False
     produces_output: bool = True
+    #: Mirrors the real `ToolSpec` field. `None` is what every tool but
+    #: `convert-image` declares: no parameter decides this tool's output
+    #: extension, so `default_suffix` stays in charge.
+    suffix_for_params: Callable[[Mapping[str, Any], str], str | None] | None = None
 
     @property
     def supported_engines(self) -> frozenset[Engine]:

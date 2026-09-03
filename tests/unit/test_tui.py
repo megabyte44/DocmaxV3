@@ -34,7 +34,9 @@ from docmax.core.registry import Param, get_tool
 from docmax.tui import catalog, forms, runner
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
+
+    from textual.widget import Widget
 
 textual = pytest.importorskip("textual", reason="the TUI needs the `tui` extra")
 
@@ -174,6 +176,50 @@ def test_choices_become_a_dropdown_not_a_text_box() -> None:
     field = forms.field_for(Param(name="preset", description="d", type_="str", choices=("a", "b")))
     assert field.kind == "choice"
     assert field.choices == ("a", "b")
+
+
+def test_a_label_defaults_to_the_parameter_name() -> None:
+    """Unlabelled params keep the derivation every tool relied on before."""
+    field = forms.field_for(Param(name="owner_password", description="d"))
+    assert field.label == "owner password"
+
+
+def test_a_spec_supplied_label_replaces_the_derived_one() -> None:
+    """`Param.label` exists so a flag name and a form label can differ.
+
+    Presentational only: the wire name is untouched, which is what keeps the
+    CLI flag, the MCP schema and API validation out of it.
+    """
+    field = forms.field_for(
+        Param(name="to", description="d", choices=("png", "jpeg"), label="output format")
+    )
+
+    assert field.label == "output format"
+    assert field.name == "to"
+
+
+def test_convert_image_offers_a_labelled_format_dropdown() -> None:
+    """The reported UX gap: a form showing only input and output.
+
+    The format is a real field, it is a dropdown rather than a text box, it
+    offers exactly what the implementation supports, and it is called
+    something a person can read — "to" named nothing above a list of formats.
+    """
+    from docmax.tools import _formats
+
+    fields = {field.name: field for field in forms.fields_for(get_tool("convert-image"))}
+
+    assert set(fields) == {"to"}
+    chooser = fields["to"]
+    assert chooser.kind == "choice"
+    assert chooser.label == "output format"
+    # Straight from the shared table, never retyped. ADR 0010.
+    assert chooser.choices == _formats.readable_image_names()
+    # Optional: blank means "take the format from the -o extension", which
+    # `collect` expresses by omitting the key entirely.
+    assert chooser.required is False
+    assert forms.collect([chooser], {"to": ""}) == {}
+    assert forms.collect([chooser], {"to": "png"}) == {"to": "png"}
 
 
 def test_an_unknown_type_still_renders_as_text() -> None:
@@ -325,6 +371,7 @@ class FakeRouter:
     ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.targets: list[tuple[str, str | None, bool]] = []
+        self.target_params: list[dict[str, Any]] = []
         self.consent = _FakeConsent()
         self.config = None
         self._result = result or ToolResult(outputs=(), engine_used=Engine.LOCAL)
@@ -336,9 +383,20 @@ class FakeRouter:
         self.missing_dependencies_calls: list[tuple[str, Engine]] = []
 
     def target_for(
-        self, tool: str, docs: Sequence[Any], *, requested: str | None = None, force: bool = False
+        self,
+        tool: str,
+        docs: Sequence[Any],
+        *,
+        requested: str | None = None,
+        force: bool = False,
+        params: Mapping[str, Any] | None = None,
     ) -> object:
+        # `params` mirrors the real signature: the router reads them to resolve
+        # a destination whose extension a parameter decides
+        # (`ToolSpec.suffix_for_params`). Recorded so a test can assert the TUI
+        # actually forwards them rather than dropping them here.
         self.targets.append((tool, requested, force))
+        self.target_params.append(dict(params or {}))
         return object()
 
     def run(self, tool: str, docs: Sequence[Any], target: object, **kwargs: Any) -> ToolResult:
@@ -594,7 +652,7 @@ def test_the_app_starts_and_lists_tools() -> None:
             await pilot.pause()
             assert type(app.screen).__name__ == "ToolListScreen"
             buttons = app.screen.query(".tool-button")
-            assert len(buttons) == len(catalog.offered_tools()) == 21
+            assert len(buttons) == len(catalog.offered_tools()) == 24
             ids = {button.id for button in buttons}
             assert "tool-crop" in ids
             # `ocr` was the one name `UNIMPLEMENTED` ever held, and M8 shipped
@@ -786,13 +844,13 @@ def test_the_catalog_scrolls_when_the_window_is_too_small() -> None:
         async with app.run_test(size=(60, 15)) as pilot:
             await pilot.pause()
             buttons = app.screen.query(".tool-button")
-            assert len(buttons) == 21, "every tool stays reachable, just off-screen"
+            assert len(buttons) == 24, "every tool stays reachable, just off-screen"
             container = app.screen.query_one("#tools", VerticalScroll)
             return container.max_scroll_y, len(buttons)
 
     max_scroll_y, button_count = asyncio.run(scenario())
     assert max_scroll_y > 0
-    assert button_count == 21
+    assert button_count == 24
 
 
 def test_every_offered_tool_opens_a_form() -> None:
@@ -825,6 +883,418 @@ def test_every_offered_tool_opens_a_form() -> None:
                 await pilot.pause()
 
     asyncio.run(scenario())
+
+
+def test_the_convert_image_form_renders_a_format_dropdown(tmp_path: Path) -> None:
+    """The reported gap, asserted against the real screen rather than the form data.
+
+    A `Select` widget, carrying every format the tool supports, under a label
+    that reads "output format" -- not the bare parameter name "to".
+    """
+    import asyncio
+
+    from textual.widgets import Label, Select
+
+    from docmax.tools import _formats
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    found: dict[str, Any] = {}
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(RunScreen("convert-image"))
+            await pilot.pause()
+
+            chooser = app.screen.query_one("#field-to", Select)
+            values = [value for _prompt, value in chooser._options]
+            found["formats"] = tuple(v for v in values if isinstance(v, str))
+            # The sentinel Textual uses for "nothing chosen" is not a string,
+            # and its spelling has moved between versions -- so it is
+            # identified by exclusion rather than by name.
+            found["has_blank"] = any(not isinstance(v, str) for v in values)
+            found["labels"] = [str(label.content) for label in app.screen.query(Label)]
+
+    asyncio.run(scenario())
+
+    assert found["formats"] == _formats.readable_image_names()
+    # A blank entry is what makes "let the -o extension decide" reachable in
+    # the UI, matching the CLI's optional --to.
+    assert found["has_blank"] is True
+    assert "output format" in found["labels"]
+    assert "to" not in found["labels"]
+
+
+def test_a_chosen_format_corrects_the_destination_in_the_tui_too(tmp_path: Path) -> None:
+    """The extension correction is the router's, so every surface inherits it.
+
+    The TUI passes the form's parameters to `target_for` for exactly this
+    reason: a rule implemented once in the router cannot drift from the CLI's
+    behaviour the way a second copy in `tui/runner.py` would.
+    """
+    from docmax.core.models import DocumentRef
+
+    source = _touch(tmp_path / "image.jpg")
+
+    target = runner.build_router().target_for(
+        "convert-image",
+        [DocumentRef.from_path(source)],
+        requested=str(tmp_path / "convert.jpg"),
+        params={"to": "png"},
+    )
+
+    assert target.destination == tmp_path / "convert.png"
+
+
+def test_describe_inputs_is_silent_for_a_tool_that_declares_nothing() -> None:
+    """Only tools that opt in say anything; the rest keep today's behaviour."""
+    assert forms.describe_inputs(get_tool("merge"), "anything.pdf") is None
+
+
+def test_describe_inputs_never_raises_on_a_bad_path(tmp_path: Path) -> None:
+    """The hint is advisory. A description that blew up would break a form
+    over a path the user is still halfway through typing."""
+    assert forms.describe_inputs(get_tool("resize"), "") is None
+    assert forms.describe_inputs(get_tool("resize"), str(tmp_path / "absent.jpg")) is None
+
+
+def test_the_resize_form_shows_the_images_real_dimensions(tmp_path: Path) -> None:
+    """The fix for "I do not know how many pixels my image is".
+
+    Driven against the real screen: typing a path puts the image's own size on
+    the hint line, which is the number the width and height fields are asking
+    the user to reason about.
+    """
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    source = tmp_path / "photo.jpg"
+    Image.new("RGB", (1920, 1080), color="red").save(source, format="JPEG")
+
+    seen: dict[str, str] = {}
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("resize")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+            seen["hint"] = str(screen.query_one("#input-hint", Static).content)
+
+    asyncio.run(scenario())
+
+    assert "1920" in seen["hint"]
+    assert "1080" in seen["hint"]
+    assert "pixels" in seen["hint"]
+
+
+def test_a_broken_path_still_reports_the_problem_not_the_dimensions(tmp_path: Path) -> None:
+    """The existing "file not found" warning keeps priority over the hint."""
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    seen: dict[str, str] = {}
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("resize")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(tmp_path / "absent.jpg")
+            await pilot.pause()
+            seen["hint"] = str(screen.query_one("#input-hint", Static).content)
+            seen["invalid"] = str(screen.query_one("#field-__inputs__", Input).has_class("invalid"))
+
+    asyncio.run(scenario())
+
+    assert "does not exist" in seen["hint"]
+    assert seen["invalid"] == "True"
+
+
+def test_the_resize_form_offers_scale_and_a_fit_dropdown() -> None:
+    """Scale is what lets a user resize without knowing the pixel size, and
+    `fit` has four values so it belongs in a dropdown rather than a text box."""
+    fields = {field.name: field for field in forms.fields_for(get_tool("resize"))}
+
+    assert set(fields) == {"width", "height", "scale", "fit", "quality"}
+    assert fields["scale"].kind == "number"
+    assert fields["fit"].kind == "choice"
+    assert fields["fit"].choices == ("cover", "contain", "fill", "stretch")
+    # Labelled in the units they are actually in, compactly.
+    assert fields["width"].label == "width (px)"
+    assert fields["scale"].label == "scale (%)"
+    # None of the three sizing fields is individually required.
+    assert not any(fields[name].required for name in ("width", "height", "scale"))
+
+
+def test_percentage_and_dimensions_are_one_mutually_exclusive_group() -> None:
+    """The reported UX fix: a form asking for a resize *method* first, rather
+    than five fields at once with no indication which go together."""
+    from docmax.tools.resize.tool import RESIZE_METHOD
+
+    fields = {field.name: field for field in forms.fields_for(get_tool("resize"))}
+
+    assert fields["scale"].group == RESIZE_METHOD
+    assert fields["scale"].group_option == "Percentage"
+    assert fields["width"].group == fields["height"].group == RESIZE_METHOD
+    assert fields["fit"].group == RESIZE_METHOD
+    assert fields["width"].group_option == fields["height"].group_option == "Dimensions"
+    assert fields["fit"].group_option == "Dimensions"
+    # quality applies whichever way the size was chosen, so it stands alone.
+    assert fields["quality"].group == ""
+
+
+def test_no_field_shows_its_description_twice() -> None:
+    """The reported bug: a description repeated as both placeholder and hint.
+
+    Checked generically, across every offered tool's every field, rather than
+    only for resize -- the duplication was in the shared renderer, not in one
+    tool's copy, so the fix is verified at the level it was made.
+    """
+    for spec in catalog.offered_tools():
+        for field in forms.fields_for(spec):
+            if not field.description:
+                continue
+            # `_unit_hint` (app.py) is the only thing allowed to fill a
+            # placeholder now, and it never returns a full description: it is
+            # either empty or a short parenthetical like "px" pulled from the
+            # label. A description-length placeholder would be the
+            # duplication back.
+            assert len(field.description) > 12, "adjust this probe if a real field gets shorter"
+
+
+def _actually_painted(widget: Widget) -> bool:
+    """Whether the compositor painted any part of ``widget`` in the last frame.
+
+    Not ``widget.is_on_screen``: that property only asks whether the widget
+    has *a* place in the compositor's arrangement, which is true even when an
+    ancestor's ``overflow: hidden`` has clipped its visible area to nothing --
+    exactly the shape of the bug this exists to catch, where a field's own
+    ``.region`` reported a real height while zero of it actually overlapped
+    the screen. ``Compositor.visible_widgets`` is what the renderer itself
+    consults to decide what to draw, so membership there is the same
+    authority a screenshot would answer from.
+    """
+    return widget in widget.screen._compositor.visible_widgets
+
+
+def test_grouped_input_widgets_are_actually_rendered_and_editable(tmp_path: Path) -> None:
+    """Regression for a real rendering bug: a grouped field's label appeared
+    with no input box underneath it.
+
+    ``Widget.display`` was ``True`` at every level (correct), and even the
+    child's own laid-out ``.region`` reported a real height -- neither would
+    have caught this. The actual defect was the group's *container*:
+    Textual's default ``Vertical`` is ``height: 1fr``, which inside this
+    screen's scrolling form collapsed the container itself to one row.
+    Textual still laid the label and the input out as if there were room, but
+    ``overflow: hidden`` on that one-row container then clipped everything
+    after the label -- so the label painted, the input did not, and neither
+    ``.display`` nor the input's own ``.region`` showed any sign of it. Even
+    ``Widget.is_on_screen`` missed it, for the same reason -- see
+    :func:`_actually_painted`, which is the check that would have failed.
+
+    Covers both answers -- a field visible only in Percentage and one visible
+    only in Dimensions -- and the switch between them.
+    """
+    import asyncio
+
+    from textual.widgets import Input, Select
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "photo.jpg")
+    seen: dict[str, Any] = {}
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(100, 45)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("resize")
+            app.push_screen(screen)
+            await pilot.pause()
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+
+            # Percentage is the default: scale must actually be painted, not
+            # merely present in the DOM with `display=True`.
+            scale = screen.query_one("#field-scale", Input)
+            seen["scale_painted"] = _actually_painted(scale)
+            scale.focus()
+            await pilot.pause()
+            seen["scale_focused"] = scale.has_focus
+            await pilot.press("5", "0")
+            await pilot.pause()
+            seen["scale_value"] = scale.value
+            # A field belonging to the answer not currently shown must not be
+            # reachable by Tab, or a keyboard user could focus an invisible
+            # field and wonder where their keystrokes are going.
+            width_field = screen.query_one("#field-width", Input)
+            seen["width_reachable_while_hidden"] = width_field in screen.focus_chain
+
+            # Switch answers, and check the fields grouped with
+            # "Dimensions" -- an Input and, separately, a Select.
+            screen.query_one("#mode-resize-method", Select).value = "Dimensions"
+            await pilot.pause()
+
+            width_field = screen.query_one("#field-width", Input)
+            fit_field = screen.query_one("#field-fit", Select)
+            seen["width_painted"] = _actually_painted(width_field)
+            seen["fit_painted"] = _actually_painted(fit_field)
+            width_field.focus()
+            await pilot.pause()
+            seen["width_focused"] = width_field.has_focus
+            await pilot.press("1", "2", "8", "0")
+            await pilot.pause()
+            seen["width_value"] = width_field.value
+            seen["scale_reachable_while_hidden"] = scale in screen.focus_chain
+
+    asyncio.run(scenario())
+
+    # Actually painted -- not a label floating above a clipped, invisible box.
+    assert seen["scale_painted"] is True
+    assert seen["width_painted"] is True
+    assert seen["fit_painted"] is True
+
+    # Focusable and editable by keyboard, in both answers.
+    assert seen["scale_focused"] is True
+    assert seen["scale_value"] == "50"
+    assert seen["width_focused"] is True
+    assert seen["width_value"] == "1280"
+
+    # The other answer's fields are not in the tab order while hidden.
+    assert seen["width_reachable_while_hidden"] is False
+    assert seen["scale_reachable_while_hidden"] is False
+
+
+def test_the_resize_form_is_compact(tmp_path: Path) -> None:
+    """Driven against the real screen: verbosity is what was reported, so the
+    fix is checked there rather than only in the data `forms` produces.
+
+    Percentage mode -- the default -- shows exactly one sizing field, no
+    field's placeholder is its own full description, and every visible hint
+    is short enough to read as a label's caption rather than a paragraph.
+    """
+    import asyncio
+
+    from textual.widgets import Input, Static
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "photo.jpg")
+    seen: dict[str, Any] = {}
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("resize")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            await pilot.pause()
+
+            seen["scale_placeholder"] = screen.query_one("#field-scale", Input).placeholder
+            seen["width_placeholder"] = screen.query_one("#field-width", Input).placeholder
+            seen["hints"] = [str(s.content) for s in screen.query(Static) if str(s.content).strip()]
+            seen["dimensions_visible"] = screen.query_one("#mode-resize-method-dimensions").display
+
+    asyncio.run(scenario())
+
+    # Short, concrete placeholders -- not the field's own sentence.
+    assert seen["scale_placeholder"] == "%"
+    assert seen["width_placeholder"] == "px"
+    # Percentage is the default: the Dimensions fields are not competing for
+    # the user's attention until asked for.
+    assert seen["dimensions_visible"] is False
+    # Nothing on the screen is a multi-sentence paragraph.
+    assert all(len(hint) < 60 for hint in seen["hints"])
+
+
+def test_a_format_chosen_in_the_form_reaches_the_router(tmp_path: Path) -> None:
+    """Choosing the format controls the conversion, by the ordinary path."""
+    import asyncio
+
+    from textual.widgets import Input, Select
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "in.png")
+    router = FakeRouter()
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("convert-image")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.png")
+            screen.query_one("#field-to", Select).value = "png"
+            await pilot.pause()
+
+            runner.run(screen._request(dry_run=False, force=True), router=router)  # type: ignore[arg-type]
+
+    asyncio.run(scenario())
+
+    (call,) = router.calls
+    assert call["tool"] == "convert-image"
+    assert call["to"] == "png"
+    # And the same parameters reached destination resolution, which is what
+    # lets the router correct `convert.jpg` to `convert.png` for the TUI too.
+    assert router.target_params == [{"to": "png"}]
+
+
+def test_leaving_the_format_blank_omits_it_so_the_extension_decides(tmp_path: Path) -> None:
+    """Blank is not a format. Sending `to=None` would override the tool's own
+    default and defeat the "-o decides" path the CLI has."""
+    import asyncio
+
+    from textual.widgets import Input
+
+    from docmax.tui.app import DocMaxApp, RunScreen
+
+    source = _touch(tmp_path / "in.png")
+    router = FakeRouter()
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = RunScreen("convert-image")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            screen.query_one("#field-__inputs__", Input).value = str(source)
+            screen.query_one("#field-__output__", Input).value = str(tmp_path / "out.bmp")
+            await pilot.pause()
+
+            runner.run(screen._request(dry_run=False, force=True), router=router)  # type: ignore[arg-type]
+
+    asyncio.run(scenario())
+
+    (call,) = router.calls
+    assert "to" not in call
 
 
 def test_selecting_parameters_reaches_the_normal_execution_path(tmp_path: Path) -> None:

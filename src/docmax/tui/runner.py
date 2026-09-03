@@ -158,6 +158,10 @@ def run(
         docs,
         requested=str(request.output) if request.output is not None else None,
         force=request.force,
+        # The parameters go in too: a tool whose output extension is decided
+        # by one of them (`convert-image --to png`) is resolved correctly here
+        # rather than in each interface. See `ToolSpec.suffix_for_params`.
+        params=request.params,
     )
 
     return router.run(

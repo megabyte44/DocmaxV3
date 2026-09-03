@@ -34,7 +34,7 @@ from docmax.core.errors import EngineNotSupportedError, InternalError, InvalidPa
 from docmax.core.models import Engine
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from docmax.core.protocols import EngineStrategy
 
@@ -77,6 +77,37 @@ class Param:
     #: (the default) renders as the single text field every other param gets.
     #: See ADR 0032.
     component_labels: tuple[str, ...] = ()
+    #: What a form calls this parameter, when its name is not what a person
+    #: would call it. Purely presentational, exactly like
+    #: :attr:`component_labels`: the wire name is still ``name``, so the CLI
+    #: flag, the MCP schema and API validation are unaffected.
+    #:
+    #: Exists because a flag name and a form label are not the same kind of
+    #: word. ``convert-image --to png`` reads correctly on a command line,
+    #: where the verb is already in the command; the same parameter rendered
+    #: above a dropdown says only "to", which names nothing. Empty (the
+    #: default) derives the label from ``name``, which is right for the
+    #: parameters whose names are already nouns — ``quality``, ``width``,
+    #: ``password``.
+    label: str = ""
+    #: Marks this parameter as one of several mutually exclusive ways to say
+    #: the same thing — ``resize``'s ``scale`` versus its ``width``/``height``.
+    #: The value is the question a form asks once for the whole set, e.g.
+    #: ``"Resize method"``; every parameter sharing it is an alternative
+    #: answer, distinguished by :attr:`group_option`. Empty (the default)
+    #: means this parameter stands alone, which is every parameter but these.
+    #:
+    #: Presentational only, exactly like :attr:`label`: the CLI still accepts
+    #: every one of these flags plainly and simultaneously (their own
+    #: validation is what makes them exclusive, not this). Only the TUI reads
+    #: it, rendering one selector for the group and showing just the fields
+    #: for whichever answer is currently chosen — a user configuring
+    #: percentage resizing is not also shown the width and height fields that
+    #: answer.
+    group: str = ""
+    #: Which answer within :attr:`group` this parameter belongs to, e.g.
+    #: ``"Percentage"``. Meaningless when ``group`` is empty.
+    group_option: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +137,47 @@ class ToolSpec:
     produces_output: bool = True
     #: Used by ``OutputTarget.resolve`` when the user does not pass ``-o``.
     default_suffix: str = ".pdf"
+    #: The output extension when a *parameter* decides it, rather than the
+    #: constant above. Given the run's parameters and the suffix the
+    #: destination already carries (``""`` when there is none yet),
+    #: returns the suffix the result must carry (``".png"``) or ``None``
+    #: to leave what is there alone.
+    #:
+    #: The current suffix is passed in because only the tool can judge
+    #: whether it is *already* right: ``.jpeg`` and ``.jpg`` are one
+    #: format, and rewriting either into the other would be a change the
+    #: user did not ask for. ``core`` cannot know that -- the table that
+    #: does live in ``tools``.
+    #:
+    #: This closes the "output extension depends on a parameter" seam
+    #: ``convert/tool.py`` has documented since M5. ``convert-image --to png``
+    #: names the format outright, and before this the destination's extension
+    #: was a second, contradictory answer to the same question — leaving the
+    #: user to reconcile two things they had already said once.
+    #:
+    #: A callable rather than a table because the mapping from a parameter
+    #: value to a suffix is the *tool's* knowledge: ``convert-image`` reads it
+    #: from ``tools/_formats``, which ``core`` must never import (see
+    #: ``.importlinter``). The router calls this without knowing what it
+    #: consults, which is what keeps the layering intact.
+    #:
+    #: Consumed generically by ``EngineRouter.target_for``, so every surface —
+    #: CLI, TUI, MCP — inherits the behaviour without a line of per-tool code.
+    suffix_for_params: Callable[[Mapping[str, Any], str], str | None] | None = None
+    #: One line describing the chosen inputs, shown by a form before it asks
+    #: for parameters that depend on them. Given the input paths, returns the
+    #: line or ``None`` to say nothing.
+    #:
+    #: Exists because some parameters cannot be answered without a fact about
+    #: the document: `resize` asks for a width in pixels, and a user who does
+    #: not know the image is 1920 x 1080 has to leave the application to find
+    #: out. The fact lives with the tool that needs it -- reading image
+    #: dimensions means Pillow, which the TUI must not import.
+    #:
+    #: Advisory only, exactly like `forms.describe_missing_paths`: a
+    #: description that fails must never stop a run, so implementations return
+    #: ``None`` rather than raising.
+    describe_inputs: Callable[[Sequence[Path]], str | None] | None = None
     #: ``split`` and ``to-images`` write many files into ``-o`` as a directory
     #: — see ADR 0003's ``atomic_dir`` and ADR 0031. Every other tool writes
     #: one file, and ``OutputTarget.resolve`` reads this to decide whether an

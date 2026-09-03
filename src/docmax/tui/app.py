@@ -127,6 +127,34 @@ def _selected(widget: Select[str], choices: tuple[str, ...]) -> str:
     return value if isinstance(value, str) and value in choices else ""
 
 
+def _unit_hint(field: forms.Field) -> str:
+    """A short, concrete placeholder for a field's input box, or none at all.
+
+    Not ``field.description``: a full sentence as a placeholder is either
+    truncated illegibly by the box's own width, or -- if the box is widened
+    to fit it -- defeats the point of having one. Most fields already put
+    their unit in the label, e.g. ``"width (px)"``, so this reuses exactly
+    that rather than asking every tool to declare a second short string for
+    the same fact a label already states. A label with no such suffix gets no
+    placeholder, which costs less than a misleading one.
+    """
+    label = field.label
+    if label.endswith(")") and "(" in label:
+        return label[label.rindex("(") + 1 : -1]
+    return ""
+
+
+def _slug(text: str) -> str:
+    """A widget-id-safe fragment from a group or option label.
+
+    Textual ids are just strings, so this only has to be stable and free of
+    spaces -- "Resize method" and "Percentage" become "resize-method" and
+    "percentage", which is what lets a group's id and its containers' ids be
+    derived from the same label rather than invented separately.
+    """
+    return text.lower().replace(" ", "-")
+
+
 #: Rendered into the status line by `RunScreen._succeeded`'s dry-run branch
 #: already, so `format_details` leaves them out rather than showing them twice.
 _DRY_RUN_KEYS = frozenset({"dry_run", "reason", "destination"})
@@ -756,32 +784,15 @@ class RunScreen(Screen[None]):
                     )
                     yield Button("Browse…", id="browse-output")
 
+            rendered_groups: set[str] = set()
             for field in self._fields:
-                required = " (required)" if field.required else ""
-                yield Label(f"{field.label}{required}")
-                if field.components:
-                    # A comma-separated value with more than one meaning is
-                    # unguessable blind — one labelled input per part, joined
-                    # back into the single value the tool actually reads.
-                    # See ADR 0032.
-                    with Horizontal(classes="component-row"):
-                        for index, component in enumerate(field.components):
-                            with Vertical(classes="component"):
-                                yield Label(component, classes="component-label")
-                                yield Input(
-                                    value=field.default_component(index),
-                                    placeholder=component,
-                                    id=f"field-{field.name}-{index}",
-                                )
-                elif field.kind == "choice":
-                    yield _select(field.choices, default=field.default, id_=f"field-{field.name}")
-                else:
-                    yield Input(
-                        value=field.default_text(),
-                        placeholder=field.description,
-                        id=f"field-{field.name}",
-                    )
-                yield Static(field.description, classes="hint", markup=False)
+                if field.group:
+                    if field.group in rendered_groups:
+                        continue
+                    rendered_groups.add(field.group)
+                    yield from self._render_group(field.group)
+                    continue
+                yield from self._render_field(field)
 
             yield Label("engine")
             yield _select(_ENGINES, default="auto", id_="field-__engine__")
@@ -1011,6 +1022,116 @@ class RunScreen(Screen[None]):
             self.query_one("#field-__output__", Input).value = str(chosen)
         self._set_status("", state="idle")
 
+    def _render_field(self, field: forms.Field) -> ComposeResult:
+        """One field: its label, its widget, and -- only if it has one worth
+        showing -- a single short hint. Used both for an ordinary field and
+        for each field inside a mode group's active container, so a grouped
+        field looks exactly like an ungrouped one.
+
+        The one thing this deliberately does not do any more: repeat
+        ``field.description`` twice, once as the input's placeholder and once
+        as the line underneath it. A placeholder that is a full sentence is
+        truncated by the field's own width into something less readable than
+        no placeholder at all, and the line below already says the whole
+        thing legibly -- so the placeholder is now the short unit hint a label
+        like ``width (px)`` already implies, via :func:`_unit_hint`, and
+        the paragraph appears exactly once.
+        """
+        required = " (required)" if field.required else ""
+        yield Label(f"{field.label}{required}")
+        if field.components:
+            # A comma-separated value with more than one meaning is
+            # unguessable blind -- one labelled input per part, joined
+            # back into the single value the tool actually reads.
+            # See ADR 0032.
+            with Horizontal(classes="component-row"):
+                for index, component in enumerate(field.components):
+                    with Vertical(classes="component"):
+                        yield Label(component, classes="component-label")
+                        yield Input(
+                            value=field.default_component(index),
+                            placeholder=component,
+                            id=f"field-{field.name}-{index}",
+                        )
+        elif field.kind == "choice":
+            yield _select(field.choices, default=field.default, id_=f"field-{field.name}")
+        else:
+            yield Input(
+                value=field.default_text(),
+                placeholder=_unit_hint(field),
+                id=f"field-{field.name}",
+            )
+        # A field with nothing to add beyond its label costs a blank line if
+        # drawn anyway -- `quality`'s hint is worth keeping, an empty one is not.
+        if field.description:
+            yield Static(field.description, classes="hint", markup=False)
+
+    def _render_group(self, group: str) -> ComposeResult:
+        """A set of mutually exclusive fields -- ``resize``'s Percentage
+        versus Dimensions -- as one selector plus one visible answer at a
+        time.
+
+        Driven entirely by ``Param.group`` / ``Param.group_option``
+        (``core/registry.py``): nothing here names ``resize`` or any other
+        tool, so a second tool that declares a group gets this rendering for
+        free, exactly as a plain parameter already does. The alternative --
+        showing every field for every answer at once -- is the clutter this
+        exists to avoid: a user choosing "resize by percentage" should not
+        also be shown the width, height and fit fields that answer a
+        different question.
+        """
+        options: dict[str, list[forms.Field]] = {}
+        for field in self._fields:
+            if field.group == group:
+                options.setdefault(field.group_option, []).append(field)
+
+        names = tuple(options)
+        default_option = names[0]
+        select_id = f"mode-{_slug(group)}"
+
+        yield Label(group)
+        yield _select(names, default=default_option, id_=select_id)
+
+        for option, fields in options.items():
+            # `Vertical`'s own default CSS is `height: 1fr`, which inside
+            # this screen's scrolling form resolves to a sliver too short to
+            # hold a label and its input both -- the label fits, the input is
+            # clipped by `overflow: hidden`, and a user sees a caption with no
+            # box underneath it. `.mode-group` overrides that to `height: auto`,
+            # the same fix `.component` already applies for the same reason.
+            container = Vertical(id=f"{select_id}-{_slug(option)}", classes="mode-group")
+            with container:
+                for field in fields:
+                    yield from self._render_field(field)
+            if option != default_option:
+                container.display = False
+
+    @on(Select.Changed)
+    def _on_mode_changed(self, event: Select.Changed) -> None:
+        """Show the chosen answer's fields, hide the rest of the group.
+
+        A hidden field also has its typed value cleared, not merely its
+        display turned off: switching from Percentage after typing 50 into
+        it, then setting a width, must not leave that 50 to resurface as a
+        contradictory ``scale`` alongside ``width`` when the form is
+        submitted -- the field the user is no longer looking at is not one
+        they are still answering.
+        """
+        select_id = event.select.id or ""
+        if not select_id.startswith("mode-"):
+            return
+        chosen = event.value if isinstance(event.value, str) else ""
+        prefix = f"{select_id}-"
+        for container in self.query(Vertical):
+            container_id = container.id or ""
+            if not container_id.startswith(prefix):
+                continue
+            active = container_id == prefix + _slug(chosen)
+            container.display = active
+            if not active:
+                for widget in container.query(Input):
+                    widget.value = ""
+
     @on(Input.Changed, "#field-__inputs__")
     def _on_inputs_changed(self) -> None:
         self._update_input_hint()
@@ -1035,6 +1156,15 @@ class RunScreen(Screen[None]):
         raw = self.query_one("#field-__inputs__", Input).value
         message = forms.describe_missing_paths(raw)
         is_invalid = bool(message)
+        # Nothing wrong with the paths, so the line is free to say something
+        # useful instead. A tool that declares `describe_inputs` uses it to
+        # state the fact its parameters depend on -- `resize` says how many
+        # pixels across the image actually is, which is the number its width
+        # and height fields are asking the user to reason about. Read
+        # generically: the TUI never learns which tool this is, and the
+        # Pillow call that produces it stays in the tool package.
+        if not is_invalid:
+            message = forms.describe_inputs(self.spec, raw) or ""
         input_widget = self.query_one("#field-__inputs__", Input)
         hint = self.query_one("#input-hint", Static)
         input_widget.set_class(is_invalid, "invalid")
@@ -1646,6 +1776,7 @@ class DocMaxApp(App[None]):
     .hint.invalid { color: $error; }
     .component-row { height: auto; }
     .component { width: 1fr; margin-right: 1; height: auto; }
+    .mode-group { height: auto; }
     .component-label { color: $text-muted; text-style: bold; }
     #details { color: $text-muted; padding: 1 0 0 0; height: auto; }
 

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from docmax.core.cancellation import NEVER_CANCELLED
@@ -58,7 +59,7 @@ from docmax.core.protocols import NULL_PROGRESS
 from docmax.core.registry import get_tool
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from docmax.core.cancellation import CancellationToken
     from docmax.core.consent import ConsentStore
@@ -237,6 +238,7 @@ class EngineRouter:
         *,
         requested: str | None = None,
         force: bool = False,
+        params: Mapping[str, Any] | None = None,
     ) -> OutputTarget:
         """Resolve a destination using the tool's own default extension.
 
@@ -254,6 +256,18 @@ class EngineRouter:
         accept but guaranteed to ignore.
         """
         spec = self.lookup(tool_name)
+        # A tool whose output extension is decided by a parameter says so with
+        # `ToolSpec.suffix_for_params` — `convert-image --to png`. Called
+        # without knowing what it consults: the mapping from a value to a
+        # suffix is the tool's own knowledge, and `core` may not import
+        # `tools` to learn it. Every interface reaching the router inherits
+        # the behaviour, so the rule has one implementation rather than one
+        # per surface.
+        enforced = (
+            spec.suffix_for_params(params or {}, Path(requested).suffix if requested else "")
+            if spec.suffix_for_params is not None
+            else None
+        )
         if not spec.produces_output:
             if not docs:
                 raise InvalidParameterError(
@@ -268,6 +282,7 @@ class EngineRouter:
             default_suffix=spec.default_suffix,
             produces_directory=spec.produces_directory,
             force=force,
+            enforced_suffix=enforced,
         )
 
     # -- dependencies ---------------------------------------------------------

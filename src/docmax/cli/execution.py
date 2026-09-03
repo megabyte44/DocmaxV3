@@ -167,7 +167,9 @@ def execute(
     with _interruptible(token), ConsoleProgress(console) as progress:
         try:
             docs = [DocumentRef.from_path(path) for path in inputs]
-            target = router.target_for(tool, docs, requested=str(output), force=force)
+            target = router.target_for(
+                tool, docs, requested=str(output), force=force, params=params
+            )
             try:
                 return router.run(
                     tool,
