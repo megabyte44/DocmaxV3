@@ -146,6 +146,7 @@ class OutputTarget:
         default_suffix: str = ".pdf",
         produces_directory: bool = False,
         force: bool = False,
+        enforced_suffix: str | None = None,
     ) -> OutputTarget:
         """Validate a requested destination against the inputs it came from.
 
@@ -164,6 +165,17 @@ class OutputTarget:
         suffixes are unaffected either way, since ``Path.suffix`` already sees
         a non-empty ``.gz``.
 
+        ``enforced_suffix`` is the one case where a suffix the user typed is
+        *replaced* rather than respected. It arrives only when a parameter has
+        named the output format outright — ``convert-image --to png`` — and it
+        exists because the alternatives are worse: writing PNG bytes into a
+        file called ``.jpg`` produces a file whose name lies about it, and
+        refusing the combination makes the user retype a path to say a thing
+        they already said. Correcting the extension is the only outcome that
+        is both truthful and what was asked for. The correction happens
+        *before* the in-place and already-exists checks below, so the file
+        actually written is the one that was checked.
+
         ``produces_directory`` (``ToolSpec.produces_directory`` — ``split``,
         ``to-images``; see ADR 0031) turns that appending off entirely. A
         directory's name almost never has a dot in it, and "no suffix" is the
@@ -172,13 +184,23 @@ class OutputTarget:
         ``parts.pdf`` that the tool then creates as a directory anyway,
         silently going where the caller did not ask it to.
         """
+        # A parameter that names the format outright decides the extension,
+        # for the derived path and the typed one alike.
+        suffix = enforced_suffix or default_suffix
+
         if requested is not None:
             destination = Path(requested).expanduser().resolve()
             if not produces_directory and not destination.suffix:
-                destination = destination.with_suffix(default_suffix)
+                destination = destination.with_suffix(suffix)
+            elif (
+                not produces_directory
+                and enforced_suffix is not None
+                and destination.suffix.lower() != enforced_suffix.lower()
+            ):
+                destination = destination.with_suffix(enforced_suffix)
         elif inputs:
             first = inputs[0].path
-            name = first.stem if produces_directory else f"{first.stem}{default_suffix}"
+            name = first.stem if produces_directory else f"{first.stem}{suffix}"
             destination = first.with_name(name)
         else:
             raise InvalidParameterError(

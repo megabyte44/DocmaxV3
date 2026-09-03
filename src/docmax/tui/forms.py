@@ -60,6 +60,12 @@ class Field:
     #: Non-empty means "render one labelled text input per label and join
     #: them with commas", instead of the single field every other kind gets.
     components: tuple[str, ...] = ()
+    #: Copied from ``Param.group`` / ``Param.group_option`` — see their
+    #: docstrings. Non-empty ``group`` means this field is one of several
+    #: mutually exclusive alternatives; a form shows one selector for the
+    #: group and only the fields for whichever alternative is chosen.
+    group: str = ""
+    group_option: str = ""
 
     def default_text(self) -> str:
         """The default rendered for a text input. Empty means "nothing yet"."""
@@ -91,13 +97,20 @@ def field_for(param: Param) -> Field:
     kind = "choice" if param.choices else _KINDS_BY_TYPE.get(param.type_, "text")
     return Field(
         name=param.name,
-        label=param.name.replace("_", " "),
+        # `Param.label` when the spec supplied one, and the parameter's own
+        # name otherwise. A flag name and a form label are not always the same
+        # word: `--to png` reads correctly where the verb is in the command,
+        # but a dropdown labelled "to" names nothing. The fallback keeps every
+        # parameter whose name is already a noun exactly as it was.
+        label=param.label or param.name.replace("_", " "),
         kind=kind,
         description=param.description,
         default=param.default,
         required=param.required,
         choices=param.choices,
         components=param.component_labels,
+        group=param.group,
+        group_option=param.group_option,
     )
 
 
@@ -234,6 +247,35 @@ def describe_missing_paths(raw: str) -> str:
     return "; ".join(problems)
 
 
+def describe_inputs(spec: ToolSpec, raw: str) -> str | None:
+    """What the tool has to say about the chosen inputs, or ``None``.
+
+    The counterpart to :func:`describe_missing_paths`: that one reports what
+    is wrong with the paths, this one reports what is *true* of them, for the
+    tools whose parameters cannot be answered without knowing it. `resize`
+    asks for a width in pixels; a user who cannot see that the image is
+    1920 x 1080 has to leave the application to answer.
+
+    The knowledge belongs to the tool -- reading image dimensions means
+    Pillow, which the TUI must never import -- so this only calls what
+    ``ToolSpec.describe_inputs`` supplies, and knows nothing about which tool
+    it is talking to.
+
+    Advisory, like everything else on this line: a tool that raises while
+    describing gets silence rather than an error, because a description has no
+    business stopping a run it does not gate.
+    """
+    if spec.describe_inputs is None:
+        return None
+    paths = [Path(part.strip()).expanduser() for part in raw.split(",") if part.strip()]
+    if not paths:
+        return None
+    try:
+        return spec.describe_inputs(paths)
+    except Exception:
+        return None
+
+
 def first_input_directory(raw: str) -> Path | None:
     """The directory of the first path in the ``__inputs__`` text, or ``None``.
 
@@ -268,6 +310,7 @@ __all__ = [
     "KINDS",
     "Field",
     "collect",
+    "describe_inputs",
     "describe_missing_paths",
     "field_for",
     "fields_for",

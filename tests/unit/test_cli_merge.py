@@ -32,7 +32,7 @@ from docmax.core.models import DocumentRef, Engine, OutputTarget, ToolResult
 from docmax.core.router import EngineRouter
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from docmax.core.cancellation import CancellationToken
     from docmax.core.protocols import EngineStrategy, ProgressSink
@@ -120,6 +120,10 @@ class FakeSpec:
     default_suffix: str = ".pdf"
     produces_directory: bool = False
     produces_output: bool = True
+    #: Mirrors the real `ToolSpec` field. `None` is what every tool but
+    #: `convert-image` declares: no parameter decides this tool's output
+    #: extension, so `default_suffix` stays in charge.
+    suffix_for_params: Callable[[Mapping[str, Any], str], str | None] | None = None
     strategies: dict[Engine, RecordingStrategy] = field(default_factory=dict)
 
     @property

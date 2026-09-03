@@ -45,6 +45,7 @@ import typer
 from docmax.core.models import Engine
 from docmax.tools import _formats, _permissions, _position
 from docmax.tools.protect import tool as protect_spec
+from docmax.tools.resize import tool as resize_spec
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -99,6 +100,11 @@ _DEFAULT_ALGORITHM = protect_spec.DEFAULT_ALGORITHM
 #: full; these two strings are only the short version for `--help`. ADR 0010.
 _CONVERT_FORMATS = ", ".join(_formats.convertible_names())
 _IMAGE_FORMATS = ", ".join(_formats.rasterisable_names())
+#: `to-images` writes only what pdftoppm produces; `convert-image` reads and
+#: writes every declared raster format, so the two lists genuinely differ.
+_CONVERTIBLE_IMAGE_FORMATS = ", ".join(_formats.readable_image_names())
+#: `resize`'s fit modes, listed by the spec that declares them.
+_FIT_MODES = ", ".join(resize_spec.FIT_MODES)
 
 
 @app_commands.command()
@@ -724,6 +730,195 @@ def compress_image(
         quality=quality,
     )
     render_result(result, dry_run=dry_run, tool="compress-image")
+
+
+@app_commands.command()
+def resize(
+    source: Annotated[Path, typer.Argument(help="The image to resize.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    width: Annotated[
+        int | None,
+        typer.Option(
+            "--width",
+            help="Target width in pixels. With --height omitted, the height follows the image.",
+            show_default=False,
+        ),
+    ] = None,
+    height: Annotated[
+        int | None,
+        typer.Option(
+            "--height",
+            help="Target height in pixels. With --width omitted, the width follows the image.",
+            show_default=False,
+        ),
+    ] = None,
+    scale: Annotated[
+        float | None,
+        typer.Option(
+            "--scale",
+            help="Percentage of the original — 50 halves it, 200 doubles it.",
+            show_default=False,
+        ),
+    ] = None,
+    fit: Annotated[
+        str,
+        typer.Option(
+            "--fit",
+            help=f"How to fit when both dimensions are given: {_FIT_MODES}.",
+        ),
+    ] = "cover",
+    quality: Annotated[
+        int, typer.Option("--quality", help="JPEG/WEBP quality 1-95 (PNG: lossless).")
+    ] = 80,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
+) -> None:
+    """Shrink or expand an image.
+
+    Three ways to say how big, and any one is enough:
+
+        --scale 50              half the original, proportions kept
+        --width 800             height follows the image's own proportions
+        --width 800 --height 600    an exact box, with --fit deciding the rest
+
+    `--fit` only matters for that last form: cover (crop to fill), contain
+    (pad to fit), fill (same as cover), stretch (ignore proportions). The
+    other two already keep the proportions, so there is nothing to decide.
+
+    Quality applies to JPEG/WEBP; PNG is lossless and ignores it.
+    Requires Pillow — install with `pip install "DocmaxV3[images]"`.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    json_output.note(json_out)
+
+    result = execute(
+        "resize",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        width=width,
+        height=height,
+        scale=scale,
+        fit=fit,
+        quality=quality,
+    )
+    render_result(result, dry_run=dry_run, tool="resize")
+
+
+@app_commands.command(name="convert-image")
+def convert_image(
+    source: Annotated[Path, typer.Argument(help="The image to convert.", show_default=False)],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Where to write the result.", show_default=False)
+    ],
+    to: Annotated[
+        str | None,
+        typer.Option(
+            "--to",
+            help=f"The format to convert to: {_CONVERTIBLE_IMAGE_FORMATS}. Default: from the -o extension.",
+            show_default=False,
+        ),
+    ] = None,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
+) -> None:
+    """Convert an image to another format.
+
+    Supports PNG, JPEG, TIFF, BMP, and GIF. Name the format with `--to`, or
+    leave it out and the extension of `-o` decides. Passing both is allowed;
+    passing two that disagree is refused rather than resolved, since either
+    answer would write a file whose name misdescribes its contents.
+
+    To also shrink the file, pipe the result through `compress-image`.
+    Requires Pillow — install with `pip install "DocmaxV3[images]"`.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    json_output.note(json_out)
+
+    result = execute(
+        "convert-image",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        to=to,
+    )
+    render_result(result, dry_run=dry_run, tool="convert-image")
+
+
+@app_commands.command(name="watermark-image")
+def watermark_image(
+    source: Annotated[Path, typer.Argument(help="The image to watermark.", show_default=False)],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Where to write the result.", show_default=False),
+    ],
+    text: Annotated[
+        str,
+        typer.Option("--text", help="The text to draw on the image.", show_default=False),
+    ],
+    position: Annotated[
+        str,
+        typer.Option(
+            "--position",
+            help=f"Which of the nine cells: {_POSITIONS}.",
+        ),
+    ] = "center",
+    size: Annotated[float, typer.Option("--size", help="Font size in points.")] = 48.0,
+    opacity: Annotated[
+        float,
+        typer.Option("--opacity", help="Opacity from 0 (invisible) to 1 (solid)."),
+    ] = 0.15,
+    angle: Annotated[
+        float,
+        typer.Option("--angle", help="Rotation angle in degrees clockwise."),
+    ] = 45.0,
+    force: _ForceOption = False,
+    engine: _EngineOption = None,
+    dry_run: _DryRunOption = False,
+    json_out: JsonOption = False,
+) -> None:
+    """Draw semi-transparent text on an image.
+
+    Watermarks the image with text at the specified position, size, opacity, and
+    angle. The watermark is a composite overlay that sits on top of the image
+    content. Requires Pillow — install with `pip install "DocmaxV3[images]"`.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import execute
+    from docmax.cli.render import render_result
+
+    json_output.note(json_out)
+
+    result = execute(
+        "watermark-image",
+        [source],
+        output,
+        engine=engine,
+        force=force,
+        dry_run=dry_run,
+        text=text,
+        position=position,
+        size=size,
+        opacity=opacity,
+        angle=angle,
+    )
+    render_result(result, dry_run=dry_run, tool="watermark-image")
 
 
 @app_commands.command()
