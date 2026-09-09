@@ -71,6 +71,62 @@ def test_an_unknown_binary_is_a_programming_error() -> None:
         _binaries.describe("nonexistent-binary")
 
 
+def test_install_hint_renders_the_current_platform_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user reads a command, never a Python tuple."""
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "linux")
+
+    hint = _binaries.describe("gs").install_hint()
+
+    assert hint == "Install it with: apt-get install -y ghostscript"
+
+
+def test_install_hint_falls_back_to_every_platform_when_unrecognised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "bsd")
+
+    hint = _binaries.describe("gs").install_hint()
+
+    assert "linux: apt-get install -y ghostscript" in hint
+    assert "windows: winget install --id ArtifexSoftware.GhostScript -e" in hint
+
+
+# ---------------------------------------------------------------------------
+# Package managers
+# ---------------------------------------------------------------------------
+
+
+def test_manager_available_finds_the_platforms_own_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "macos")
+    monkeypatch.setattr(
+        shutil, "which", lambda name: "/usr/local/bin/brew" if name == "brew" else None
+    )
+
+    assert _binaries.manager_available() == "brew"
+
+
+def test_manager_available_is_none_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "macos")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    assert _binaries.manager_available() is None
+
+
+def test_manager_available_never_offers_an_unverified_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the one manager this platform's install_argv was written for.
+
+    Not "whatever else happens to be on PATH" — a second manager's package
+    name for these binaries has never been checked against this project's own
+    install lines (see the comment on `_MANAGER_BY_PLATFORM`).
+    """
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "linux")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    assert _binaries.manager_available() == "apt-get"
+
+
 # ---------------------------------------------------------------------------
 # Finding
 # ---------------------------------------------------------------------------

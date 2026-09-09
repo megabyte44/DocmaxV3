@@ -23,6 +23,8 @@ SPEC = register(
         # `core/registry.py` have both named it as the example since M1.
         accepts_multiple_inputs=True,
         default_suffix=".pdf",
+        # img2pdf and Pillow both ship in pyproject.toml's `images` extra.
+        pip_extra="images",
         # No parameters. Order is argument order, and page size follows each
         # image's own dimensions -- see `local.py` for why neither is a flag.
         params=(),

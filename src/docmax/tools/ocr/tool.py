@@ -18,6 +18,11 @@ SPEC = register(
         module=__name__.rpartition(".")[0],
         supported_engines=frozenset({Engine.LOCAL, Engine.CLOUD}),
         default_suffix=".pdf",
+        # Both are used_by=("ocr", ...) in tools/_binaries.py; recorded here
+        # too so `setup` can ask the registry rather than the binary catalogue.
+        # OpenCV (the `ocr` extra) is deliberately excluded: it only gates
+        # `--deskew`, not this tool's availability -- see ocr/local.py.
+        requires_binaries=("tesseract", "pdftoppm"),
         params=(
             Param(
                 name="lang",

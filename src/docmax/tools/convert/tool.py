@@ -39,6 +39,8 @@ SPEC = register(
         # required `-o`; this is what lets `tui/app.py` know it too, instead
         # of silently diverging the way issue #24 found. See ADR 0033.
         output_required=True,
+        # used_by=("convert",) in tools/_binaries.py, recorded here too.
+        requires_binaries=("pandoc",),
         params=(
             Param(
                 name="to",

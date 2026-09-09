@@ -65,6 +65,8 @@ class ErrorCode(StrEnum):
     DEP_TOOL_FAILED = "dependency.tool_failed"
     DEP_TOOL_TIMEOUT = "dependency.tool_timeout"
     DEP_UNTRUSTED_BINARY = "dependency.untrusted_binary"
+    DEP_INSTALL_FAILED = "dependency.install_failed"
+    DEP_NO_PACKAGE_MANAGER = "dependency.no_package_manager"
 
     # -- engine routing ------------------------------------------------------
     ENGINE_NOT_SUPPORTED = "engine.not_supported"
@@ -307,6 +309,32 @@ class UntrustedBinaryError(DependencyError):
     default_remedy = f"Run `{CLI_NAME} doctor --fix` to re-discover tool paths."
 
 
+class InstallFailedError(DependencyError):
+    """`docmax setup` ran an installer and the dependency still isn't usable.
+
+    Distinct from :class:`ExternalToolFailedError`: that one means a
+    *document* tool's own subprocess failed mid-run, a fact about the
+    document being processed. This means the installer itself failed or
+    silently did nothing, a fact about the machine — conflating the two would
+    make a compress failure and a setup failure indistinguishable by code.
+    """
+
+    code = ErrorCode.DEP_INSTALL_FAILED
+    user_fixable = True
+
+
+class NoPackageManagerError(DependencyError):
+    """`docmax setup` has nothing it can run on this platform automatically.
+
+    Never auto-elevates and never guesses at a second or third package
+    manager's package name — see `tools/_binaries.py`'s
+    `_MANAGER_BY_PLATFORM`. The remedy is always the same copy-pasteable line
+    `doctor` already prints.
+    """
+
+    code = ErrorCode.DEP_NO_PACKAGE_MANAGER
+
+
 # ---------------------------------------------------------------------------
 # Engine routing
 # ---------------------------------------------------------------------------
@@ -499,12 +527,14 @@ __all__ = [
     "InPlaceOverwriteError",
     "InputError",
     "InputNotFoundError",
+    "InstallFailedError",
     "InsufficientDiskSpaceError",
     "InternalError",
     "InvalidParameterError",
     "LicenseRequiredError",
     "LocalDependencyMissingError",
     "NoEngineAvailableError",
+    "NoPackageManagerError",
     "OutputError",
     "OutputExistsError",
     "OutputNotWritableError",

@@ -202,6 +202,18 @@ class ToolSpec:
     #: to mark the generated output field required and drop the placeholder's
     #: extension hint where it would mislead.
     output_required: bool = False
+    #: External programs (``Binary.name`` in ``tools/_binaries.py``) this
+    #: tool's local engine needs. The same fact ``Binary.used_by`` records
+    #: the other way round -- a registry test keeps the two from disagreeing.
+    #: Lets ``setup`` (and anything else router-adjacent) ask "what does this
+    #: tool need" generically, without a lookup table of its own.
+    requires_binaries: tuple[str, ...] = ()
+    #: The pip extra (see ``pyproject.toml``'s ``[project.optional-dependencies]``)
+    #: that installs this tool's Python dependency, or ``None`` if the tool
+    #: needs no extra (a pure ``pypdf`` tool) or only an external binary.
+    #: ``docmax setup`` reads this generically instead of special-casing a
+    #: tool by name.
+    pip_extra: str | None = None
 
     def supports(self, engine: Engine) -> bool:
         return engine in self.supported_engines

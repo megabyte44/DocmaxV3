@@ -65,6 +65,8 @@ SPEC = register(
         # extension that doesn't name a format `run()` recognises is refused
         # there rather than written mislabelled.
         default_suffix=".jpg",
+        # Pillow ships in pyproject.toml's `images` extra.
+        pip_extra="images",
         # `--to` decides the extension when it is given. ADR 0010's
         # vocabulary, consumed generically by `EngineRouter.target_for`
         # so the CLI and the TUI cannot disagree about it.

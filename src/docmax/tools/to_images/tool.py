@@ -29,6 +29,8 @@ SPEC = register(
         # ToolSpec now has a way to say so; see ADR 0031.
         default_suffix=".pdf",
         produces_directory=True,
+        # used_by=("ocr", "to-images") in tools/_binaries.py, recorded here too.
+        requires_binaries=("pdftoppm",),
         params=(
             Param(
                 name="format",
