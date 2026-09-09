@@ -65,6 +65,8 @@ SPEC = register(
         accepts_multiple_inputs=False,
         output_required=False,
         default_suffix=".jpg",
+        # Pillow ships in pyproject.toml's `images` extra.
+        pip_extra="images",
         # Lets the form show the image's real dimensions the moment a path
         # is typed. Consumed generically by the TUI; no per-tool code there.
         describe_inputs=describe_inputs,

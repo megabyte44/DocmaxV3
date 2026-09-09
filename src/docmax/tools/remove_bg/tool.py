@@ -23,6 +23,8 @@ SPEC = register(
         # Always PNG for transparency. Unlike ``convert``, this is never wrong,
         # so no ``output_required`` is needed — ``.png`` is always correct.
         default_suffix=".png",
+        # rembg ships in pyproject.toml's `remove-bg` extra.
+        pip_extra="remove-bg",
         params=(
             Param(
                 name="model",

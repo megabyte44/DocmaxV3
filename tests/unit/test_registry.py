@@ -139,3 +139,35 @@ def test_output_required_defaults_to_false() -> None:
     from docmax.core.registry import ToolSpec
 
     assert ToolSpec.__dataclass_fields__["output_required"].default is False
+
+
+def test_binary_catalogue_matches_the_registry() -> None:
+    """`Binary.used_by` and `ToolSpec.requires_binaries` record one fact twice.
+
+    `used_by` may name a tool that is not registered yet — `_binaries.py` says
+    so explicitly, since `doctor` has reported on roadmap binaries since M0.
+    But a tool that *is* registered must not disagree with what its own
+    binary catalogue entry says it needs, in either direction: `setup` reads
+    `requires_binaries` generically, and a tool claiming a binary the
+    catalogue does not know about, or missing one the catalogue says it
+    needs, would make `setup` either install nothing or crash on an unknown
+    name.
+    """
+    from docmax.tools import _binaries
+
+    registry = build_registry()
+    known_binaries = {binary.name for binary in _binaries.EXTERNAL_BINARIES}
+
+    for binary in _binaries.EXTERNAL_BINARIES:
+        for tool_name in binary.used_by:
+            spec = registry.get(tool_name)
+            if spec is None:
+                continue  # not registered yet — a roadmap entry, not a bug
+            assert binary.name in spec.requires_binaries, (
+                f"_binaries.EXTERNAL_BINARIES says {tool_name!r} needs "
+                f"{binary.name!r}, but its ToolSpec.requires_binaries does not"
+            )
+
+    for spec in registry.values():
+        unknown = set(spec.requires_binaries) - known_binaries
+        assert not unknown, f"{spec.name}.requires_binaries names unknown binaries: {unknown}"

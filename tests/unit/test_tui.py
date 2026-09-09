@@ -82,10 +82,11 @@ def test_the_tui_offers_exactly_what_the_cli_exposes() -> None:
     one-line deletion in `catalog.py` non-optional.
 
     The allowed remainder is the set of CLI commands that are **not tools**, and
-    which the TUI therefore has nothing to generate a form from. `doctor` and
-    `formats` answer questions, `tui` and `mcp` are entry points into the other
+    which the TUI therefore has nothing to generate a form from. `doctor`,
+    `formats` and `setup` answer questions or act on the whole environment
+    rather than one document, `tui` and `mcp` are entry points into the other
     two interfaces, and M9's `pipeline`, `batch` and `watch` compose tools rather
-    than being any — none of the seven is in the registry, which is what
+    than being any — none of the eight is in the registry, which is what
     `offered <= exposed` above still asserts strictly. See ADR 0021, ADR 0023
     and ADR 0027.
     """
@@ -106,6 +107,7 @@ def test_the_tui_offers_exactly_what_the_cli_exposes() -> None:
     assert exposed - offered <= {
         "doctor",
         "formats",
+        "setup",
         "tui",
         "mcp",
         "pipeline",

@@ -9,7 +9,7 @@ any process-terminating call.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 
@@ -18,6 +18,12 @@ from docmax.cli import cloud, commands, workflows
 from docmax.cli.render import console, out
 from docmax.core.branding import APP_NAME, CLI_NAME, HOMEPAGE
 from docmax.core.models import Engine
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from docmax.core.cancellation import CancellationToken
+    from docmax.core.registry import ToolSpec
 
 app = typer.Typer(
     name=CLI_NAME,
@@ -322,9 +328,7 @@ def formats(json_out: commands.JsonOption = False) -> None:
 def doctor(json_out: commands.JsonOption = False) -> None:
     """Report the status of external tools the local engines depend on.
 
-    Reports only — never mutates. ``docmax setup`` (M3) does the installing, and
-    unlike v2's version it will be idempotent, support --dry-run, and verify
-    afterwards rather than assuming success.
+    Reports only — never mutates. ``docmax setup`` does the installing.
     """
     from rich.table import Table
 
@@ -365,7 +369,7 @@ def doctor(json_out: commands.JsonOption = False) -> None:
         console.print(f"  [bold]{binary.name}[/bold] — {binary.install_hint()}")
     console.print(
         "\nAffected operations can still run via the Cloud Engine (M6), "
-        f"or install locally with [bold]{CLI_NAME} setup[/bold] (coming later)."
+        f"or install locally with [bold]{CLI_NAME} setup[/bold]."
     )
 
 
@@ -394,6 +398,283 @@ def _emit_doctor_json() -> None:
             }
         )
     )
+
+
+@app.command()
+def setup(
+    tool: Annotated[
+        str | None,
+        typer.Argument(
+            help="Install only what this tool needs. Omit for everything missing.",
+            show_default=False,
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show the plan; install nothing.")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask for confirmation.")] = False,
+    json_out: commands.JsonOption = False,
+) -> None:
+    """Install what ``doctor`` reports missing: Python extras and system binaries.
+
+    Installs only what is actually missing, so running this again once nothing
+    is missing does nothing.
+
+    **Never auto-elevates.** A package manager that needs ``sudo`` or an admin
+    prompt fails with the exact command to re-run yourself, rather than DocMax
+    attempting to grant itself a permission it was not given.
+
+    **Never guesses at a second package manager.** Only the one manager this
+    project already trusts for your platform (``apt-get``, ``brew``,
+    ``winget`` — see ``tools/_binaries.py``) is ever run. When that manager is
+    not on ``PATH``, this prints the same install line ``doctor`` already does
+    instead of running anything.
+    """
+    from docmax.cli import json_output
+    from docmax.cli.execution import interruptible
+    from docmax.cli.interactive import is_interactive
+    from docmax.cli.render import _emit, render_error
+    from docmax.core.cancellation import CancellationToken
+    from docmax.core.errors import CancelledError, DocMaxError, InvalidParameterError
+    from docmax.core.registry import get_tool, iter_tools
+    from docmax.tools import _binaries
+
+    json_output.note(json_out)
+
+    try:
+        specs = [get_tool(tool)] if tool is not None else list(iter_tools())
+    except DocMaxError as exc:
+        render_error(exc)
+        raise typer.Exit(1) from exc
+
+    missing_binaries = _setup_missing_binaries(specs)
+    missing_extras = _setup_missing_extras(specs)
+    manager = _binaries.manager_available()
+    plan = _setup_plan(missing_binaries, missing_extras, manager)
+
+    if not plan:
+        if json_output.enabled():
+            _emit(json_output.report({"items": [], "ran": False}))
+        else:
+            out.print("[green]Nothing missing.[/green]")
+        return
+
+    if not json_output.enabled():
+        # `out`, not `console`: this is the answer a script wants, exactly as
+        # `doctor`'s status table is -- the confirmation prompt and the
+        # installer's own streamed chatter below are commentary and stay on
+        # stderr.
+        out.print("[bold]Plan:[/bold]")
+        for item in plan:
+            out.print(f"  {_setup_plan_line(item)}")
+
+    if dry_run:
+        if json_output.enabled():
+            _emit(json_output.report({"items": plan, "ran": False}))
+        return
+
+    runnable = [item for item in plan if item["command"] is not None]
+    if not runnable:
+        if json_output.enabled():
+            _emit(json_output.report({"items": plan, "ran": False}))
+        else:
+            console.print(
+                "\n[yellow]Nothing here can be installed automatically on this "
+                "platform.[/yellow] Run the commands above by hand."
+            )
+        raise typer.Exit(1)
+
+    if not yes:
+        if json_output.enabled() or not is_interactive():
+            message = "Refusing to install without --yes: nothing to confirm with."
+            if json_output.enabled():
+                _emit(
+                    json_output.failure(
+                        InvalidParameterError(message, remedy=f"Re-run with {CLI_NAME} setup -y.")
+                    )
+                )
+            else:
+                console.print(f"\n[yellow]{message}[/yellow]")
+            raise typer.Exit(1)
+        console.print()
+        if not typer.confirm("Proceed?", default=False):
+            raise typer.Exit(1)
+
+    token = CancellationToken()
+    results: list[dict[str, Any]] = []
+    with interruptible(token):
+        try:
+            for item in plan:
+                results.append(_setup_run_item(item, manager=manager, cancellation=token))
+        except CancelledError as exc:
+            console.print(f"\n[yellow]{exc.message}[/yellow]")
+            raise typer.Exit(130) from exc
+
+    if json_output.enabled():
+        _emit(json_output.report({"items": results, "ran": True}))
+    else:
+        out.print()
+        for result in results:
+            out.print(f"  {_setup_result_line(result)}")
+
+    if any(not result["verified"] for result in results):
+        raise typer.Exit(1)
+
+
+def _setup_missing_binaries(specs: Sequence[ToolSpec]) -> dict[str, tuple[str, ...]]:
+    """Binary name -> the tool names among `specs` that need it and lack it."""
+    from docmax.tools import _binaries
+
+    needed: dict[str, set[str]] = {}
+    for spec in specs:
+        for name in spec.requires_binaries:
+            needed.setdefault(name, set()).add(spec.name)
+    return {
+        name: tuple(sorted(tools)) for name, tools in needed.items() if _binaries.find(name) is None
+    }
+
+
+def _setup_missing_extras(specs: Sequence[ToolSpec]) -> dict[str, tuple[str, ...]]:
+    """Extra name -> the tool names among `specs` whose local engine needs it.
+
+    Reuses each tool's own ``is_available()`` — the same check every routing
+    decision already makes — rather than a second, parallel "is this package
+    importable" check that could drift from what the engine itself trusts.
+    """
+    needed: dict[str, set[str]] = {}
+    for spec in specs:
+        if spec.pip_extra is None or not spec.supports(Engine.LOCAL):
+            continue
+        if spec.load_strategy(Engine.LOCAL).is_available():
+            continue
+        needed.setdefault(spec.pip_extra, set()).add(spec.name)
+    return {extra: tuple(sorted(tools)) for extra, tools in needed.items()}
+
+
+def _setup_plan(
+    missing_binaries: dict[str, tuple[str, ...]],
+    missing_extras: dict[str, tuple[str, ...]],
+    manager: str | None,
+) -> list[dict[str, Any]]:
+    """One entry per missing thing: what would run, or the hint when nothing can."""
+    from docmax.tools import _binaries, _install
+
+    plan: list[dict[str, Any]] = []
+    for name in sorted(missing_binaries):
+        binary = _binaries.describe(name)
+        argv = binary.install_argv_for(manager) if manager else None
+        plan.append(
+            {
+                "kind": "binary",
+                "name": name,
+                "used_by": missing_binaries[name],
+                "command": list(argv) if argv else None,
+                "fallback": None if argv else binary.install_hint(),
+            }
+        )
+    for extra in sorted(missing_extras):
+        plan.append(
+            {
+                "kind": "extra",
+                "name": extra,
+                "used_by": missing_extras[extra],
+                "command": list(_install.pip_extra_argv(extra)),
+                "fallback": None,
+            }
+        )
+    return plan
+
+
+def _setup_plan_line(item: dict[str, Any]) -> str:
+    used_by = ", ".join(item["used_by"])
+    if item["command"] is not None:
+        return f"{item['name']} (needed by {used_by}): {' '.join(item['command'])}"
+    return f"{item['name']} (needed by {used_by}): {item['fallback']}"
+
+
+def _print_unstyled(line: str) -> None:
+    """Print one line of a package manager's own stdout.
+
+    ``markup=False``: pip's real output includes literal unmatched brackets
+    (``[notice] A new release of pip is available``) that Rich would otherwise
+    try to parse as a style tag and reject.
+    """
+    console.print(line, markup=False)
+
+
+def _setup_run_item(
+    item: dict[str, Any],
+    *,
+    manager: str | None,
+    cancellation: CancellationToken,
+) -> dict[str, Any]:
+    """Run one plan item and fold verification into the same record.
+
+    ``item['command'] is None`` means neither ``setup`` nor the user can do
+    anything automatically here — reported unverified without attempting a
+    subprocess that has no argv to run.
+    """
+    from docmax.cli import json_output
+    from docmax.core.registry import get_tool
+    from docmax.tools import _binaries, _install
+
+    if item["command"] is None:
+        return {**item, "installed": False, "verified": False, "stdout_tail": ""}
+
+    on_output = None if json_output.enabled() else _print_unstyled
+    if not json_output.enabled():
+        console.print(f"\n[bold]{item['name']}[/bold]:")
+
+    if item["kind"] == "binary":
+        # item["command"] is None whenever manager is (see _setup_plan), and
+        # that case already returned above -- so manager is not None here.
+        assert manager is not None
+        binary = _binaries.describe(item["name"])
+        outcome = _install.install_binary(
+            binary,
+            manager,
+            dry_run=False,
+            cancellation=cancellation,
+            on_output=on_output,
+        )
+    else:
+        outcome = _install.install_pip_extra(
+            item["name"], dry_run=False, cancellation=cancellation, on_output=on_output
+        )
+        # install_pip_extra cannot verify itself (see its own docstring): an
+        # extra has no single import name to generically re-check. This is
+        # that check, through the same is_available() every routing decision
+        # already trusts, for whichever tool motivated installing it.
+        verified = any(
+            get_tool(name).load_strategy(Engine.LOCAL).is_available() for name in item["used_by"]
+        )
+        outcome = _install.InstallResult(
+            ok=outcome.ok,
+            verified=verified,
+            command=outcome.command,
+            stdout_tail=outcome.stdout_tail,
+        )
+
+    return {
+        **item,
+        "installed": outcome.ok,
+        "verified": outcome.verified,
+        "stdout_tail": outcome.stdout_tail,
+    }
+
+
+def _setup_result_line(result: dict[str, Any]) -> str:
+    from rich.markup import escape
+
+    if result["verified"]:
+        return f"[green]{result['name']}: installed[/green]"
+    if result["command"] is None:
+        return f"[yellow]{result['name']}: no package manager — {result['fallback']}[/yellow]"
+    # escape(): this line is built for a markup-enabled console.print, and the
+    # tail is the installer's own stdout -- which, like pip's "[notice] ..."
+    # lines, can carry brackets Rich would otherwise try to parse as a tag.
+    tail = f" {escape(result['stdout_tail'])}" if result.get("stdout_tail") else ""
+    return f"[red]{result['name']}: failed[/red]{tail}"
 
 
 if __name__ == "__main__":  # pragma: no cover

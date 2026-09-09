@@ -19,6 +19,8 @@ SPEC = register(
         supported_engines=frozenset({Engine.LOCAL}),
         accepts_multiple_inputs=False,
         default_suffix=".jpg",
+        # Pillow ships in pyproject.toml's `images` extra.
+        pip_extra="images",
         params=(
             Param(
                 name="quality",

@@ -56,8 +56,15 @@ class Binary:
     #: Windows and ``gs`` everywhere else, so looking only for ``gs`` would
     #: report it missing on a machine where it is installed.
     commands: tuple[str, ...] = ()
-    #: What to type, per platform, to get it.
-    install: dict[str, str] = field(default_factory=dict)
+    #: The argv that installs this binary, per platform (``"linux"``,
+    #: ``"macos"``, ``"windows"``) -- via the one package manager that
+    #: platform's argv assumes (``apt-get``, ``brew``, ``winget``
+    #: respectively; see ``_MANAGER_BY_PLATFORM``). Structured rather than a
+    #: shell string so ``setup`` can hand it straight to ``subprocess``: a
+    #: package name is not always one word (Ghostscript's winget id is
+    #: ``ArtifexSoftware.GhostScript``), and this never goes through a shell
+    #: to be parsed.
+    install_argv: dict[str, tuple[str, ...]] = field(default_factory=dict)
     #: The project's own official install or documentation page — never a
     #: third-party mirror, a search result, or a download aggregator. This is
     #: what a TUI's "Open Installation Page" opens; see ADR 0036 and
@@ -69,18 +76,29 @@ class Binary:
 
     def install_hint(self) -> str:
         """The install line for this platform, or every line if unrecognised."""
-        platform = (
-            "windows"
-            if sys.platform == "win32"
-            else ("macos" if sys.platform == "darwin" else "linux")
-        )
-        specific = self.install.get(platform)
+        platform = _platform_key()
+        specific = self.install_argv.get(platform)
         if specific:
-            return f"Install it with: {specific}"
-        if self.install:
-            joined = "; ".join(f"{key}: {value}" for key, value in sorted(self.install.items()))
+            return f"Install it with: {' '.join(specific)}"
+        if self.install_argv:
+            joined = "; ".join(
+                f"{key}: {' '.join(value)}" for key, value in sorted(self.install_argv.items())
+            )
             return f"Install it — {joined}"
         return f"Install {self.name} and make sure it is on your PATH."
+
+    def install_argv_for(self, manager: str) -> tuple[str, ...] | None:
+        """This binary's argv for `manager`, if it has one for this platform.
+
+        `manager` is supplied by the caller — normally `manager_available()`'s
+        own answer — rather than looked up again here, so this cannot land on
+        a different platform's argv than the one the caller already checked
+        for a package manager on `PATH`.
+        """
+        argv = self.install_argv.get(_platform_key())
+        if argv is None or argv[0] != manager:
+            return None
+        return argv
 
 
 #: Every external program DocMax knows about, and which tools want it.
@@ -95,40 +113,40 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
         # gswin64c/gswin32c are the *console* builds. The bare `gswin64` opens a
         # window and never returns, which would hang a batch run.
         commands=("gs", "gswin64c", "gswin32c"),
-        install={
-            "linux": "apt install ghostscript",
-            "macos": "brew install ghostscript",
-            "windows": "winget install ArtifexSoftware.GhostScript",
+        install_argv={
+            "linux": ("apt-get", "install", "-y", "ghostscript"),
+            "macos": ("brew", "install", "ghostscript"),
+            "windows": ("winget", "install", "--id", "ArtifexSoftware.GhostScript", "-e"),
         },
         homepage="https://ghostscript.com/releases/gsdnld.html",
     ),
     Binary(
         name="tesseract",
         used_by=("ocr",),
-        install={
-            "linux": "apt install tesseract-ocr",
-            "macos": "brew install tesseract",
-            "windows": "winget install UB-Mannheim.TesseractOCR",
+        install_argv={
+            "linux": ("apt-get", "install", "-y", "tesseract-ocr"),
+            "macos": ("brew", "install", "tesseract"),
+            "windows": ("winget", "install", "--id", "UB-Mannheim.TesseractOCR", "-e"),
         },
         homepage="https://tesseract-ocr.github.io/tessdoc/Installation.html",
     ),
     Binary(
         name="pdftoppm",
         used_by=("ocr", "to-images"),
-        install={
-            "linux": "apt install poppler-utils",
-            "macos": "brew install poppler",
-            "windows": "winget install oschwartz10612.Poppler",
+        install_argv={
+            "linux": ("apt-get", "install", "-y", "poppler-utils"),
+            "macos": ("brew", "install", "poppler"),
+            "windows": ("winget", "install", "--id", "oschwartz10612.Poppler", "-e"),
         },
         homepage="https://poppler.freedesktop.org/",
     ),
     Binary(
         name="pandoc",
         used_by=("convert",),
-        install={
-            "linux": "apt install pandoc",
-            "macos": "brew install pandoc",
-            "windows": "winget install JohnMacFarlane.Pandoc",
+        install_argv={
+            "linux": ("apt-get", "install", "-y", "pandoc"),
+            "macos": ("brew", "install", "pandoc"),
+            "windows": ("winget", "install", "--id", "JohnMacFarlane.Pandoc", "-e"),
         },
         homepage="https://pandoc.org/installing.html",
     ),
@@ -136,10 +154,47 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
 
 _BY_NAME = {binary.name: binary for binary in EXTERNAL_BINARIES}
 
+#: The one package manager each platform's ``install_argv`` assumes -- the
+#: same three ``install_hint()`` has always named. Not a matrix of every
+#: manager a machine might have: a second or third manager's package name for
+#: these binaries has never been verified against this project's own install
+#: lines, and guessing one would be worse than falling back to the printed
+#: hint (see ``manager_available``).
+_MANAGER_BY_PLATFORM: dict[str, str] = {
+    "linux": "apt-get",
+    "macos": "brew",
+    "windows": "winget",
+}
+
+
+def _platform_key() -> str:
+    """This machine's platform, as the key ``install_argv`` and the manager
+    table use."""
+    # A ternary, not if/elif: mypy special-cases `sys.platform ==` comparisons
+    # for cross-platform stubs, which would mark one of three `if` branches
+    # unreachable depending on which platform mypy itself runs on.
+    return (
+        "windows" if sys.platform == "win32" else ("macos" if sys.platform == "darwin" else "linux")
+    )
+
 
 def describe(name: str) -> Binary:
     """The declaration for ``name``. Raises ``KeyError`` for an unknown binary."""
     return _BY_NAME[name]
+
+
+def manager_available() -> str | None:
+    """The package manager this platform's ``install_argv`` assumes, if present.
+
+    ``shutil.which`` only — stdlib, cheap, no heavy import, matching
+    :func:`find`'s own discipline. ``None`` means ``setup`` has nothing it can
+    run automatically here and falls back to the same install line ``doctor``
+    already prints.
+    """
+    manager = _MANAGER_BY_PLATFORM.get(_platform_key())
+    if manager is None or shutil.which(manager) is None:
+        return None
+    return manager
 
 
 def find(name: str) -> str | None:
@@ -262,4 +317,12 @@ def _tail(stream: bytes | None, *, limit: int = 400) -> str:
     return text if len(text) <= limit else "…" + text[-limit:]
 
 
-__all__ = ["EXTERNAL_BINARIES", "Binary", "describe", "find", "require", "run"]
+__all__ = [
+    "EXTERNAL_BINARIES",
+    "Binary",
+    "describe",
+    "find",
+    "manager_available",
+    "require",
+    "run",
+]

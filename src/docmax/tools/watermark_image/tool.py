@@ -21,6 +21,8 @@ SPEC = register(
         accepts_multiple_inputs=False,
         output_required=False,
         default_suffix=".jpg",
+        # Pillow ships in pyproject.toml's `images` extra.
+        pip_extra="images",
         params=(
             Param(
                 name="text",

@@ -27,6 +27,8 @@ SPEC = register(
         supported_engines=frozenset({Engine.LOCAL, Engine.CLOUD}),
         accepts_multiple_inputs=False,
         default_suffix=".pdf",
+        # used_by=("compress", ...) in tools/_binaries.py, recorded here too.
+        requires_binaries=("gs",),
         params=(
             Param(
                 name="preset",
