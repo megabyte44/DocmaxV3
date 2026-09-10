@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "DocMax Architecture",
+    "subtitle": "One core, four independent interfaces",
+    "output": "docmax-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/megabyte44/DocmaxV3.git",
+      "revision": "21ddbbc4612b1db9d7a2389465ce4d64e9a4ed34"
+    },
+    "views": [
+      { "id": "single-funnel", "label": "Single funnel", "focus": ["cli", "tui", "server", "mcp", "router"], "note": "Every interface turns its protocol into one call on EngineRouter. None reassembles routing, consent, or cancellation itself." },
+      { "id": "core-boundary", "label": "Core boundary", "focus": ["router", "registry", "tools", "atomic"], "note": "core imports no UI and no tool; tools import core; atomic.py is the only module that writes." },
+      { "id": "cloud-opt-in", "label": "Cloud is opt-in", "focus": ["tools", "cloud_client"], "note": "A tool's cloud strategy is reached only when the router resolves that engine, and only after consent is recorded." }
+    ]
+  },
+  "components": [
+    { "id": "operator", "type": "external", "label": "Operator", "sublabel": "argv / keystrokes", "pos": [40, 235], "size": [130, 60] },
+    { "id": "api_client", "type": "external", "label": "API Client", "sublabel": "HTTPS", "pos": [40, 320], "size": [130, 60] },
+    { "id": "agent", "type": "external", "label": "AI Agent", "sublabel": "JSON-RPC / stdio", "pos": [40, 405], "size": [130, 60] },
+
+    { "id": "cli", "type": "frontend", "label": "CLI", "sublabel": "typer, argv → execute()", "pos": [250, 150], "size": [140, 60], "sources": [{ "path": "src/docmax/cli/execution.py", "label": "execute()" }] },
+    { "id": "tui", "type": "frontend", "label": "TUI", "sublabel": "Textual (optional extra)", "pos": [250, 235], "size": [140, 60], "sources": [{ "path": "src/docmax/tui/__init__.py" }] },
+    { "id": "server", "type": "frontend", "label": "HTTP Server", "sublabel": "optional extra", "pos": [250, 320], "size": [140, 60], "sources": [{ "path": "src/docmax/server/__init__.py" }] },
+    { "id": "mcp", "type": "frontend", "label": "MCP Server", "sublabel": "optional extra", "pos": [250, 405], "size": [140, 60], "sources": [{ "path": "src/docmax/mcp/__init__.py" }] },
+
+    { "id": "router", "type": "backend", "label": "EngineRouter", "sublabel": "resolve, consent, cancel, time", "pos": [520, 235], "size": [160, 70], "sources": [{ "path": "src/docmax/core/router.py", "label": "EngineRouter" }] },
+    { "id": "registry", "type": "backend", "label": "Tool Registry", "sublabel": "ToolSpec discovery", "pos": [520, 345], "size": [160, 60], "sources": [{ "path": "src/docmax/core/registry.py", "label": "ToolSpec" }] },
+    { "id": "tools", "type": "backend", "label": "Tool Strategies", "sublabel": "local.py / cloud.py per tool", "pos": [770, 235], "size": [160, 70], "sources": [{ "path": "src/docmax/tools/merge/local.py", "label": "e.g. tools/merge/local.py" }] },
+    { "id": "atomic", "type": "database", "label": "Atomic Writer", "sublabel": "stage → validate → os.replace", "pos": [770, 375], "size": [160, 60], "sources": [{ "path": "src/docmax/core/atomic.py" }] },
+    { "id": "cloud_client", "type": "cloud", "label": "Cloud Client", "sublabel": "hosted or self-hosted engine", "pos": [1000, 235], "size": [160, 60], "sources": [{ "path": "src/docmax/cloud_client/client.py" }] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Interfaces — peers, never import each other", "wraps": ["cli", "tui", "server", "mcp"] },
+    { "kind": "security-group", "label": "Core — no UI import, no tool import", "wraps": ["router", "registry"] }
+  ],
+  "connections": [
+    { "id": "operator-cli", "from": "operator", "to": "cli", "label": "argv", "labelDy": -10 },
+    { "id": "operator-tui", "from": "operator", "to": "tui", "label": "keystrokes", "labelDy": 10 },
+    { "id": "apiclient-server", "from": "api_client", "to": "server", "label": "HTTPS" },
+    { "id": "agent-mcp", "from": "agent", "to": "mcp", "label": "JSON-RPC" },
+
+    { "id": "cli-router", "from": "cli", "to": "router", "label": "execute()", "variant": "emphasis", "fromSide": "right", "toSide": "top" },
+    { "id": "tui-router", "from": "tui", "to": "router", "label": "execute()", "fromSide": "right", "toSide": "left", "labelDx": 20, "labelDy": -6 },
+    { "id": "server-router", "from": "server", "to": "router", "label": "execute()", "fromSide": "right", "toSide": "left", "via": [[440, 350], [440, 270]], "labelSegment": 0, "labelDy": 22 },
+    { "id": "mcp-router", "from": "mcp", "to": "router", "label": "execute()", "fromSide": "right", "toSide": "left", "via": [[470, 435], [470, 270]], "labelSegment": 0, "labelDy": -22 },
+
+    { "id": "router-registry", "from": "router", "to": "registry", "label": "resolve ToolSpec", "labelDy": 24 },
+    { "id": "router-tools", "from": "router", "to": "tools", "label": "call strategy", "variant": "emphasis" },
+    { "id": "tools-atomic", "from": "tools", "to": "atomic", "label": "write result", "labelDy": 24 },
+    { "id": "tools-cloud", "from": "tools", "to": "cloud_client", "label": "cloud strategy", "variant": "dashed", "labelDy": -29 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Single funnel", "items": ["core/router.py:EngineRouter is the only path from \"run this tool\" to a result", "cli/execution.py is the CLI's one call into it — no command reassembles routing"] },
+    { "dot": "emerald", "title": "Four independent interfaces", "items": ["cli, tui, server, mcp are peers — none may import another (.importlinter)", "None contains document logic: no routing, no consent rule, no atomic write"] },
+    { "dot": "rose", "title": "Boundaries that are tested", "items": ["core/atomic.py is the only module that writes: stage, validate, os.replace", "Heavy imports (pypdf, cv2, textual) load inside functions, never at module scope", "Cloud is opt-in and never silent — consent is recorded before a document leaves"] }
+  ]
+}
