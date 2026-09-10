@@ -93,7 +93,7 @@ modules =
     docmax.mcp
 ignore_imports =
     docmax.cli.main -> docmax.tui
-    docmax.cli.main -> docmax.mcp
+    docmax.cli.mcp_group -> docmax.mcp
 ; CLI and HTTP are siblings — two front-ends over one tool layer, neither built
 ; on the other. The layers contract below must be totally ordered, so it cannot
 ; express "same level, mutually forbidden" on its own; this states it directly.
@@ -121,6 +121,13 @@ ignore_imports =
 ; to forbid -- and it stays broken, here and in tests/unit/test_tui.py. The
 ; reverse direction is not ignored at all: the TUI may never import the CLI.
 ; See ADR 0020.
+;
+; `docmax mcp` moved from `cli.main` to `cli.mcp_group` at ADR 0039, alongside
+; `docmax mcp connect` -- the same reason `docmax cloud` lives in `cli.cloud`
+; rather than the application shell. The ignored pair moved with it; the
+; internals it still may not reach (`docmax.mcp.server`, `.policy`, `.schema`)
+; are unchanged and stay asserted by
+; tests/unit/test_m10_mcp.py::test_the_cli_reaches_only_the_mcp_entry_point.
 
 [importlinter:contract:core-is-standalone]
 name = core never imports tools or interfaces

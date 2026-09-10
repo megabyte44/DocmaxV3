@@ -275,6 +275,43 @@ def pick_files(*, multiple: bool, start: Path | None = None) -> list[Path] | Non
     return [Path(item) for item in chosen if item]
 
 
+def _native_directory_dialog(*, start: Path) -> str:
+    """Ask the OS's native folder dialog for one directory to write into.
+
+    The directory-picking counterpart of :func:`_native_dialog` and
+    :func:`_native_save_dialog`, kept as its own function for the same
+    reason: a test that replaces "the user chose a directory" must not also
+    have to know about either file dialog.
+    """
+    from tkinter import filedialog
+
+    with _hidden_root() as root:
+        return filedialog.askdirectory(
+            title="Choose an output directory", initialdir=str(start), parent=root
+        )
+
+
+def pick_directory(*, start: Path | None = None) -> Path | None:
+    """Open the OS's native folder dialog and return the chosen directory.
+
+    Returns ``None`` if the user cancelled — Tk's convention for a cancelled
+    directory dialog is an empty string, same as the save dialog. Never
+    creates the directory itself; see the module docstring. Batch is the one
+    caller today (its output directory must already exist — see ADR 0025 —
+    so this only ever hands back a path for the run to check, never one it
+    made on the user's behalf).
+
+    With no ``start``, opens where a file was last chosen from or saved to —
+    see :func:`remembered_start` — falling back to :func:`default_start` the
+    first time there is nothing remembered.
+    """
+    root_dir = (
+        start if start is not None and start.is_dir() else remembered_start() or default_start()
+    )
+    chosen = _native_directory_dialog(start=root_dir)
+    return Path(chosen) if chosen else None
+
+
 def pick_save_path(*, start: Path | None = None) -> Path | None:
     """Open the OS's native save dialog and return the chosen path.
 
@@ -301,6 +338,7 @@ def pick_save_path(*, start: Path | None = None) -> Path | None:
 __all__ = [
     "default_start",
     "merge_paths",
+    "pick_directory",
     "pick_files",
     "pick_save_path",
     "remember_directory",

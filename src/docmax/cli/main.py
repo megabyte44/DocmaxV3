@@ -9,21 +9,15 @@ any process-terminating call.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 import typer
 
 from docmax import __version__
-from docmax.cli import cloud, commands, workflows
+from docmax.cli import cloud, commands, mcp_group, workflows
 from docmax.cli.render import console, out
 from docmax.core.branding import APP_NAME, CLI_NAME, HOMEPAGE
 from docmax.core.models import Engine
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from docmax.core.cancellation import CancellationToken
-    from docmax.core.registry import ToolSpec
 
 app = typer.Typer(
     name=CLI_NAME,
@@ -163,60 +157,6 @@ def tui(json_out: commands.JsonOption = False) -> None:
 
 
 @app.command()
-def mcp(
-    root: Annotated[
-        list[Path] | None,
-        typer.Option(
-            "--root",
-            help="A directory the server may read and write. Repeatable. Default: the working directory.",
-        ),
-    ] = None,
-    allow_cloud: Annotated[
-        bool,
-        typer.Option("--allow-cloud", help="Permit cloud engines for tools you already agreed to."),
-    ] = False,
-    json_out: commands.JsonOption = False,
-) -> None:
-    """Serve the tools over MCP, so an AI agent can drive DocMax locally.
-
-    Speaks JSON-RPC on stdin and stdout, so it is started by an MCP client's
-    configuration rather than by hand. Every tool the registry knows is offered,
-    with a schema generated from its own declaration — the same router, the same
-    validators, the same atomic writes as every other way in.
-
-    **It may only touch what you allow.** Reads and writes are confined to
-    `--root` (the working directory by default) and an agent cannot reach outside
-    it. Existing files are never overwritten, and cloud engines are unavailable
-    unless you pass `--allow-cloud` *and* have already agreed to that tool with
-    `docmax cloud agree` — an agent cannot consent on your behalf.
-
-    Needs the `mcp` extra. Without it this reports the exact install line rather
-    than an import error.
-    """
-    from docmax.cli import json_output
-    from docmax.cli.render import render_error
-    from docmax.core.errors import DocMaxError, InvalidParameterError
-    from docmax.mcp import require_available, serve
-
-    # Accepted and then refused, exactly as `tui --json` is: stdout carries the
-    # JSON-RPC stream, which is the one thing ADR 0017's single object cannot
-    # share a channel with.
-    json_output.note(json_out)
-
-    try:
-        if json_output.enabled():
-            raise InvalidParameterError(
-                f"`{CLI_NAME} mcp` speaks JSON-RPC on stdout, so --json cannot apply to it.",
-                remedy=f"Run `{CLI_NAME} mcp` without --json; the protocol is the output.",
-            )
-        require_available()
-        serve(root, allow_cloud=allow_cloud)
-    except DocMaxError as exc:
-        render_error(exc)
-        raise typer.Exit(1) from exc
-
-
-@app.command()
 def merge(
     inputs: Annotated[
         list[Path],
@@ -296,6 +236,11 @@ for _command in workflows.workflow_commands.registered_commands:
 # handful of related verbs, and flattening them would put `docmax login` next to
 # `docmax merge` as though they were the same kind of thing.
 app.add_typer(cloud.cloud_app)
+
+# `mcp` is a group rather than a command: `docmax mcp` alone still serves, and
+# `docmax mcp connect` wires a client to it instead of a person hand-editing
+# that client's config from a README snippet. See `cli/mcp_group.py`.
+app.add_typer(mcp_group.mcp_app)
 
 # Token administration for a docmax.server deployment (ADR 0037) is
 # deliberately *not* a subcommand here: docmax.server is excluded from the
@@ -437,7 +382,7 @@ def setup(
     from docmax.core.cancellation import CancellationToken
     from docmax.core.errors import CancelledError, DocMaxError, InvalidParameterError
     from docmax.core.registry import get_tool, iter_tools
-    from docmax.tools import _binaries
+    from docmax.tools import _binaries, _install
 
     json_output.note(json_out)
 
@@ -447,10 +392,10 @@ def setup(
         render_error(exc)
         raise typer.Exit(1) from exc
 
-    missing_binaries = _setup_missing_binaries(specs)
-    missing_extras = _setup_missing_extras(specs)
     manager = _binaries.manager_available()
-    plan = _setup_plan(missing_binaries, missing_extras, manager)
+    plan = _install.build_plan(
+        _install.missing_binaries(specs), _install.missing_extras(specs), manager
+    )
 
     if not plan:
         if json_output.enabled():
@@ -505,7 +450,14 @@ def setup(
     with interruptible(token):
         try:
             for item in plan:
-                results.append(_setup_run_item(item, manager=manager, cancellation=token))
+                if not json_output.enabled():
+                    console.print(f"\n[bold]{item['name']}[/bold]:")
+                on_output = None if json_output.enabled() else _print_unstyled
+                results.append(
+                    _install.run_item(
+                        item, manager=manager, cancellation=token, on_output=on_output
+                    )
+                )
         except CancelledError as exc:
             console.print(f"\n[yellow]{exc.message}[/yellow]")
             raise typer.Exit(130) from exc
@@ -519,70 +471,6 @@ def setup(
 
     if any(not result["verified"] for result in results):
         raise typer.Exit(1)
-
-
-def _setup_missing_binaries(specs: Sequence[ToolSpec]) -> dict[str, tuple[str, ...]]:
-    """Binary name -> the tool names among `specs` that need it and lack it."""
-    from docmax.tools import _binaries
-
-    needed: dict[str, set[str]] = {}
-    for spec in specs:
-        for name in spec.requires_binaries:
-            needed.setdefault(name, set()).add(spec.name)
-    return {
-        name: tuple(sorted(tools)) for name, tools in needed.items() if _binaries.find(name) is None
-    }
-
-
-def _setup_missing_extras(specs: Sequence[ToolSpec]) -> dict[str, tuple[str, ...]]:
-    """Extra name -> the tool names among `specs` whose local engine needs it.
-
-    Reuses each tool's own ``is_available()`` — the same check every routing
-    decision already makes — rather than a second, parallel "is this package
-    importable" check that could drift from what the engine itself trusts.
-    """
-    needed: dict[str, set[str]] = {}
-    for spec in specs:
-        if spec.pip_extra is None or not spec.supports(Engine.LOCAL):
-            continue
-        if spec.load_strategy(Engine.LOCAL).is_available():
-            continue
-        needed.setdefault(spec.pip_extra, set()).add(spec.name)
-    return {extra: tuple(sorted(tools)) for extra, tools in needed.items()}
-
-
-def _setup_plan(
-    missing_binaries: dict[str, tuple[str, ...]],
-    missing_extras: dict[str, tuple[str, ...]],
-    manager: str | None,
-) -> list[dict[str, Any]]:
-    """One entry per missing thing: what would run, or the hint when nothing can."""
-    from docmax.tools import _binaries, _install
-
-    plan: list[dict[str, Any]] = []
-    for name in sorted(missing_binaries):
-        binary = _binaries.describe(name)
-        argv = binary.install_argv_for(manager) if manager else None
-        plan.append(
-            {
-                "kind": "binary",
-                "name": name,
-                "used_by": missing_binaries[name],
-                "command": list(argv) if argv else None,
-                "fallback": None if argv else binary.install_hint(),
-            }
-        )
-    for extra in sorted(missing_extras):
-        plan.append(
-            {
-                "kind": "extra",
-                "name": extra,
-                "used_by": missing_extras[extra],
-                "command": list(_install.pip_extra_argv(extra)),
-                "fallback": None,
-            }
-        )
-    return plan
 
 
 def _setup_plan_line(item: dict[str, Any]) -> str:
@@ -600,67 +488,6 @@ def _print_unstyled(line: str) -> None:
     try to parse as a style tag and reject.
     """
     console.print(line, markup=False)
-
-
-def _setup_run_item(
-    item: dict[str, Any],
-    *,
-    manager: str | None,
-    cancellation: CancellationToken,
-) -> dict[str, Any]:
-    """Run one plan item and fold verification into the same record.
-
-    ``item['command'] is None`` means neither ``setup`` nor the user can do
-    anything automatically here — reported unverified without attempting a
-    subprocess that has no argv to run.
-    """
-    from docmax.cli import json_output
-    from docmax.core.registry import get_tool
-    from docmax.tools import _binaries, _install
-
-    if item["command"] is None:
-        return {**item, "installed": False, "verified": False, "stdout_tail": ""}
-
-    on_output = None if json_output.enabled() else _print_unstyled
-    if not json_output.enabled():
-        console.print(f"\n[bold]{item['name']}[/bold]:")
-
-    if item["kind"] == "binary":
-        # item["command"] is None whenever manager is (see _setup_plan), and
-        # that case already returned above -- so manager is not None here.
-        assert manager is not None
-        binary = _binaries.describe(item["name"])
-        outcome = _install.install_binary(
-            binary,
-            manager,
-            dry_run=False,
-            cancellation=cancellation,
-            on_output=on_output,
-        )
-    else:
-        outcome = _install.install_pip_extra(
-            item["name"], dry_run=False, cancellation=cancellation, on_output=on_output
-        )
-        # install_pip_extra cannot verify itself (see its own docstring): an
-        # extra has no single import name to generically re-check. This is
-        # that check, through the same is_available() every routing decision
-        # already trusts, for whichever tool motivated installing it.
-        verified = any(
-            get_tool(name).load_strategy(Engine.LOCAL).is_available() for name in item["used_by"]
-        )
-        outcome = _install.InstallResult(
-            ok=outcome.ok,
-            verified=verified,
-            command=outcome.command,
-            stdout_tail=outcome.stdout_tail,
-        )
-
-    return {
-        **item,
-        "installed": outcome.ok,
-        "verified": outcome.verified,
-        "stdout_tail": outcome.stdout_tail,
-    }
 
 
 def _setup_result_line(result: dict[str, Any]) -> str:

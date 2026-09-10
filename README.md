@@ -175,7 +175,18 @@ docmax mcp --root ~/Documents
 
 Serves every tool over the Model Context Protocol on stdio, so an assistant can
 merge, split, compress or OCR your documents — **on your machine, with nothing
-uploaded**. Point your MCP client at it:
+uploaded**. Point your MCP client at it — automatically:
+
+```bash
+docmax mcp connect
+```
+
+Detects Claude Desktop, Claude Code and Cursor on this machine and merges a
+`docmax` entry into each one's own config, leaving everything else in that file
+untouched. `--dry-run` shows the plan first; `--remote` wires up the cloud
+bridge instead, using whatever `docmax cloud login` already stored. If nothing
+is detected (or you use something else), it prints the same snippet to paste in
+by hand:
 
 ```json
 {

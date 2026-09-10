@@ -68,6 +68,7 @@ from docmax.core.branding import APP_NAME
 from docmax.tui import catalog, content, forms, runner, status
 from docmax.tui.browser import (
     merge_paths,
+    pick_directory,
     pick_files,
     pick_save_path,
     remember_directory,
@@ -75,15 +76,17 @@ from docmax.tui.browser import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from textual.timer import Timer
 
     from docmax.core.errors import DocMaxError
-    from docmax.core.models import ToolResult
+    from docmax.core.models import Engine, ToolResult
     from docmax.core.protocols import MissingDependency
     from docmax.core.registry import ToolSpec
     from docmax.core.router import EngineRouter
+    from docmax.runners.batch import BatchReport, ItemOutcome
 
 #: The engine choices a run screen offers. ``auto`` is first and is the default,
 #: because the router's ladder is the behaviour a user should get unless they
@@ -218,6 +221,157 @@ def _output_placeholder(spec: ToolSpec) -> str:
     return f"path to write the {spec.default_suffix} result to"
 
 
+def _render_field(field: forms.Field) -> ComposeResult:
+    """One field: its label, its widget, and -- only if it has one worth
+    showing -- a single short hint. Used both for an ordinary field and
+    for each field inside a mode group's active container, so a grouped
+    field looks exactly like an ungrouped one. Shared by ``RunScreen`` and
+    ``BatchScreen`` -- both generate a form from a ``ToolSpec`` the same way,
+    so this took no argument that named either.
+
+    The one thing this deliberately does not do any more: repeat
+    ``field.description`` twice, once as the input's placeholder and once
+    as the line underneath it. A placeholder that is a full sentence is
+    truncated by the field's own width into something less readable than
+    no placeholder at all, and the line below already says the whole
+    thing legibly -- so the placeholder is now the short unit hint a label
+    like ``width (px)`` already implies, via :func:`_unit_hint`, and
+    the paragraph appears exactly once.
+    """
+    required = " (required)" if field.required else ""
+    yield Label(f"{field.label}{required}")
+    if field.components:
+        # A comma-separated value with more than one meaning is
+        # unguessable blind -- one labelled input per part, joined
+        # back into the single value the tool actually reads.
+        # See ADR 0032.
+        with Horizontal(classes="component-row"):
+            for index, component in enumerate(field.components):
+                with Vertical(classes="component"):
+                    yield Label(component, classes="component-label")
+                    yield Input(
+                        value=field.default_component(index),
+                        placeholder=component,
+                        id=f"field-{field.name}-{index}",
+                    )
+    elif field.kind == "choice":
+        yield _select(field.choices, default=field.default, id_=f"field-{field.name}")
+    else:
+        yield Input(
+            value=field.default_text(),
+            placeholder=_unit_hint(field),
+            id=f"field-{field.name}",
+        )
+    # A field with nothing to add beyond its label costs a blank line if
+    # drawn anyway -- `quality`'s hint is worth keeping, an empty one is not.
+    if field.description:
+        yield Static(field.description, classes="hint", markup=False)
+
+
+def _render_group(group: str, fields: Sequence[forms.Field]) -> ComposeResult:
+    """A set of mutually exclusive fields -- ``resize``'s Percentage
+    versus Dimensions -- as one selector plus one visible answer at a
+    time.
+
+    Driven entirely by ``Param.group`` / ``Param.group_option``
+    (``core/registry.py``): nothing here names ``resize`` or any other
+    tool, so a second tool that declares a group gets this rendering for
+    free, exactly as a plain parameter already does. The alternative --
+    showing every field for every answer at once -- is the clutter this
+    exists to avoid: a user choosing "resize by percentage" should not
+    also be shown the width, height and fit fields that answer a
+    different question. Shared by ``RunScreen`` and ``BatchScreen``, taking
+    the caller's ``fields`` explicitly rather than reading it off ``self``.
+    """
+    options: dict[str, list[forms.Field]] = {}
+    for field in fields:
+        if field.group == group:
+            options.setdefault(field.group_option, []).append(field)
+
+    names = tuple(options)
+    default_option = names[0]
+    select_id = f"mode-{_slug(group)}"
+
+    yield Label(group)
+    yield _select(names, default=default_option, id_=select_id)
+
+    for option, group_fields in options.items():
+        # `Vertical`'s own default CSS is `height: 1fr`, which inside
+        # this screen's scrolling form resolves to a sliver too short to
+        # hold a label and its input both -- the label fits, the input is
+        # clipped by `overflow: hidden`, and a user sees a caption with no
+        # box underneath it. `.mode-group` overrides that to `height: auto`,
+        # the same fix `.component` already applies for the same reason.
+        container = Vertical(id=f"{select_id}-{_slug(option)}", classes="mode-group")
+        with container:
+            for field in group_fields:
+                yield from _render_field(field)
+        if option != default_option:
+            container.display = False
+
+
+def _apply_mode_change(screen: Widget, event: Select.Changed) -> None:
+    """Show the chosen answer's fields, hide the rest of the group.
+
+    A hidden field also has its typed value cleared, not merely its
+    display turned off: switching from Percentage after typing 50 into
+    it, then setting a width, must not leave that 50 to resurface as a
+    contradictory ``scale`` alongside ``width`` when the form is
+    submitted -- the field the user is no longer looking at is not one
+    they are still answering. Shared by ``RunScreen`` and ``BatchScreen``:
+    the group-mode select this reacts to is rendered the same way by both.
+    """
+    select_id = event.select.id or ""
+    if not select_id.startswith("mode-"):
+        return
+    chosen = event.value if isinstance(event.value, str) else ""
+    prefix = f"{select_id}-"
+    for container in screen.query(Vertical):
+        container_id = container.id or ""
+        if not container_id.startswith(prefix):
+            continue
+        active = container_id == prefix + _slug(chosen)
+        container.display = active
+        if not active:
+            for widget in container.query(Input):
+                widget.value = ""
+
+
+def _value_of(screen: Widget, field: forms.Field) -> str:
+    """The current typed/selected value of one field, read off its widget(s).
+
+    Shared by ``RunScreen`` and ``BatchScreen``: both read a filled-in form
+    back the same way, into the same ``forms.collect`` call.
+    """
+    if field.components:
+        return _composite_value_of(screen, field)
+    widget = screen.query_one(f"#field-{field.name}")
+    if isinstance(widget, Select):
+        return _selected(widget, field.choices)
+    if isinstance(widget, Input):
+        return widget.value
+    return ""
+
+
+def _composite_value_of(screen: Widget, field: forms.Field) -> str:
+    """The comma-joined value of a labelled multi-input field.
+
+    Blank overall — every part still empty — reads as "not supplied",
+    matching ``forms.collect``'s existing rule for a plain field left
+    empty. A value with only *some* parts filled in is joined and handed
+    to the tool's own parser exactly as if it had been typed into a
+    single field: the parser's error already names the missing part,
+    which is a second implementation of that message this need not be.
+    """
+    parts = [
+        screen.query_one(f"#field-{field.name}-{index}", Input).value.strip()
+        for index in range(len(field.components))
+    ]
+    if not any(parts):
+        return ""
+    return ",".join(parts)
+
+
 def _open_url(url: str) -> None:
     """Open ``url`` in the user's default browser. Never raises into the UI.
 
@@ -334,6 +488,7 @@ class ToolListScreen(Screen[None]):
         Binding("right", "next_category", "Category", show=False),
         Binding("escape", "clear_search", "Clear search", show=False),
         Binding("m", "open_menu", "Menu", show=True),
+        Binding("b", "open_batch", "Batch", show=True),
     ]
 
     def __init__(self) -> None:
@@ -345,6 +500,7 @@ class ToolListScreen(Screen[None]):
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
                 yield Input(placeholder="/ search tools…", id="search")
+                yield Button("▤ Batch — run a tool over many documents", id="open-batch")
                 with VerticalScroll(id="tools"):
                     for category, specs in catalog.categories().items():
                         yield Static(category.upper(), classes="category")
@@ -362,7 +518,8 @@ class ToolListScreen(Screen[None]):
                     markup=False,
                 )
         yield Static(
-            "↑↓ Navigate   ←→ Category   Enter Open   / Search   Esc Clear   m Menu   q Quit",
+            "↑↓ Navigate   ←→ Category   Enter Open   / Search   "
+            "Esc Clear   b Batch   m Menu   q Quit",
             id="help",
             classes="help-bar",
             markup=False,
@@ -377,6 +534,21 @@ class ToolListScreen(Screen[None]):
         name = identifier.removeprefix("tool-")
         if catalog.is_offered(name):
             self.app.push_screen(RunScreen(name))
+
+    @on(Button.Pressed, "#open-batch")
+    def _open_batch(self) -> None:
+        self.action_open_batch()
+
+    def action_open_batch(self) -> None:
+        """A direct button and binding, not folded into ``MenuScreen``.
+
+        ``MenuScreen``'s own docstring scopes it to screens that "do no work
+        of its own" — help text, a status readout, a yes/no modal. Batch
+        starts a worker thread, writes files, and can be cancelled, the same
+        shape as opening a tool from this screen's own button list, so it
+        gets the same kind of entry point a tool gets rather than the menu's.
+        """
+        self.app.push_screen(BatchScreen())
 
     # -- live preview ---------------------------------------------------
 
@@ -927,9 +1099,9 @@ class RunScreen(Screen[None]):
                     if field.group in rendered_groups:
                         continue
                     rendered_groups.add(field.group)
-                    yield from self._render_group(field.group)
+                    yield from _render_group(field.group, self._fields)
                     continue
-                yield from self._render_field(field)
+                yield from _render_field(field)
 
             yield Label("engine")
             yield _select(_ENGINES, default="auto", id_="field-__engine__")
@@ -1159,115 +1331,9 @@ class RunScreen(Screen[None]):
             self.query_one("#field-__output__", Input).value = str(chosen)
         self._set_status("", state="idle")
 
-    def _render_field(self, field: forms.Field) -> ComposeResult:
-        """One field: its label, its widget, and -- only if it has one worth
-        showing -- a single short hint. Used both for an ordinary field and
-        for each field inside a mode group's active container, so a grouped
-        field looks exactly like an ungrouped one.
-
-        The one thing this deliberately does not do any more: repeat
-        ``field.description`` twice, once as the input's placeholder and once
-        as the line underneath it. A placeholder that is a full sentence is
-        truncated by the field's own width into something less readable than
-        no placeholder at all, and the line below already says the whole
-        thing legibly -- so the placeholder is now the short unit hint a label
-        like ``width (px)`` already implies, via :func:`_unit_hint`, and
-        the paragraph appears exactly once.
-        """
-        required = " (required)" if field.required else ""
-        yield Label(f"{field.label}{required}")
-        if field.components:
-            # A comma-separated value with more than one meaning is
-            # unguessable blind -- one labelled input per part, joined
-            # back into the single value the tool actually reads.
-            # See ADR 0032.
-            with Horizontal(classes="component-row"):
-                for index, component in enumerate(field.components):
-                    with Vertical(classes="component"):
-                        yield Label(component, classes="component-label")
-                        yield Input(
-                            value=field.default_component(index),
-                            placeholder=component,
-                            id=f"field-{field.name}-{index}",
-                        )
-        elif field.kind == "choice":
-            yield _select(field.choices, default=field.default, id_=f"field-{field.name}")
-        else:
-            yield Input(
-                value=field.default_text(),
-                placeholder=_unit_hint(field),
-                id=f"field-{field.name}",
-            )
-        # A field with nothing to add beyond its label costs a blank line if
-        # drawn anyway -- `quality`'s hint is worth keeping, an empty one is not.
-        if field.description:
-            yield Static(field.description, classes="hint", markup=False)
-
-    def _render_group(self, group: str) -> ComposeResult:
-        """A set of mutually exclusive fields -- ``resize``'s Percentage
-        versus Dimensions -- as one selector plus one visible answer at a
-        time.
-
-        Driven entirely by ``Param.group`` / ``Param.group_option``
-        (``core/registry.py``): nothing here names ``resize`` or any other
-        tool, so a second tool that declares a group gets this rendering for
-        free, exactly as a plain parameter already does. The alternative --
-        showing every field for every answer at once -- is the clutter this
-        exists to avoid: a user choosing "resize by percentage" should not
-        also be shown the width, height and fit fields that answer a
-        different question.
-        """
-        options: dict[str, list[forms.Field]] = {}
-        for field in self._fields:
-            if field.group == group:
-                options.setdefault(field.group_option, []).append(field)
-
-        names = tuple(options)
-        default_option = names[0]
-        select_id = f"mode-{_slug(group)}"
-
-        yield Label(group)
-        yield _select(names, default=default_option, id_=select_id)
-
-        for option, fields in options.items():
-            # `Vertical`'s own default CSS is `height: 1fr`, which inside
-            # this screen's scrolling form resolves to a sliver too short to
-            # hold a label and its input both -- the label fits, the input is
-            # clipped by `overflow: hidden`, and a user sees a caption with no
-            # box underneath it. `.mode-group` overrides that to `height: auto`,
-            # the same fix `.component` already applies for the same reason.
-            container = Vertical(id=f"{select_id}-{_slug(option)}", classes="mode-group")
-            with container:
-                for field in fields:
-                    yield from self._render_field(field)
-            if option != default_option:
-                container.display = False
-
     @on(Select.Changed)
     def _on_mode_changed(self, event: Select.Changed) -> None:
-        """Show the chosen answer's fields, hide the rest of the group.
-
-        A hidden field also has its typed value cleared, not merely its
-        display turned off: switching from Percentage after typing 50 into
-        it, then setting a width, must not leave that 50 to resurface as a
-        contradictory ``scale`` alongside ``width`` when the form is
-        submitted -- the field the user is no longer looking at is not one
-        they are still answering.
-        """
-        select_id = event.select.id or ""
-        if not select_id.startswith("mode-"):
-            return
-        chosen = event.value if isinstance(event.value, str) else ""
-        prefix = f"{select_id}-"
-        for container in self.query(Vertical):
-            container_id = container.id or ""
-            if not container_id.startswith(prefix):
-                continue
-            active = container_id == prefix + _slug(chosen)
-            container.display = active
-            if not active:
-                for widget in container.query(Input):
-                    widget.value = ""
+        _apply_mode_change(self, event)
 
     @on(Input.Changed, "#field-__inputs__")
     def _on_inputs_changed(self) -> None:
@@ -1384,7 +1450,7 @@ class RunScreen(Screen[None]):
         engine_value = _selected(self.query_one("#field-__engine__", Select), _ENGINES)
         engine = None if engine_value in ("", "auto") else Engine(engine_value)
 
-        values = {field.name: self._value_of(field) for field in self._fields}
+        values = {field.name: _value_of(self, field) for field in self._fields}
 
         return runner.RunRequest(
             tool=self.tool,
@@ -1395,34 +1461,6 @@ class RunScreen(Screen[None]):
             dry_run=dry_run,
             params=forms.collect(self._fields, values),
         )
-
-    def _value_of(self, field: forms.Field) -> str:
-        if field.components:
-            return self._composite_value_of(field)
-        widget = self.query_one(f"#field-{field.name}")
-        if isinstance(widget, Select):
-            return _selected(widget, field.choices)
-        if isinstance(widget, Input):
-            return widget.value
-        return ""
-
-    def _composite_value_of(self, field: forms.Field) -> str:
-        """The comma-joined value of a labelled multi-input field.
-
-        Blank overall — every part still empty — reads as "not supplied",
-        matching ``forms.collect``'s existing rule for a plain field left
-        empty. A value with only *some* parts filled in is joined and handed
-        to the tool's own parser exactly as if it had been typed into a
-        single field: the parser's error already names the missing part,
-        which is a second implementation of that message this need not be.
-        """
-        parts = [
-            self.query_one(f"#field-{field.name}-{index}", Input).value.strip()
-            for index in range(len(field.components))
-        ]
-        if not any(parts):
-            return ""
-        return ",".join(parts)
 
     @work(thread=True, exclusive=True)
     def _execute(self, request: runner.RunRequest) -> None:
@@ -1695,6 +1733,433 @@ class RunScreen(Screen[None]):
         self._on_timer_update()
 
 
+class _BatchParamsPanel(Vertical):
+    """``BatchScreen``'s parameter fields for whichever tool is selected.
+
+    ``compose()``'s container-context-manager sugar for a component row or a
+    mode group only works correctly while Textual is actually driving a real
+    ``compose()`` call. Choosing a different tool happens after the screen is
+    already mounted, so the fields cannot simply be rebuilt by calling
+    ``_render_field``/``_render_group`` and mounting whatever they return —
+    only recomposing this one small widget (``refresh(recompose=True)``)
+    keeps that machinery intact, without recomposing the input/output paths
+    the user already browsed to, which live outside it.
+    """
+
+    def __init__(self, spec: ToolSpec | None) -> None:
+        super().__init__(id="batch-params")
+        self.fields: list[forms.Field] = forms.fields_for(spec) if spec is not None else []
+
+    def compose(self) -> ComposeResult:
+        rendered_groups: set[str] = set()
+        for field in self.fields:
+            if field.group:
+                if field.group in rendered_groups:
+                    continue
+                rendered_groups.add(field.group)
+                yield from _render_group(field.group, self.fields)
+                continue
+            yield from _render_field(field)
+
+    def set_tool(self, spec: ToolSpec | None) -> None:
+        self.fields = forms.fields_for(spec) if spec is not None else []
+        self.refresh(recompose=True)
+
+
+class BatchScreen(Screen[None]):
+    """One tool, run over many documents -- the TUI's ``docmax batch --tool``.
+
+    Hand-written, not generated: "which tool, over which files, into which
+    directory" is not a ``ToolSpec`` shape the way one tool's own parameters
+    are -- the same reason ``HelpScreen``/``SystemCheckScreen``/
+    ``CloudStatusScreen`` are hand-written too. It calls
+    ``docmax.runners.batch.run_batch`` directly: the ``tui -> runners`` edge
+    ADR 0023 built for exactly this, so a batch run here and
+    ``docmax batch --tool`` cannot silently disagree about what "batch"
+    means. See ADR 0040.
+
+    Covers ``--tool`` only -- the one-stage ``Pipeline`` ``single_stage``
+    already gives ``batch --tool`` on the CLI -- not a ``--pipeline`` file
+    and not ``watch``. Both are open extensions of this same pattern, not
+    ruled out by it.
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "back", "Back", show=True),
+        Binding("ctrl+r", "run", "Run", show=True),
+        Binding("ctrl+c", "cancel", "Cancel run", show=True, priority=True),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._tools: list[ToolSpec] = catalog.batchable_tools()
+        self._fields: list[forms.Field] = []
+        self._token: Any = None
+        self._run_in_progress = False
+        self._force = False
+
+    @property
+    def _tool_names(self) -> tuple[str, ...]:
+        return tuple(spec.name for spec in self._tools)
+
+    def _spec_named(self, name: str) -> ToolSpec | None:
+        for spec in self._tools:
+            if spec.name == name:
+                return spec
+        return None
+
+    @property
+    def _current_tool(self) -> str:
+        return _selected(self.query_one("#field-__tool__", Select), self._tool_names)
+
+    def compose(self) -> ComposeResult:
+        names = self._tool_names
+        default_tool = names[0] if names else ""
+
+        yield Brand()
+        with VerticalScroll(id="batch-form"), Vertical(classes="panel"):
+            yield Static("Batch", classes="title", markup=False)
+            yield Static(
+                "Run one tool over many documents. Each output is named after "
+                "its input and written into the output directory.",
+                classes="hint",
+                markup=False,
+            )
+
+            yield Label("tool")
+            yield _select(names, default=default_tool, id_="field-__tool__")
+
+            yield Label("inputs, comma-separated")
+            with Horizontal(classes="input-row"):
+                yield Input(placeholder="paths to the documents", id="field-__inputs__")
+                yield Button("Browse…", id="browse-inputs")
+
+            yield Label("output directory (required)")
+            with Horizontal(classes="input-row"):
+                yield Input(
+                    placeholder="directory to write results into",
+                    id="field-__output-dir__",
+                )
+                yield Button("Browse…", id="browse-output-dir")
+
+            yield _BatchParamsPanel(self._spec_named(default_tool))
+
+            yield Label("engine")
+            yield _select(_ENGINES, default="auto", id_="field-__engine__")
+
+            with Horizontal(classes="actions"):
+                yield Button("Run", variant="primary", id="run")
+                yield Button("Dry run", id="dry-run")
+                yield Button("Overwrite output", id="force")
+                yield Button("Cancel run", variant="warning", id="cancel", disabled=True)
+
+            yield Static("", id="status", classes="status-idle", markup=False)
+            yield DataTable(id="batch-results")
+            yield Static("", id="batch-summary", classes="hint", markup=False)
+        yield Static(
+            "Ctrl+R Run   Ctrl+C Cancel   Esc Back   Tab Next field",
+            id="help",
+            classes="help-bar",
+            markup=False,
+        )
+
+    def on_mount(self) -> None:
+        table = self.query_one("#batch-results", DataTable)
+        table.add_columns("", "Document", "Result")
+        self._fields = self.query_one(_BatchParamsPanel).fields
+
+    # -- actions --------------------------------------------------------
+
+    def action_back(self) -> None:
+        if not self._run_in_progress:
+            self.app.pop_screen()
+
+    def action_run(self) -> None:
+        self._start(dry_run=False, force=self._force)
+
+    def action_cancel(self) -> None:
+        """Ask the run to stop. Never raises; never kills the app."""
+        if self._token is not None:
+            self._token.cancel()
+            self._set_status("Stopping…", state="running")
+
+    @on(Button.Pressed, "#run")
+    def _on_run(self) -> None:
+        self._start(dry_run=False, force=self._force)
+
+    @on(Button.Pressed, "#dry-run")
+    def _on_dry_run(self) -> None:
+        self._start(dry_run=True, force=self._force)
+
+    @on(Button.Pressed, "#force")
+    def _on_force(self) -> None:
+        self._force = not self._force
+        button = self.query_one("#force", Button)
+        button.variant = "success" if self._force else "default"
+        self._set_status(
+            "Existing outputs will be overwritten."
+            if self._force
+            else "Existing outputs will not be overwritten.",
+            state="idle",
+        )
+
+    @on(Button.Pressed, "#cancel")
+    def _on_cancel(self) -> None:
+        self.action_cancel()
+
+    @on(Select.Changed)
+    def _on_select_changed(self, event: Select.Changed) -> None:
+        """The tool dropdown rebuilds the params panel; every other ``Select``
+        on this screen (a mode-group switch inside that panel) gets the same
+        treatment ``RunScreen`` gives one -- see ``_apply_mode_change``."""
+        if event.select.id == "field-__tool__":
+            self._on_tool_changed()
+            return
+        _apply_mode_change(self, event)
+
+    def _on_tool_changed(self) -> None:
+        spec = self._spec_named(self._current_tool)
+        panel = self.query_one(_BatchParamsPanel)
+        panel.set_tool(spec)
+        self._fields = panel.fields
+
+    # -- browsing ---------------------------------------------------------
+
+    @on(Button.Pressed, "#browse-inputs")
+    def _on_browse_inputs(self) -> None:
+        if self._browsing:
+            return
+        self._browsing = True
+        self.query_one("#browse-inputs", Button).disabled = True
+        self._set_status("Opening the file browser…", state="running")
+        self._browse()
+
+    @work(thread=True, exclusive=True)
+    def _browse(self) -> None:
+        """Always a multi-select dialog: batch is unconditionally many-in,
+        unlike ``RunScreen`` where it depends on the chosen tool."""
+        from docmax.core.errors import DocMaxError
+
+        try:
+            chosen = pick_files(multiple=True)
+        except DocMaxError as exc:
+            self.app.call_from_thread(self._browse_failed, exc)
+            return
+        if chosen:
+            remember_directory(chosen[0].parent)
+        self.app.call_from_thread(self._apply_browsed_paths, chosen)
+
+    _browsing = False
+
+    def _browse_failed(self, exc: DocMaxError) -> None:
+        self._browsing = False
+        self.query_one("#browse-inputs", Button).disabled = False
+        self._show(exc)
+
+    def _apply_browsed_paths(self, chosen: list[Path] | None) -> None:
+        self._browsing = False
+        self.query_one("#browse-inputs", Button).disabled = False
+        if not chosen:
+            self._set_status("", state="idle")
+            return
+        field = self.query_one("#field-__inputs__", Input)
+        field.value = merge_paths(field.value, chosen)
+        self._set_status("", state="idle")
+
+    @on(Button.Pressed, "#browse-output-dir")
+    def _on_browse_output_dir(self) -> None:
+        if self._browsing_output:
+            return
+        self._browsing_output = True
+        self.query_one("#browse-output-dir", Button).disabled = True
+        self._set_status("Opening the folder browser…", state="running")
+        self._browse_output_dir()
+
+    @work(thread=True, exclusive=True)
+    def _browse_output_dir(self) -> None:
+        from docmax.core.errors import DocMaxError
+
+        try:
+            chosen = pick_directory()
+        except DocMaxError as exc:
+            self.app.call_from_thread(self._browse_output_dir_failed, exc)
+            return
+        if chosen is not None:
+            remember_directory(chosen)
+        self.app.call_from_thread(self._apply_browsed_output_dir, chosen)
+
+    _browsing_output = False
+
+    def _browse_output_dir_failed(self, exc: DocMaxError) -> None:
+        self._browsing_output = False
+        self.query_one("#browse-output-dir", Button).disabled = False
+        self._show(exc)
+
+    def _apply_browsed_output_dir(self, chosen: Path | None) -> None:
+        self._browsing_output = False
+        self.query_one("#browse-output-dir", Button).disabled = False
+        if chosen is not None:
+            self.query_one("#field-__output-dir__", Input).value = str(chosen)
+        self._set_status("", state="idle")
+
+    # -- running ------------------------------------------------------------
+
+    def _gather(self) -> tuple[str, tuple[Path, ...], Path, Engine | None, dict[str, Any]]:
+        """Read the form into what ``run_batch`` needs, or raise the typed
+        error saying why not -- the batch counterpart of ``RunScreen._request``."""
+        from pathlib import Path
+
+        from docmax.core.errors import InvalidParameterError
+        from docmax.core.models import Engine
+
+        tool = self._current_tool
+        if not tool:
+            raise InvalidParameterError(
+                "Choose a tool to run.", remedy="Pick one from the tool dropdown."
+            )
+
+        raw_inputs = self.query_one("#field-__inputs__", Input).value.strip()
+        if not raw_inputs:
+            raise InvalidParameterError(
+                "Batch needs one or more documents.",
+                remedy="Type or browse to the files you want to process.",
+                context={"parameter": "input"},
+            )
+        inputs = tuple(Path(part.strip()) for part in raw_inputs.split(",") if part.strip())
+
+        output_text = self.query_one("#field-__output-dir__", Input).value.strip()
+        if not output_text:
+            raise InvalidParameterError(
+                "Batch needs an output directory.",
+                remedy="Type or browse to a directory that holds none of the inputs.",
+                context={"parameter": "output"},
+            )
+        output_dir = Path(output_text)
+
+        engine_value = _selected(self.query_one("#field-__engine__", Select), _ENGINES)
+        engine = None if engine_value in ("", "auto") else Engine(engine_value)
+
+        values = {field.name: _value_of(self, field) for field in self._fields}
+        params = forms.collect(self._fields, values)
+
+        return tool, inputs, output_dir, engine, params
+
+    def _start(self, *, dry_run: bool, force: bool) -> None:
+        if self._run_in_progress:
+            return
+        try:
+            tool, inputs, output_dir, engine, params = self._gather()
+        except Exception as exc:
+            self._show(exc)
+            return
+
+        from docmax.core.cancellation import CancellationToken
+
+        self._token = CancellationToken()
+        self._run_in_progress = True
+        self.query_one("#cancel", Button).disabled = False
+        self.query_one("#run", Button).disabled = True
+        self._set_status("Running…", state="running")
+        self.query_one("#batch-results", DataTable).clear()
+        self.query_one("#batch-summary", Static).update("")
+        self._execute(tool, inputs, output_dir, engine, params, dry_run=dry_run, force=force)
+
+    @work(thread=True, exclusive=True)
+    def _execute(
+        self,
+        tool: str,
+        inputs: tuple[Path, ...],
+        output_dir: Path,
+        engine: Engine | None,
+        params: dict[str, Any],
+        *,
+        dry_run: bool,
+        force: bool,
+    ) -> None:
+        """The batch itself, off the event loop -- see the module docstring's
+        "threading rule". ``on_outcome`` fires once per finished document, on
+        this same worker thread, so it is marshalled to the UI thread exactly
+        like every other callback here."""
+        from docmax.core.errors import DocMaxError
+        from docmax.runners.batch import ItemOutcome, run_batch
+        from docmax.runners.pipeline import single_stage
+
+        router = runner.build_router()
+        pipeline = single_stage(tool, engine=engine, params=params)
+        progress = runner.CallbackProgress(
+            on_start=lambda description, total: self.app.call_from_thread(
+                self._set_status, description, state="running"
+            ),
+        )
+
+        def on_outcome(outcome: ItemOutcome) -> None:
+            self.app.call_from_thread(self._append_outcome, outcome)
+
+        try:
+            report = run_batch(
+                pipeline,
+                inputs,
+                output_dir,
+                router=router,
+                progress=progress,
+                cancellation=self._token,
+                force=force,
+                dry_run=dry_run,
+                on_outcome=on_outcome,
+            )
+        except DocMaxError as exc:
+            self.app.call_from_thread(self._show, exc)
+            return
+        finally:
+            self.app.call_from_thread(self._finished)
+
+        self.app.call_from_thread(self._finished_report, report)
+
+    # -- callbacks, all on the UI thread ------------------------------------
+
+    def _finished(self) -> None:
+        self._run_in_progress = False
+        self._token = None
+        self.query_one("#cancel", Button).disabled = True
+        self.query_one("#run", Button).disabled = False
+
+    def _append_outcome(self, outcome: ItemOutcome) -> None:
+        table = self.query_one("#batch-results", DataTable)
+        if outcome.ok:
+            result_text = str(outcome.destination) if outcome.destination else "—"
+            table.add_row(_STATUS_ICONS["success"], outcome.source.name, result_text)
+            return
+        error = outcome.error
+        result_text = f"{error.code.value}: {error.message}" if error is not None else "failed"
+        table.add_row(_STATUS_ICONS["error"], outcome.source.name, result_text)
+
+    def _finished_report(self, report: BatchReport) -> None:
+        summary = f"{len(report.succeeded)} succeeded, {len(report.failed)} failed"
+        if report.cancelled:
+            summary += " — stopped early"
+        self.query_one("#batch-summary", Static).update(summary)
+        self._set_status(summary, state="error" if report.failed or report.cancelled else "success")
+
+    def _show(self, exc: BaseException) -> None:
+        """Display any whole-batch failure as a message and a remedy. Never a
+        traceback -- the same contract ``RunScreen._show`` holds for one tool."""
+        from docmax.core.errors import CancelledError, DocMaxError, InternalError
+
+        if isinstance(exc, CancelledError):
+            self._set_status(f"{exc.message} Nothing was written.", state="error")
+            return
+        if not isinstance(exc, DocMaxError):
+            exc = InternalError(str(exc) or exc.__class__.__name__)
+        self._set_status(exc.message, state="error")
+        self.app.push_screen(ErrorScreen(exc))
+
+    def _set_status(self, text: str, *, state: str = "idle") -> None:
+        widget = self.query_one("#status", Static)
+        widget.set_classes(f"status-{state}")
+        icon = _STATUS_ICONS.get(state, "")
+        widget.update(f"{icon}  {text}" if icon and text else text)
+
+
 class ConsentScreen(ModalScreen[bool]):
     """*"the CLI renders this as a y/n prompt and the TUI as a modal"* — errors.py, M0."""
 
@@ -1960,6 +2425,7 @@ class DocMaxApp(App[None]):
         padding: 0 1;
     }
     #search { margin: 1 1 1 0; }
+    #open-batch { width: 1fr; margin: 0 0 1 0; }
     #tools { padding: 0 1 1 0; }
 
     .category {
@@ -2009,7 +2475,7 @@ class DocMaxApp(App[None]):
 
     /* -- run screen: a single card ------------------------------------ */
 
-    #form { padding: 1 2; }
+    #form, #batch-form { padding: 1 2; }
     .panel {
         height: auto;
         border: round $panel-lighten-2;
@@ -2085,7 +2551,7 @@ class DocMaxApp(App[None]):
         padding: 1 0 0 0;
     }
     .help-body { color: $foreground; padding: 0 0 1 0; }
-    #system-check-table, #cloud-status-table { margin: 1 0; }
+    #system-check-table, #cloud-status-table, #batch-results { margin: 1 0; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
@@ -2097,6 +2563,7 @@ class DocMaxApp(App[None]):
 
 
 __all__ = [
+    "BatchScreen",
     "CloudStatusScreen",
     "ConsentScreen",
     "DependencyMissingScreen",

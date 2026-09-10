@@ -66,6 +66,21 @@ def categories() -> dict[str, list[ToolSpec]]:
     return grouped
 
 
+def batchable_tools() -> list[ToolSpec]:
+    """The offered tools ``BatchScreen`` may run over many documents.
+
+    A report-only tool (``produces_output=False`` — ``get-info``,
+    ``permissions``) has nothing to mirror into ``--output-dir``, the same
+    reason ``RunScreen`` already omits its output field entirely. A tool
+    whose output extension depends on a parameter (``convert``) is left in:
+    that exclusion lives in ``runners.pipeline.SUFFIX_FROM_PARAMS``, private
+    to the runners layer, and re-deriving it here would be a second place to
+    keep in sync. ``run_batch`` refuses it at run time instead, exactly as
+    ``docmax batch --tool convert`` already does on the CLI.
+    """
+    return [spec for spec in offered_tools() if spec.produces_output]
+
+
 def is_offered(name: str) -> bool:
     """Is ``name`` a tool the TUI will run?"""
     return any(spec.name == name for spec in _runnable())
@@ -79,4 +94,4 @@ def _runnable() -> Iterator[ToolSpec]:
             yield spec
 
 
-__all__ = ["UNIMPLEMENTED", "categories", "is_offered", "offered_tools"]
+__all__ = ["UNIMPLEMENTED", "batchable_tools", "categories", "is_offered", "offered_tools"]

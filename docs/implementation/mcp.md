@@ -41,6 +41,16 @@ A typical client configuration:
 }
 ```
 
+`docmax mcp connect` writes exactly this into a client's own config file
+instead — see [ADR 0039](../adr/0039-mcp-connect-writes-a-clients-config-file.md)
+and [`cli/mcp_group.py`](../../src/docmax/cli/mcp_group.py). It detects Claude
+Desktop, Claude Code and Cursor by whether their own config directory exists on
+this machine, merges a `docmax` entry into `mcpServers` without touching
+anything else already in the file, and falls back to printing the snippet above
+when nothing is detected. `connect --remote` writes the cloud bridge's URL and
+API key (`docmax cloud login`) into Claude Code's `.mcp.json` instead of stdio —
+the only client here with a documented remote-server shape.
+
 `--json` is accepted and then refused: stdout carries the JSON-RPC stream, which
 is the one thing [ADR 0017](../adr/0017-json-output-contract.md)'s single object
 cannot share a channel with. `docmax tui --json` refuses for the same reason.
@@ -195,6 +205,11 @@ There is no second cancellation mechanism.
 
 ## Known limitations
 
+- **`connect` only knows three clients, and one remote shape.** Claude Desktop
+  and Cursor's stdio config is documented and stable; a client not on that list
+  gets the manual snippet, not a guess. Claude Code is the only client here
+  with a documented remote-server shape, so `connect --remote` is a no-op for
+  everything else until another client's shape is confirmed.
 - **No progress is reported.** A long call is silent until it returns. MCP has a
   progress notification; using it needs the request's progress token plumbed
   through and a `ProgressSink` that emits async notifications from a worker
