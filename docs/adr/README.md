@@ -50,6 +50,9 @@ turned out to be wrong is as useful as the reasoning that held.
 | [0035](0035-remote-mcp-is-a-transport-bridge-over-the-cloud-server.md) | Remote MCP is a transport bridge over the Cloud Engine server, not a fifth interface | Accepted |
 | [0036](0036-toolspec-says-when-a-tool-produces-no-output.md) | `ToolSpec` says when a tool produces no output, so an interface can stop asking for one | Accepted |
 | [0037](0037-server-token-identity.md) | Tokens are durable, hashed, and belong to a user; the env-var allowlist becomes the bootstrap path | Accepted |
+| [0038](0038-remove-bg-and-compress-image-ship-local-only.md) | `remove-bg` and `compress-image` ship local-only, no cloud engine | Accepted |
+| [0039](0039-mcp-connect-writes-a-clients-config-file.md) | `docmax mcp connect` writes a client's config file directly | Accepted |
+| [0040](0040-the-tui-batch-screen-is-hand-written-and-calls-runners-directly.md) | The TUI's batch screen is hand-written, and calls `runners.batch` directly | Accepted |
 
 ## When to write one
 
