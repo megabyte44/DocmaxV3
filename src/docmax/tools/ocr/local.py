@@ -162,6 +162,7 @@ class OcrLocal:
                 name=_binaries.describe(name).name,
                 reason=f"OCR cannot run because {_binaries.describe(name).name} is not installed.",
                 url=_binaries.describe(name).homepage or None,
+                size_hint=_binaries.describe(name).size_hint,
             )
             # `missing_dependencies()` — the module function above — is what
             # `is_available` itself calls; reusing it here is what keeps this

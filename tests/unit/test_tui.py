@@ -4175,6 +4175,99 @@ def test_escape_on_the_system_check_screen_returns_to_the_tool_list() -> None:
     asyncio.run(scenario())
 
 
+def test_the_system_check_screen_lists_every_extra_a_tool_names() -> None:
+    """The extras table, like the binaries one, has no second list of its own."""
+    import asyncio
+
+    from textual.widgets import DataTable
+
+    from docmax.core.registry import iter_tools
+    from docmax.tui.app import DocMaxApp, SystemCheckScreen
+
+    async def scenario() -> int:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = SystemCheckScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            return screen.query_one("#system-check-extras-table", DataTable).row_count
+
+    expected = len({spec.pip_extra for spec in iter_tools() if spec.pip_extra is not None})
+    assert asyncio.run(scenario()) == expected
+
+
+def test_the_system_check_screen_offers_install_buttons_for_whats_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.tools import _binaries
+    from docmax.tui.app import DocMaxApp, SystemCheckScreen
+
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+    monkeypatch.setattr(_binaries, "manager_available", lambda: "apt-get")
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "linux")
+
+    async def scenario() -> list[str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = SystemCheckScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            return [widget.id or "" for widget in screen.query(Button)]
+
+    button_ids = asyncio.run(scenario())
+    assert any(identifier.startswith("install-binary-") for identifier in button_ids)
+
+
+def test_clicking_install_on_the_system_check_screen_runs_and_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The click reaches `_install.run_item` -- never a real subprocess in a test."""
+    import asyncio
+
+    from textual.widgets import Button, Static
+
+    from docmax.tools import _binaries, _install
+    from docmax.tui.app import DocMaxApp, SystemCheckScreen
+
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+    monkeypatch.setattr(_binaries, "manager_available", lambda: "apt-get")
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "linux")
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_item(item: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(item)
+        return {**item, "installed": True, "verified": True, "stdout_tail": ""}
+
+    monkeypatch.setattr(_install, "run_item", fake_run_item)
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            screen = SystemCheckScreen()
+            app.push_screen(screen)
+            await pilot.pause()
+            button = next(iter(screen.query(Button)))
+            assert button.id is not None
+            identifier = button.id
+            await pilot.click(f"#{identifier}")
+            await pilot.pause()
+            await pilot.pause()
+            kind, _, name = identifier.removeprefix("install-").partition("-")
+            return _text_of(screen.query_one(f"#missing-status-{kind}-{name}", Static))
+
+    status_text = asyncio.run(scenario())
+    assert calls, "the button press must reach _install.run_item"
+    assert "Installed" in status_text
+
+
 # -- Cloud & account screen -----------------------------------------------
 
 
@@ -4625,6 +4718,152 @@ def test_the_open_installation_page_button_opens_the_official_url(
 
     asyncio.run(scenario())
     assert opened == ["https://tesseract-ocr.github.io/tessdoc/Installation.html"]
+
+
+def test_the_dependency_dialog_offers_install_for_a_known_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A binary-backed dependency gets both buttons -- Install, not instead
+    of Open Installation Page, since a click either way is a valid choice."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.core.protocols import MissingDependency
+    from docmax.tools import _binaries
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp
+
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+    monkeypatch.setattr(_binaries, "manager_available", lambda: "apt-get")
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "linux")
+
+    dependencies = (
+        MissingDependency(
+            name="tesseract",
+            reason="needs tesseract",
+            url="https://tesseract-ocr.github.io/tessdoc/Installation.html",
+            size_hint="~50 MB (plus language data)",
+        ),
+    )
+
+    async def scenario() -> list[str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(DependencyMissingScreen("ocr", dependencies))
+            await pilot.pause()
+            return [widget.id or "" for widget in app.screen.query(Button)]
+
+    button_ids = asyncio.run(scenario())
+    assert "install-0" in button_ids
+    assert "open-install-0" in button_ids
+
+
+def test_a_dependency_with_no_pip_extra_and_no_binary_gets_no_install_button() -> None:
+    """`protect`'s optional `cryptography` path: not a `Binary`, and
+    `protect.pip_extra` is deliberately `None` -- feature-conditional, out of
+    `docmax setup`'s scope. This dialog must never offer ahead of the CLI."""
+    import asyncio
+
+    from textual.widgets import Button
+
+    from docmax.core.protocols import MissingDependency
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp
+
+    dependencies = (MissingDependency(name="cryptography", reason="needs cryptography", url=None),)
+
+    async def scenario() -> list[str]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(DependencyMissingScreen("protect", dependencies))
+            await pilot.pause()
+            return [widget.id or "" for widget in app.screen.query(Button)]
+
+    button_ids = asyncio.run(scenario())
+    assert not any(identifier.startswith("install-") for identifier in button_ids)
+
+
+def test_clicking_install_in_the_dependency_dialog_runs_and_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The click reaches `_install.run_item` -- never a real subprocess in a test."""
+    import asyncio
+
+    from textual.widgets import Static
+
+    from docmax.core.protocols import MissingDependency
+    from docmax.tools import _binaries, _install
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp
+
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+    monkeypatch.setattr(_binaries, "manager_available", lambda: "apt-get")
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "linux")
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_item(item: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(item)
+        return {**item, "installed": True, "verified": True, "stdout_tail": ""}
+
+    monkeypatch.setattr(_install, "run_item", fake_run_item)
+
+    dependencies = (MissingDependency(name="tesseract", reason="needs tesseract", url=None),)
+
+    async def scenario() -> str:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(DependencyMissingScreen("ocr", dependencies))
+            await pilot.pause()
+            await pilot.click("#install-0")
+            await pilot.pause()
+            await pilot.pause()
+            return _text_of(app.screen.query_one("#dep-status-0", Static))
+
+    status_text = asyncio.run(scenario())
+    assert calls
+    assert calls[0]["name"] == "tesseract"
+    assert "Installed" in status_text
+
+
+def test_a_failed_dependency_install_keeps_the_button_to_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from textual.widgets import Button, Static
+
+    from docmax.core.protocols import MissingDependency
+    from docmax.tools import _binaries, _install
+    from docmax.tui.app import DependencyMissingScreen, DocMaxApp
+
+    monkeypatch.setattr(_binaries, "find", lambda name: None)
+    monkeypatch.setattr(_binaries, "manager_available", lambda: "apt-get")
+    monkeypatch.setattr(_binaries, "_platform_key", lambda: "linux")
+
+    def fake_run_item(item: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        return {**item, "installed": False, "verified": False, "stdout_tail": "boom"}
+
+    monkeypatch.setattr(_install, "run_item", fake_run_item)
+
+    dependencies = (MissingDependency(name="tesseract", reason="needs tesseract", url=None),)
+
+    async def scenario() -> tuple[str, bool]:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(DependencyMissingScreen("ocr", dependencies))
+            await pilot.pause()
+            await pilot.click("#install-0")
+            await pilot.pause()
+            await pilot.pause()
+            button = app.screen.query_one("#install-0", Button)
+            return _text_of(app.screen.query_one("#dep-status-0", Static)), button.disabled
+
+    status_text, disabled = asyncio.run(scenario())
+    assert "boom" in status_text
+    assert disabled is False
 
 
 def test_the_dependency_dialogs_back_button_returns_unchanged(

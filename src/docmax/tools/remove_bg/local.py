@@ -71,6 +71,7 @@ class RemoveBgLocal:
         unavailable" into "Dependency Required: rembg".
         """
         from docmax.core.protocols import MissingDependency
+        from docmax.tools import _install
 
         if self.is_available():
             return ()
@@ -79,6 +80,7 @@ class RemoveBgLocal:
                 name="rembg",
                 reason="Background removal requires the rembg package.",
                 url="https://github.com/danielgatis/rembg",
+                size_hint=_install.describe_extra("remove-bg").size_hint,
             ),
         )
 
