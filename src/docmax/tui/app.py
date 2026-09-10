@@ -2081,7 +2081,7 @@ class BatchScreen(Screen[None]):
         this same worker thread, so it is marshalled to the UI thread exactly
         like every other callback here."""
         from docmax.core.errors import DocMaxError
-        from docmax.runners.batch import ItemOutcome, run_batch
+        from docmax.runners.batch import run_batch
         from docmax.runners.pipeline import single_stage
 
         router = runner.build_router()
