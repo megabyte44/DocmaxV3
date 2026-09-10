@@ -115,6 +115,13 @@ class MissingDependency:
     #: The official documentation or download page, or ``None`` if the
     #: project has not recorded one for this dependency yet.
     url: str | None = None
+    #: Approximate download size, e.g. ``"~50 MB"`` — shown next to an
+    #: Install button so a click isn't a surprise. ``""`` when the producer
+    #: has none recorded. ``core`` never computes this itself (it would have
+    #: to import ``tools`` to know a binary's size, which it may not); a
+    #: producer that already knows a size — ``tools/ocr/local.py``, from
+    #: ``tools/_binaries.py``'s ``Binary.size_hint`` — passes it through.
+    size_hint: str = ""
 
 
 class EngineStrategy(Protocol):

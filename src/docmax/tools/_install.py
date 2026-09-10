@@ -15,10 +15,13 @@ different kind of action, and folding it into `_binaries.py` — whose own
 docstring is specific to *finding and running* a program a local engine needs
 at document-processing time — would blur that.
 
-Never imports `rich` or `typer`. `docmax setup` is the only caller today, but
-this stays as interface-agnostic as `_binaries.py` itself: a caller wanting
-live output supplies its own `on_output` callback rather than this module
-choosing how to print one.
+Never imports `rich` or `typer`. `docmax setup` and the TUI's install buttons
+both call this module directly — `docmax.cli` and `docmax.tui` are peers that
+may not import each other, so the logic they share (what's missing, and how
+to install one thing) lives here rather than in either interface, exactly as
+`_binaries.py` already does for finding things. A caller wanting live output
+supplies its own `on_output` callback rather than this module choosing how to
+print one.
 
 **Verification, not trust.** A package manager can exit `0` having installed
 the wrong thing, or already having it, and can exit non-zero after actually
@@ -37,16 +40,68 @@ from __future__ import annotations
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from docmax.core.branding import DIST_NAME
+from docmax.core.models import Engine
 from docmax.tools import _binaries
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from docmax.core.cancellation import CancellationToken
+    from docmax.core.registry import ToolSpec
     from docmax.tools._binaries import Binary
+
+
+@dataclass(frozen=True, slots=True)
+class PipExtra:
+    """One pip extra (`pyproject.toml`'s `[project.optional-dependencies]`),
+    and what it costs to install.
+
+    Mirrors `Binary` on purpose: same shape, same reason -- a `ToolSpec` names
+    an extra by a bare string (`pip_extra`), and this is the one place that
+    string's cost and contents are recorded, so `setup` and the TUI's install
+    buttons read it generically rather than each hand-writing a description.
+    """
+
+    #: Matches `ToolSpec.pip_extra` and the extra's own name in `pyproject.toml`.
+    name: str
+    #: The packages it installs, as a person would recognise them -- not
+    #: necessarily one-to-one with PyPI's own list (`rembg[cpu]` is one entry
+    #: here because that is the one line `pip` is actually given).
+    packages: tuple[str, ...]
+    #: Approximate download size, hand-maintained like `Binary.size_hint` --
+    #: not measured, and not re-verified against a live index. Good enough to
+    #: warn someone before a 200 MB install starts on a slow connection; wrong
+    #: by itself is not a reason to add a network call before showing it.
+    size_hint: str = ""
+
+
+#: One entry per extra any `ToolSpec.pip_extra` names -- kept in sync by
+#: `tests/unit/test_registry.py::test_pip_extra_catalogue_matches_the_registry`,
+#: the same discipline `EXTERNAL_BINARIES` gets from
+#: `test_binary_catalogue_matches_the_registry`.
+PIP_EXTRAS: tuple[PipExtra, ...] = (
+    PipExtra(name="images", packages=("Pillow", "img2pdf"), size_hint="~5 MB"),
+    PipExtra(name="ocr", packages=("opencv-python-headless", "numpy"), size_hint="~90 MB"),
+    PipExtra(name="tables", packages=("pdfplumber", "pandas", "openpyxl"), size_hint="~35 MB"),
+    PipExtra(
+        name="remove-bg",
+        packages=("rembg[cpu]",),
+        # rembg itself is small; onnxruntime and a background-removal model
+        # (fetched on first real use, not at install time) are the real cost.
+        size_hint="~200 MB (plus a one-time model download on first use)",
+    ),
+    PipExtra(name="crypto", packages=("cryptography",), size_hint="~4 MB"),
+)
+
+_PIP_EXTRAS_BY_NAME = {extra.name: extra for extra in PIP_EXTRAS}
+
+
+def describe_extra(name: str) -> PipExtra:
+    """The declaration for `name`. Raises `KeyError` for an unknown extra."""
+    return _PIP_EXTRAS_BY_NAME[name]
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,4 +236,144 @@ def _stream(
     return InstallResult(ok=process.returncode == 0, verified=False, command=argv, stdout_tail=tail)
 
 
-__all__ = ["InstallResult", "install_binary", "install_pip_extra", "pip_extra_argv"]
+# ---------------------------------------------------------------------------
+# What's missing, and running one item -- shared by `docmax setup` and the
+# TUI's install buttons, neither of which may import the other.
+# ---------------------------------------------------------------------------
+
+
+def missing_binaries(specs: Sequence[ToolSpec]) -> dict[str, tuple[str, ...]]:
+    """Binary name -> the tool names among `specs` that need it and lack it."""
+    needed: dict[str, set[str]] = {}
+    for spec in specs:
+        for name in spec.requires_binaries:
+            needed.setdefault(name, set()).add(spec.name)
+    return {
+        name: tuple(sorted(tools)) for name, tools in needed.items() if _binaries.find(name) is None
+    }
+
+
+def missing_extras(specs: Sequence[ToolSpec]) -> dict[str, tuple[str, ...]]:
+    """Extra name -> the tool names among `specs` whose local engine needs it.
+
+    Reuses each tool's own `is_available()` -- the same check every routing
+    decision already makes -- rather than a second, parallel "is this package
+    importable" check that could drift from what the engine itself trusts.
+    """
+    needed: dict[str, set[str]] = {}
+    for spec in specs:
+        if spec.pip_extra is None or not spec.supports(Engine.LOCAL):
+            continue
+        if spec.load_strategy(Engine.LOCAL).is_available():
+            continue
+        needed.setdefault(spec.pip_extra, set()).add(spec.name)
+    return {extra: tuple(sorted(tools)) for extra, tools in needed.items()}
+
+
+def build_plan(
+    missing_binaries: dict[str, tuple[str, ...]],
+    missing_extras: dict[str, tuple[str, ...]],
+    manager: str | None,
+) -> list[dict[str, Any]]:
+    """One entry per missing thing: what would run, or the hint when nothing can.
+
+    A plain dict, not a dataclass, because the two callers want different
+    subsets rendered differently -- the CLI formats it into Rich-markup text,
+    the TUI into `Static`/`Button` widgets -- and neither needs a type beyond
+    "has these keys" to do it.
+    """
+    plan: list[dict[str, Any]] = []
+    for name in sorted(missing_binaries):
+        binary = _binaries.describe(name)
+        argv = binary.install_argv_for(manager) if manager else None
+        plan.append(
+            {
+                "kind": "binary",
+                "name": name,
+                "used_by": missing_binaries[name],
+                "size_hint": binary.size_hint,
+                "command": list(argv) if argv else None,
+                "fallback": None if argv else binary.install_hint(),
+            }
+        )
+    for extra in sorted(missing_extras):
+        plan.append(
+            {
+                "kind": "extra",
+                "name": extra,
+                "used_by": missing_extras[extra],
+                "size_hint": describe_extra(extra).size_hint,
+                "command": list(pip_extra_argv(extra)),
+                "fallback": None,
+            }
+        )
+    return plan
+
+
+def run_item(
+    item: dict[str, Any],
+    *,
+    manager: str | None,
+    cancellation: CancellationToken,
+    on_output: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Run one `build_plan` entry and fold verification into the same record.
+
+    `item['command'] is None` means neither this nor the user can do anything
+    automatically here -- reported unverified without attempting a subprocess
+    that has no argv to run. Never prints anything itself: a caller wanting a
+    header line or a confirmation prompt around this owns that, since a CLI's
+    console and a TUI's widgets have nothing in common to print through.
+    """
+    from docmax.core.registry import get_tool
+
+    if item["command"] is None:
+        return {**item, "installed": False, "verified": False, "stdout_tail": ""}
+
+    if item["kind"] == "binary":
+        # item["command"] is None whenever manager is (see build_plan), and
+        # that case already returned above -- so manager is not None here.
+        assert manager is not None
+        binary = _binaries.describe(item["name"])
+        outcome = install_binary(
+            binary, manager, dry_run=False, cancellation=cancellation, on_output=on_output
+        )
+    else:
+        outcome = install_pip_extra(
+            item["name"], dry_run=False, cancellation=cancellation, on_output=on_output
+        )
+        # install_pip_extra cannot verify itself (see its own docstring): an
+        # extra has no single import name to generically re-check. This is
+        # that check, through the same is_available() every routing decision
+        # already trusts, for whichever tool motivated installing it.
+        verified = any(
+            get_tool(name).load_strategy(Engine.LOCAL).is_available() for name in item["used_by"]
+        )
+        outcome = InstallResult(
+            ok=outcome.ok,
+            verified=verified,
+            command=outcome.command,
+            stdout_tail=outcome.stdout_tail,
+        )
+
+    return {
+        **item,
+        "installed": outcome.ok,
+        "verified": outcome.verified,
+        "stdout_tail": outcome.stdout_tail,
+    }
+
+
+__all__ = [
+    "PIP_EXTRAS",
+    "InstallResult",
+    "PipExtra",
+    "build_plan",
+    "describe_extra",
+    "install_binary",
+    "install_pip_extra",
+    "missing_binaries",
+    "missing_extras",
+    "pip_extra_argv",
+    "run_item",
+]
