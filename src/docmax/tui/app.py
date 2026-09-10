@@ -75,6 +75,7 @@ from docmax.tui.browser import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from textual.timer import Timer
@@ -84,6 +85,7 @@ if TYPE_CHECKING:
     from docmax.core.protocols import MissingDependency
     from docmax.core.registry import ToolSpec
     from docmax.core.router import EngineRouter
+    from docmax.runners.batch import ItemOutcome
 
 #: The engine choices a run screen offers. ``auto`` is first and is the default,
 #: because the router's ladder is the behaviour a user should get unless they
@@ -216,6 +218,157 @@ def _output_placeholder(spec: ToolSpec) -> str:
     if spec.output_required:
         return "path to write the result to"
     return f"path to write the {spec.default_suffix} result to"
+
+
+def _render_field(field: forms.Field) -> ComposeResult:
+    """One field: its label, its widget, and -- only if it has one worth
+    showing -- a single short hint. Used both for an ordinary field and
+    for each field inside a mode group's active container, so a grouped
+    field looks exactly like an ungrouped one. Shared by ``RunScreen`` and
+    ``BatchScreen`` -- both generate a form from a ``ToolSpec`` the same way,
+    so this took no argument that named either.
+
+    The one thing this deliberately does not do any more: repeat
+    ``field.description`` twice, once as the input's placeholder and once
+    as the line underneath it. A placeholder that is a full sentence is
+    truncated by the field's own width into something less readable than
+    no placeholder at all, and the line below already says the whole
+    thing legibly -- so the placeholder is now the short unit hint a label
+    like ``width (px)`` already implies, via :func:`_unit_hint`, and
+    the paragraph appears exactly once.
+    """
+    required = " (required)" if field.required else ""
+    yield Label(f"{field.label}{required}")
+    if field.components:
+        # A comma-separated value with more than one meaning is
+        # unguessable blind -- one labelled input per part, joined
+        # back into the single value the tool actually reads.
+        # See ADR 0032.
+        with Horizontal(classes="component-row"):
+            for index, component in enumerate(field.components):
+                with Vertical(classes="component"):
+                    yield Label(component, classes="component-label")
+                    yield Input(
+                        value=field.default_component(index),
+                        placeholder=component,
+                        id=f"field-{field.name}-{index}",
+                    )
+    elif field.kind == "choice":
+        yield _select(field.choices, default=field.default, id_=f"field-{field.name}")
+    else:
+        yield Input(
+            value=field.default_text(),
+            placeholder=_unit_hint(field),
+            id=f"field-{field.name}",
+        )
+    # A field with nothing to add beyond its label costs a blank line if
+    # drawn anyway -- `quality`'s hint is worth keeping, an empty one is not.
+    if field.description:
+        yield Static(field.description, classes="hint", markup=False)
+
+
+def _render_group(group: str, fields: Sequence[forms.Field]) -> ComposeResult:
+    """A set of mutually exclusive fields -- ``resize``'s Percentage
+    versus Dimensions -- as one selector plus one visible answer at a
+    time.
+
+    Driven entirely by ``Param.group`` / ``Param.group_option``
+    (``core/registry.py``): nothing here names ``resize`` or any other
+    tool, so a second tool that declares a group gets this rendering for
+    free, exactly as a plain parameter already does. The alternative --
+    showing every field for every answer at once -- is the clutter this
+    exists to avoid: a user choosing "resize by percentage" should not
+    also be shown the width, height and fit fields that answer a
+    different question. Shared by ``RunScreen`` and ``BatchScreen``, taking
+    the caller's ``fields`` explicitly rather than reading it off ``self``.
+    """
+    options: dict[str, list[forms.Field]] = {}
+    for field in fields:
+        if field.group == group:
+            options.setdefault(field.group_option, []).append(field)
+
+    names = tuple(options)
+    default_option = names[0]
+    select_id = f"mode-{_slug(group)}"
+
+    yield Label(group)
+    yield _select(names, default=default_option, id_=select_id)
+
+    for option, group_fields in options.items():
+        # `Vertical`'s own default CSS is `height: 1fr`, which inside
+        # this screen's scrolling form resolves to a sliver too short to
+        # hold a label and its input both -- the label fits, the input is
+        # clipped by `overflow: hidden`, and a user sees a caption with no
+        # box underneath it. `.mode-group` overrides that to `height: auto`,
+        # the same fix `.component` already applies for the same reason.
+        container = Vertical(id=f"{select_id}-{_slug(option)}", classes="mode-group")
+        with container:
+            for field in group_fields:
+                yield from _render_field(field)
+        if option != default_option:
+            container.display = False
+
+
+def _apply_mode_change(screen: Widget, event: Select.Changed) -> None:
+    """Show the chosen answer's fields, hide the rest of the group.
+
+    A hidden field also has its typed value cleared, not merely its
+    display turned off: switching from Percentage after typing 50 into
+    it, then setting a width, must not leave that 50 to resurface as a
+    contradictory ``scale`` alongside ``width`` when the form is
+    submitted -- the field the user is no longer looking at is not one
+    they are still answering. Shared by ``RunScreen`` and ``BatchScreen``:
+    the group-mode select this reacts to is rendered the same way by both.
+    """
+    select_id = event.select.id or ""
+    if not select_id.startswith("mode-"):
+        return
+    chosen = event.value if isinstance(event.value, str) else ""
+    prefix = f"{select_id}-"
+    for container in screen.query(Vertical):
+        container_id = container.id or ""
+        if not container_id.startswith(prefix):
+            continue
+        active = container_id == prefix + _slug(chosen)
+        container.display = active
+        if not active:
+            for widget in container.query(Input):
+                widget.value = ""
+
+
+def _value_of(screen: Widget, field: forms.Field) -> str:
+    """The current typed/selected value of one field, read off its widget(s).
+
+    Shared by ``RunScreen`` and ``BatchScreen``: both read a filled-in form
+    back the same way, into the same ``forms.collect`` call.
+    """
+    if field.components:
+        return _composite_value_of(screen, field)
+    widget = screen.query_one(f"#field-{field.name}")
+    if isinstance(widget, Select):
+        return _selected(widget, field.choices)
+    if isinstance(widget, Input):
+        return widget.value
+    return ""
+
+
+def _composite_value_of(screen: Widget, field: forms.Field) -> str:
+    """The comma-joined value of a labelled multi-input field.
+
+    Blank overall — every part still empty — reads as "not supplied",
+    matching ``forms.collect``'s existing rule for a plain field left
+    empty. A value with only *some* parts filled in is joined and handed
+    to the tool's own parser exactly as if it had been typed into a
+    single field: the parser's error already names the missing part,
+    which is a second implementation of that message this need not be.
+    """
+    parts = [
+        screen.query_one(f"#field-{field.name}-{index}", Input).value.strip()
+        for index in range(len(field.components))
+    ]
+    if not any(parts):
+        return ""
+    return ",".join(parts)
 
 
 def _open_url(url: str) -> None:
@@ -588,44 +741,62 @@ class HelpScreen(Screen[None]):
 
 
 class SystemCheckScreen(Screen[None]):
-    """Item 2 of GitHub #39: ``docmax doctor``'s own data, as a table.
+    """Item 2 of GitHub #39: ``docmax doctor``'s own data, as a table — plus
+    ``docmax setup``'s, as buttons.
 
-    Reads ``tui/status.binary_statuses``, which calls straight into
-    ``tools/_binaries.py`` — the exact declaration and lookup function
-    ``doctor``'s own table and ``--json`` envelope both read. There is no
-    second list of binaries here, and no re-implementation of ``find()``.
+    The binaries table reads ``tui/status.binary_statuses``, which calls
+    straight into ``tools/_binaries.py`` — the exact declaration and lookup
+    function ``doctor``'s own table and ``--json`` envelope both read. The
+    extras table and the "Missing" section below both read
+    ``tools/_install.py``'s ``missing_binaries``/``missing_extras``/
+    ``build_plan`` — the exact functions ``docmax setup`` itself calls, moved
+    there so this screen and the CLI cannot compute two different answers to
+    "what's missing." There is no second list of binaries or extras here, and
+    no re-implementation of ``find()``, ``is_available()``, or an install.
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "back", "Back", show=True),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._plan: list[dict[str, Any]] = []
+        #: The token for whichever install is currently running, if any. See
+        #: `DependencyMissingScreen._active_token` for why this is `Any`.
+        self._active_token: Any = None
+
     def compose(self) -> ComposeResult:
         yield Brand()
         with VerticalScroll(id="system-check-content"), Vertical(classes="panel"):
             yield Static("System check", classes="title", markup=False)
             yield Static(
-                "External programs some local engines depend on.",
+                "External programs and Python extras some local engines depend on.",
                 classes="hint",
                 markup=False,
             )
             yield DataTable(id="system-check-table")
+            yield DataTable(id="system-check-extras-table")
             yield Static("", id="system-check-summary", classes="hint", markup=False)
+            yield Vertical(id="system-check-missing")
         yield Static("Esc Back", id="help", classes="help-bar", markup=False)
 
     def on_mount(self) -> None:
+        from docmax.core.registry import iter_tools
+        from docmax.tools import _binaries, _install
+
         table = self.query_one("#system-check-table", DataTable)
         table.add_columns("Binary", "Status", "Path", "Needed by", "Install hint")
 
         binaries = status.binary_statuses()
-        missing = 0
+        missing_count = 0
         for binary in binaries:
             if binary.found:
                 table.add_row(
                     binary.name, "found", binary.path or "—", ", ".join(binary.used_by), ""
                 )
             else:
-                missing += 1
+                missing_count += 1
                 table.add_row(
                     binary.name,
                     "missing",
@@ -634,13 +805,132 @@ class SystemCheckScreen(Screen[None]):
                     binary.install_hint,
                 )
 
+        specs = list(iter_tools())
+        missing_extras = _install.missing_extras(specs)
+
+        # Every extra a registered tool names, not only the missing ones —
+        # the same "found and missing side by side" shape the binaries table
+        # already has. `ToolSpec.pip_extra` is the only source of truth for
+        # which tools want which extra; nothing here names one by hand.
+        extras_used_by: dict[str, set[str]] = {}
+        for spec in specs:
+            if spec.pip_extra is not None:
+                extras_used_by.setdefault(spec.pip_extra, set()).add(spec.name)
+
+        extras_table = self.query_one("#system-check-extras-table", DataTable)
+        extras_table.add_columns("Extra", "Status", "Needed by", "Size")
+        for extra in sorted(extras_used_by):
+            used_by = ", ".join(sorted(extras_used_by[extra]))
+            size = _install.describe_extra(extra).size_hint
+            if extra in missing_extras:
+                missing_count += 1
+                extras_table.add_row(extra, "missing", used_by, size)
+            else:
+                extras_table.add_row(extra, "found", used_by, size)
+
         summary = (
-            "All external tools available."
-            if missing == 0
-            else f"{missing} tool(s) missing — see Install hint above, or run "
+            "All external tools and extras available."
+            if missing_count == 0
+            else f"{missing_count} item(s) missing — install below, or run "
             "the Cloud Engine instead where a tool supports it."
         )
         self.query_one("#system-check-summary", Static).update(summary)
+
+        self._plan = _install.build_plan(
+            _install.missing_binaries(specs), missing_extras, _binaries.manager_available()
+        )
+        self._render_missing_section()
+
+    def _render_missing_section(self) -> None:
+        container = self.query_one("#system-check-missing", Vertical)
+        container.remove_children()
+        if not self._plan:
+            return
+        container.mount(Static("Missing — tap to install", classes="title", markup=False))
+        for item in self._plan:
+            row_id = f"{item['kind']}-{item['name']}"
+            row = Vertical()
+            container.mount(row)
+            detail = f"{item['name']} — needed by {', '.join(item['used_by'])}"
+            if item.get("size_hint"):
+                detail = f"{detail}  ·  Size: {item['size_hint']}"
+            row.mount(Static(detail, markup=False))
+            if item["command"] is not None:
+                row.mount(
+                    Button(f"Install {item['name']}", variant="primary", id=f"install-{row_id}")
+                )
+            else:
+                # No package manager on this machine for a binary -- the
+                # same fallback `doctor`/`setup` print, not a button that
+                # would do nothing.
+                row.mount(Static(f"→ {item['fallback']}", classes="hint", markup=False))
+            row.mount(Static("", id=f"missing-status-{row_id}", classes="hint", markup=False))
+
+    def _plan_item(self, kind: str, name: str) -> dict[str, Any] | None:
+        for item in self._plan:
+            if item["kind"] == kind and item["name"] == name:
+                return item
+        return None
+
+    @on(Button.Pressed)
+    def _pressed(self, event: Button.Pressed) -> None:
+        identifier = event.button.id or ""
+        if not identifier.startswith("install-"):
+            return
+        # Built as f"install-{kind}-{name}"; `partition` splits on the first
+        # "-" only, which is what lets `name` itself contain one (the
+        # "remove-bg" extra).
+        kind, _, name = identifier.removeprefix("install-").partition("-")
+        event.button.disabled = True
+        event.button.label = "Installing…"
+        self._install_item(kind, name)
+
+    @work(thread=True, exclusive=True)
+    def _install_item(self, kind: str, name: str) -> None:
+        """Run one row's install off the event loop.
+
+        See the module docstring's "threading rule" and
+        ``DependencyMissingScreen._install_dependency``, which this mirrors
+        exactly. ``exclusive=True``: only one install runs at a time per
+        screen.
+        """
+        from docmax.core.cancellation import CancellationToken
+        from docmax.tools import _binaries, _install
+
+        item = self._plan_item(kind, name)
+        if item is None:  # pragma: no cover — the button would not exist
+            return
+
+        token = CancellationToken()
+        self._active_token = token
+        try:
+            result = _install.run_item(
+                item,
+                manager=_binaries.manager_available(),
+                cancellation=token,
+                on_output=lambda line: self.app.call_from_thread(
+                    self._set_item_status, kind, name, line
+                ),
+            )
+        finally:
+            self._active_token = None
+        self.app.call_from_thread(self._item_install_finished, kind, name, result)
+
+    # -- callbacks, all on the UI thread --------------------------------
+
+    def _set_item_status(self, kind: str, name: str, text: str) -> None:
+        self.query_one(f"#missing-status-{kind}-{name}", Static).update(text)
+
+    def _item_install_finished(self, kind: str, name: str, result: dict[str, Any]) -> None:
+        button = self.query_one(f"#install-{kind}-{name}", Button)
+        if result["verified"]:
+            self._set_item_status(kind, name, "\N{HEAVY CHECK MARK} Installed.")
+            button.remove()
+            return
+        tail = result.get("stdout_tail") or "The installer did not report success."
+        self._set_item_status(kind, name, f"\N{HEAVY BALLOT X} {tail}")
+        button.disabled = False
+        button.label = f"Retry install {name}"
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -1638,6 +1928,15 @@ class DependencyMissingScreen(ModalScreen[str]):
     binaries — OCR, on a machine with neither Tesseract nor Poppler — gets
     two rows and two buttons rather than one arbitrarily chosen page, because
     the second one is exactly as necessary as the first. See ADR 0036.
+
+    Each row that can be installed automatically also gets an Install button,
+    alongside "Open Installation Page" rather than instead of it — a click
+    runs the exact same ``tools/_install.py`` primitive ``docmax setup``
+    does, through ``_build_plan``, so this dialog can never offer to install
+    something ``setup`` itself would refuse. A row whose dependency is not a
+    known ``Binary`` and whose tool has no ``pip_extra`` (``protect``'s
+    optional ``cryptography`` path, say) keeps today's URL-only behaviour —
+    this dialog's install capability is never ahead of the CLI's.
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "back", "Back", show=True)]
@@ -1646,12 +1945,69 @@ class DependencyMissingScreen(ModalScreen[str]):
         super().__init__()
         self.tool = tool
         self.dependencies = dependencies
+        self._plan = self._build_plan()
+        #: The token for whichever install is currently running, if any.
+        #: `Any` rather than `CancellationToken | None`, matching
+        #: `RunScreen._token`'s own style — this file imports the module
+        #: locally, on demand, like every other tools/core seam here.
+        self._active_token: Any = None
+
+    def _build_plan(self) -> list[dict[str, Any]]:
+        """What ``docmax setup`` would do for just this tool.
+
+        Reused, not recomputed: an Install button here must offer exactly
+        what ``setup`` would, never a second opinion about what this tool
+        needs.
+        """
+        from docmax.core.registry import get_tool
+        from docmax.tools import _binaries, _install
+
+        spec = get_tool(self.tool)
+        manager = _binaries.manager_available()
+        return _install.build_plan(
+            _install.missing_binaries([spec]), _install.missing_extras([spec]), manager
+        )
+
+    def _plan_item_for(self, dependency: MissingDependency) -> dict[str, Any] | None:
+        """The ``build_plan`` entry this row's Install button would run.
+
+        A binary dependency matches by name directly. A dependency that
+        isn't a binary (``remove-bg``'s ``rembg``) has no name in common with
+        an extra — ``ToolSpec.pip_extra`` is the only link between the two —
+        so it falls back to whichever single extra this dialog's one tool
+        needs, if any; a tool names at most one.
+        """
+        for item in self._plan:
+            if item["kind"] == "binary" and item["name"] == dependency.name:
+                return item
+        for item in self._plan:
+            if item["kind"] == "extra":
+                return item
+        return None
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal warning"):
             yield Static("\N{WARNING SIGN} Dependency Required", classes="title")
             for index, dependency in enumerate(self.dependencies):
                 yield Static(dependency.reason, markup=False)
+                item = self._plan_item_for(dependency)
+                if item is not None:
+                    detail = f"Needed by: {', '.join(item['used_by'])}"
+                    if dependency.size_hint:
+                        detail = f"{detail}  ·  Size: {dependency.size_hint}"
+                    yield Static(detail, classes="hint", markup=False)
+                    if item["command"] is not None:
+                        yield Button(
+                            f"Install {item['name']}",
+                            variant="primary",
+                            id=f"install-{index}",
+                        )
+                    else:
+                        # No package manager on this machine for a binary —
+                        # the same fallback `doctor`/`setup` print, not a
+                        # button that would do nothing.
+                        yield Static(f"→ {item['fallback']}", classes="hint", markup=False)
+                yield Static("", id=f"dep-status-{index}", classes="hint", markup=False)
                 if dependency.url:
                     yield Button(
                         f"Open {dependency.name} Installation Page",
@@ -1672,9 +2028,62 @@ class DependencyMissingScreen(ModalScreen[str]):
             url = self.dependencies[index].url
             if url:
                 _open_url(url)
+            return
+        if identifier.startswith("install-"):
+            index = int(identifier.removeprefix("install-"))
+            event.button.disabled = True
+            event.button.label = "Installing…"
+            self._install_dependency(index)
 
     def action_back(self) -> None:
         self.dismiss("back")
+
+    @work(thread=True, exclusive=True)
+    def _install_dependency(self, index: int) -> None:
+        """Run this row's install off the event loop.
+
+        See the module docstring's "threading rule": everything this thread
+        wants to say goes through ``call_from_thread``. ``exclusive=True``
+        matches ``RunScreen._execute`` — only one install runs at a time per
+        dialog, so two rapid clicks cannot start two overlapping processes.
+        """
+        from docmax.core.cancellation import CancellationToken
+        from docmax.tools import _binaries, _install
+
+        item = self._plan_item_for(self.dependencies[index])
+        if item is None:  # pragma: no cover — the button would not exist
+            return
+
+        token = CancellationToken()
+        self._active_token = token
+        try:
+            result = _install.run_item(
+                item,
+                manager=_binaries.manager_available(),
+                cancellation=token,
+                on_output=lambda line: self.app.call_from_thread(
+                    self._set_dependency_status, index, line
+                ),
+            )
+        finally:
+            self._active_token = None
+        self.app.call_from_thread(self._dependency_install_finished, index, result)
+
+    # -- callbacks, all on the UI thread --------------------------------
+
+    def _set_dependency_status(self, index: int, text: str) -> None:
+        self.query_one(f"#dep-status-{index}", Static).update(text)
+
+    def _dependency_install_finished(self, index: int, result: dict[str, Any]) -> None:
+        button = self.query_one(f"#install-{index}", Button)
+        if result["verified"]:
+            self._set_dependency_status(index, "\N{HEAVY CHECK MARK} Installed.")
+            button.remove()
+            return
+        tail = result.get("stdout_tail") or "The installer did not report success."
+        self._set_dependency_status(index, f"\N{HEAVY BALLOT X} {tail}")
+        button.disabled = False
+        button.label = f"Retry install {result['name']}"
 
 
 class DocMaxApp(App[None]):

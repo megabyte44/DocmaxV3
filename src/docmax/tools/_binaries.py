@@ -70,6 +70,12 @@ class Binary:
     #: what a TUI's "Open Installation Page" opens; see ADR 0036 and
     #: ``core.protocols.MissingDependency``.
     homepage: str = ""
+    #: Approximate download size, shown alongside an Install button so a
+    #: person isn't surprised by what a click starts. Hand-maintained, like
+    #: ``install_argv`` — not measured, and not re-verified against a live
+    #: package manager. Being roughly right is the whole job; a live query
+    #: would cost a network round trip before the button could even render.
+    size_hint: str = ""
 
     def candidates(self) -> tuple[str, ...]:
         return self.commands or (self.name,)
@@ -119,6 +125,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "windows": ("winget", "install", "--id", "ArtifexSoftware.GhostScript", "-e"),
         },
         homepage="https://ghostscript.com/releases/gsdnld.html",
+        size_hint="~50 MB",
     ),
     Binary(
         name="tesseract",
@@ -129,6 +136,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "windows": ("winget", "install", "--id", "UB-Mannheim.TesseractOCR", "-e"),
         },
         homepage="https://tesseract-ocr.github.io/tessdoc/Installation.html",
+        size_hint="~50 MB (plus language data)",
     ),
     Binary(
         name="pdftoppm",
@@ -139,6 +147,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "windows": ("winget", "install", "--id", "oschwartz10612.Poppler", "-e"),
         },
         homepage="https://poppler.freedesktop.org/",
+        size_hint="~15 MB",
     ),
     Binary(
         name="pandoc",
@@ -149,6 +158,7 @@ EXTERNAL_BINARIES: tuple[Binary, ...] = (
             "windows": ("winget", "install", "--id", "JohnMacFarlane.Pandoc", "-e"),
         },
         homepage="https://pandoc.org/installing.html",
+        size_hint="~25 MB",
     ),
 )
 

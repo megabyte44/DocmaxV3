@@ -171,3 +171,23 @@ def test_binary_catalogue_matches_the_registry() -> None:
     for spec in registry.values():
         unknown = set(spec.requires_binaries) - known_binaries
         assert not unknown, f"{spec.name}.requires_binaries names unknown binaries: {unknown}"
+
+
+def test_pip_extra_catalogue_matches_the_registry() -> None:
+    """Every `ToolSpec.pip_extra` names a real entry in `_install.PIP_EXTRAS`.
+
+    The same discipline as `test_binary_catalogue_matches_the_registry`, for
+    the same reason: `setup` and the TUI's install buttons both read
+    `_install.describe_extra` generically, and a tool naming an extra the
+    catalogue doesn't know would make either one crash on an unknown name
+    instead of installing it.
+    """
+    from docmax.tools import _install
+
+    known_extras = {extra.name for extra in _install.PIP_EXTRAS}
+
+    for spec in build_registry().values():
+        if spec.pip_extra is not None:
+            assert spec.pip_extra in known_extras, (
+                f"{spec.name}.pip_extra={spec.pip_extra!r} has no entry in _install.PIP_EXTRAS"
+            )
