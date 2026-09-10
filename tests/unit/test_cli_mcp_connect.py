@@ -68,7 +68,8 @@ def no_other_clients(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     everything else.
     """
     monkeypatch.setattr(
-        mcp_group.platformdirs, "user_config_dir", lambda *a, **k: str(tmp_path / "no-claude")
+        "docmax.cli.mcp_group.platformdirs.user_config_dir",
+        lambda *a, **k: str(tmp_path / "no-claude"),
     )
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-home")
 
@@ -230,7 +231,9 @@ def test_claude_desktop_is_offered_only_when_its_config_dir_exists(
 ) -> None:
     claude_dir = tmp_path / "Claude"
     claude_dir.mkdir()
-    monkeypatch.setattr(mcp_group.platformdirs, "user_config_dir", lambda *a, **k: str(claude_dir))
+    monkeypatch.setattr(
+        "docmax.cli.mcp_group.platformdirs.user_config_dir", lambda *a, **k: str(claude_dir)
+    )
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-home")
 
     result = runner.invoke(
@@ -284,7 +287,9 @@ def test_remote_skips_clients_without_a_documented_remote_shape(
 ) -> None:
     claude_dir = tmp_path / "Claude"
     claude_dir.mkdir()
-    monkeypatch.setattr(mcp_group.platformdirs, "user_config_dir", lambda *a, **k: str(claude_dir))
+    monkeypatch.setattr(
+        "docmax.cli.mcp_group.platformdirs.user_config_dir", lambda *a, **k: str(claude_dir)
+    )
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-home")
 
     result = runner.invoke(
