@@ -616,8 +616,14 @@ def test_mcp_imports_no_other_interface() -> None:
 
 
 def test_the_cli_reaches_only_the_mcp_entry_point() -> None:
-    """The narrow half of ADR 0027, mirroring ADR 0020's for the TUI."""
-    text = (SRC / "cli" / "main.py").read_text(encoding="utf-8")
+    """The narrow half of ADR 0027, mirroring ADR 0020's for the TUI.
+
+    `docmax mcp` lives in `cli/mcp_group.py` (ADR 0039), not `cli/main.py` —
+    the same way `docmax cloud` lives in `cli/cloud.py` rather than the
+    application shell. The entry-point narrowness this asserts is unchanged;
+    only which file in `cli/` is the one reaching for it.
+    """
+    text = (SRC / "cli" / "mcp_group.py").read_text(encoding="utf-8")
 
     assert "from docmax.mcp import" in text
     for internal in ("docmax.mcp.server", "docmax.mcp.policy", "docmax.mcp.schema"):
