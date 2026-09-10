@@ -82,12 +82,17 @@ def test_the_tui_offers_exactly_what_the_cli_exposes() -> None:
     one-line deletion in `catalog.py` non-optional.
 
     The allowed remainder is the set of CLI commands that are **not tools**, and
-    which the TUI therefore has nothing to generate a form from. `doctor`,
+    which the TUI therefore has nothing to *generate a form* from. `doctor`,
     `formats` and `setup` answer questions or act on the whole environment
     rather than one document, `tui` and `mcp` are entry points into the other
     two interfaces, and M9's `pipeline`, `batch` and `watch` compose tools rather
     than being any — none of the eight is in the registry, which is what
-    `offered <= exposed` above still asserts strictly. See ADR 0021, ADR 0023
+    `offered <= exposed` above still asserts strictly. `batch` has since
+    gained its own hand-written `BatchScreen` (ADR 0040), reached directly
+    from `ToolListScreen` rather than through the generated tool list — it
+    stays in this exception set correctly, because it still names no `Param`
+    of its own for `forms.py` to render, only a `ToolSpec` chosen from the
+    same registry every generated form already reads. See ADR 0021, ADR 0023
     and ADR 0027.
     """
     from docmax.cli.commands import app_commands
@@ -3036,6 +3041,68 @@ def test_pick_save_path_opens_at_the_remembered_directory_when_no_start_is_given
     assert seen == [tmp_path]
 
 
+# ---------------------------------------------------------------------------
+# pick_directory / _native_directory_dialog — `BatchScreen`'s output-dir
+# browse button. Same shape as the pick_save_path tests above: one seam for
+# testing without a display.
+# ---------------------------------------------------------------------------
+
+
+def test_pick_directory_returns_none_for_a_cancelled_dialog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "_native_directory_dialog", lambda **_: "")
+    assert browser_module.pick_directory(start=tmp_path) is None
+
+
+def test_pick_directory_wraps_the_chosen_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    chosen = tmp_path / "results"
+    monkeypatch.setattr(browser_module, "_native_directory_dialog", lambda **_: str(chosen))
+    assert browser_module.pick_directory(start=tmp_path) == chosen
+
+
+def test_pick_directory_defaults_to_the_users_home_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "remembered_start", lambda: None)
+    seen: list[Path] = []
+
+    def fake(*, start: Path) -> str:
+        seen.append(start)
+        return ""
+
+    monkeypatch.setattr(browser_module, "_native_directory_dialog", fake)
+    browser_module.pick_directory()
+
+    assert seen == [Path.home()]
+
+
+def test_pick_directory_opens_at_the_remembered_directory_when_no_start_is_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import docmax.tui.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "remembered_start", lambda: tmp_path)
+    seen: list[Path] = []
+
+    def fake(*, start: Path) -> str:
+        seen.append(start)
+        return ""
+
+    monkeypatch.setattr(browser_module, "_native_directory_dialog", fake)
+    browser_module.pick_directory()
+
+    assert seen == [tmp_path]
+
+
 def test_first_input_directory_is_none_for_an_empty_field() -> None:
     assert forms.first_input_directory("") is None
 
@@ -3939,6 +4006,45 @@ def test_pressing_m_opens_the_menu() -> None:
             await pilot.press("m")
             await pilot.pause()
             assert isinstance(app.screen, MenuScreen)
+
+    asyncio.run(scenario())
+
+
+def test_pressing_b_opens_the_batch_screen() -> None:
+    """`b`, like `m`, is a plain (non-priority) screen binding on
+    `ToolListScreen` — a direct binding rather than folded into `MenuScreen`,
+    because a batch run does work (starts a worker, writes files, can be
+    cancelled) the way opening a tool does, not the way `MenuScreen`'s own
+    "no work of its own" screens do. See `ToolListScreen.action_open_batch`."""
+    import asyncio
+
+    from docmax.tui.app import BatchScreen, DocMaxApp
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.screen.query(".tool-button").first().focus()
+            await pilot.pause()
+            await pilot.press("b")
+            await pilot.pause()
+            assert isinstance(app.screen, BatchScreen)
+
+    asyncio.run(scenario())
+
+
+def test_clicking_batch_in_the_sidebar_opens_the_batch_screen() -> None:
+    import asyncio
+
+    from docmax.tui.app import BatchScreen, DocMaxApp
+
+    async def scenario() -> None:
+        app = DocMaxApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.click("#open-batch")
+            await pilot.pause()
+            assert isinstance(app.screen, BatchScreen)
 
     asyncio.run(scenario())
 

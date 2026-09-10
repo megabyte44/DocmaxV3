@@ -427,11 +427,17 @@ a **fourth** seam and M10 refused to open it —
 [ADR 0028](../adr/0028-the-mcp-tool-surface-is-the-registry.md). The cost is one
 wasted round trip when a client hands `ocr` a spreadsheet.
 
-**The M9 runners are not exposed, and that is a recorded contradiction.**
+**MCP does not expose the M9 runners, and that is a recorded contradiction.**
 `docs/plans/05` proposed an MCP `run_pipeline` and ADR 0023 anticipated one, but
-pipelines, batch and watch are not registered tools — offering them needs a
-hand-written list, which ADR 0021 and `CLAUDE.md` rule 1 forbid. The registry
-rule won; a test holds the absence.
+pipelines, batch and watch are not registered tools — offering them through the
+MCP tool surface needs a hand-written list, which ADR 0021, ADR 0028 and
+`CLAUDE.md` rule 1 forbid. The registry rule won; a test holds the absence.
+The TUI took the other route ADR 0023 anticipated: `batch` gained its own
+hand-written, non-generated `BatchScreen`
+([ADR 0040](../adr/0040-the-tui-batch-screen-is-hand-written-and-calls-runners-directly.md)),
+calling `docmax.runners.batch` directly rather than adding a `ToolSpec`. A
+`--pipeline` file and `watch` remain unexposed there too — narrower gaps than
+before, not closed ones.
 
 **A TOCTOU window exists in the root check.** A path validated and then replaced
 with a symlink before the tool opens it would escape. Closing it needs
